@@ -1,0 +1,3 @@
+[submodule "bno/sh2"]
+	path = bno/sh2
+	url = https://github.com/ceva-dsp/sh2
