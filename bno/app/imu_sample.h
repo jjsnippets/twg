@@ -1,0 +1,50 @@
+#ifndef IMU_SAMPLE_H
+#define IMU_SAMPLE_H
+
+#include <stdint.h>
+
+#define IMU_SAMPLE_STRUCT_VERSION 2
+
+typedef struct {
+    uint8_t  version;        /* IMU_SAMPLE_STRUCT_VERSION */
+
+    /* Monotonically increasing per real sensor event, incremented in
+     * sensor_reader.c's sensorCallback(). Starts at 0 for the first
+     * decoded event. Always increases by 1 per real event; if a
+     * consumer polls faster than new events arrive, it will observe
+     * the same seq value repeated (a genuine duplicate, not a new
+     * sample), which is now directly visible in the printed seq
+     * field instead of requiring a value-by-value comparison. */
+    uint32_t seq;
+
+    /* Sensor-reported timestamp (from sh2_SensorEvent_t.timestamp_uS).
+     * Retained alongside seq: seq alone carries no timing information,
+     * so timestamp_uS is still needed for rate/cadence verification
+     * and for dt-based control logic. NOTE: this field can very
+     * occasionally be non-monotonic by a few microseconds between
+     * consecutive events -- this is an SH-2/SHTP-level artifact,
+     * independent of host scheduling/RT tuning, so any dt computation
+     * must still guard against dt <= 0. */
+    uint64_t timestamp_uS;
+
+    float yaw;
+    float pitch;
+    float roll;
+    float orientationAccuracy;
+
+    float ax;
+    float ay;
+    float az;
+
+    float gx;
+    float gy;
+    float gz;
+
+    uint8_t validMask;       /* bit 0: orientation, 1: accel, 2: gyro */
+} ImuSample_t;
+
+#define IMU_SAMPLE_VALID_ORIENTATION (1u << 0)
+#define IMU_SAMPLE_VALID_ACCEL       (1u << 1)
+#define IMU_SAMPLE_VALID_GYRO        (1u << 2)
+
+#endif /* IMU_SAMPLE_H */

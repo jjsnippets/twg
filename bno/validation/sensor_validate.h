@@ -1,0 +1,44 @@
+/*
+ * sensor_validate.h — SH-2 session owner for the validation binary.
+ *
+ * Validation counterpart of app/sensor_reader.c: same HAL, same three
+ * 100 Hz reports (rotation vector, linear acceleration, calibrated
+ * gyro), but decodes into ImuValidateSample_t with per-group timestamps
+ * so consumers can see exactly how stale each group is.
+ *
+ * Single-threaded, like the app reader: call sensor_validate_service()
+ * and sensor_validate_getLatestSample() from the same ~1 ms loop.
+ *
+ * Build: make validate   (validation/Makefile)
+ */
+
+#ifndef SENSOR_VALIDATE_H
+#define SENSOR_VALIDATE_H
+
+#include <stdbool.h>
+
+#include "imu_validate.h"
+
+/*
+ * Brings up the Pi HAL, opens the SH-2 session, registers the sensor
+ * callback and enables the three reports at 100 Hz. Returns false on
+ * any failure (nothing to clean up afterwards in that case).
+ */
+bool sensor_validate_start(void);
+
+/*
+ * Services the SH-2 session. Call at approximately 1 ms cadence so
+ * pending BNO085 H_INTN traffic is handled promptly.
+ */
+void sensor_validate_service(void);
+
+/* Closes the SH-2 session (mirrors sensor_reader_stop). */
+void sensor_validate_stop(void);
+
+/*
+ * Copies the most recent decoded sample into outSample. Returns false
+ * if no event has been decoded yet.
+ */
+bool sensor_validate_getLatestSample(ImuValidateSample_t *outSample);
+
+#endif /* SENSOR_VALIDATE_H */
