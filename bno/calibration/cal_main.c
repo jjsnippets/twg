@@ -38,6 +38,16 @@
  * very stable" regardless. Gyro calibration is therefore confirmed
  * during step 3 (flag on), informationally.
  *
+ * KNOWN OPEN ITEM (observed 2026-09-04): with all dynamic calibration
+ * disabled, the rotation vector reports status 0 with its heading
+ * error estimate pinned at ~1.45 rad, while with calibration enabled
+ * it reports status 3 / ~0.1 rad in the same environment with the
+ * same DCD. RV convergence after a reset also takes ~10 s of device
+ * motion even with calibration enabled. The verify step therefore
+ * includes a motion window, and --check --mask allows probing other
+ * cal configs, to determine whether the flight-time all-off policy
+ * affects only the RV status bits or the RV data itself.
+ *
  * The rotation vector's radian error estimate is printed as a
  * diagnostic but not gated.
  *
@@ -45,15 +55,21 @@
  * wholesale, so recalibration is safe without a clear step.
  *
  * Usage:
- *   bno_cal            run the guided calibration; logs the accuracy
- *                      trace to bno_cal_<date>_<time>.csv in the
- *                      current directory
- *   bno_cal --check    read-only field go/no-go: open the session,
- *                      disable dynamic calibration like bno_app, print
- *                      the ME cal config and accuracy bits, exit
+ *   bno_cal                       run the guided calibration; logs the
+ *                                 accuracy trace to
+ *                                 bno_cal_<date>_<time>.csv in the
+ *                                 current directory
+ *   bno_cal --check               read-only field go/no-go: open the
+ *                                 session, disable dynamic calibration
+ *                                 like bno_app, print the ME cal
+ *                                 config and accuracy bits, exit
+ *   bno_cal --check --mask 0xNN   probe mode: like --check but with
+ *                                 the given ME cal mask (e.g. 0x05
+ *                                 accel+mag, 0x02 gyro-only).
+ *                                 Informational only — no verdict.
  *
  * Exit codes:
- *   0  success (calibrated, saved, verified) / --check: ready
+ *   0  success (calibrated, saved, verified) / --check: ready or probe
  *   1  runtime error (SPI/SH-2 failure, DCD save failed)
  *   2  aborted by the user ('q' at a prompt or Ctrl-C)
  *   3  not calibrated (--check verdict) or verification failed
@@ -104,13 +120,16 @@
  * a single good sample is not trustworthy. */
 #define SUSTAIN_MS 3000
 
-/* Calibration report rate of the Magnetic Field output: 1000-4044
- * requires 50 Hz for proper magnetometer calibration (set in
- * sensor_calibrate.c). One full roll/pitch/yaw swing pattern at the
- * documented ~2 s per axis takes ~12 s; require two full patterns of
- * fresh motion per round. */
+/* One full roll/pitch/yaw swing pattern at the documented ~2 s per
+ * axis takes ~12 s; require two full patterns of fresh motion per
+ * round (1000-4044 requires 50 Hz Magnetic Field output for proper
+ * magnetometer calibration — set in sensor_calibrate.c). */
 #define MAG_MIN_SWING_MS 25000
 #define MAX_SAVE_ATTEMPTS 3
+
+/* Verify: motion window (RV needs ~10 s of motion to converge after a
+ * reset, observed with cal enabled), then the stationary watch. */
+#define VERIFY_MOTION_MS 10000
 
 #define SERVICE_LOOP_US   1000     /* ~1 kHz service, like the app loop */
 #define DISPLAY_PERIOD_US 500000   /* live status line refresh */
@@ -363,10 +382,18 @@ static int waitAccurateSustained(unsigned need, unsigned timeout_s,
 }
 
 /* ------------------------------------------------------------------ */
-/* --check: read-only field go/no-go                                  */
+/* --check: read-only inspection / cal-config probe                   */
 /* ------------------------------------------------------------------ */
 
-static int doCheck(void)
+/*
+ * Opens a session, applies the given ME cal mask (0x00 mirrors the
+ * bno_app flight policy; other values are probes), watches accuracy
+ * for up to 10 s and prints the result.
+ *
+ * mask == 0: pass/fail verdict on accel+mag (the go/no-go mode).
+ * mask != 0: probe mode — informational output only, always EXIT_OK.
+ */
+static int doCheck(uint8_t mask)
 {
     CalSample_t s;
     uint8_t calCfg = 0;
@@ -378,12 +405,7 @@ static int doCheck(void)
         return EXIT_ERROR;
     }
 
-    /*
-     * Mirror bno_app's flight policy (all dynamic calibration off, fly
-     * on the saved DCD) so the verdict describes exactly what the
-     * acquisition binary will see.
-     */
-    if (sh2_setCalConfig(0) != SH2_OK) {
+    if (sh2_setCalConfig(mask) != SH2_OK) {
         fprintf(stderr, "error: sh2_setCalConfig failed\n");
         sensor_calibrate_stop();
         return EXIT_ERROR;
@@ -392,9 +414,11 @@ static int doCheck(void)
     if (sh2_getCalConfig(&calCfg) == SH2_OK) {
         printCalConfig(calCfg);
     }
-    printf("note: the gyro accuracy bit reads 0 while gyro dynamic cal "
-           "is off (observed on this unit); it is not part of the "
-           "verdict.\n");
+    if (!(mask & SH2_CAL_GYRO)) {
+        printf("note: the gyro accuracy bit reads 0 while gyro dynamic "
+               "cal is off (observed on this unit); it is not part of "
+               "the verdict.\n");
+    }
 
     printf("monitoring accuracy for up to 10 s (keep the device "
            "stationary; needs %d s of good readings)...\n",
@@ -413,6 +437,12 @@ static int doCheck(void)
     printVerdict(&s);
     sensor_calibrate_stop();
 
+    if (mask != 0) {
+        printf("RESULT: probe complete (mask 0x%02x) - informational "
+               "only (exit 0)\n",
+               mask);
+        return EXIT_OK;
+    }
     if (rc == 0) {
         printf("RESULT: READY - saved calibration looks good (exit 0)\n");
         return EXIT_OK;
@@ -617,7 +647,9 @@ static int doCalibrate(void)
     /* Step 6: verify exactly the way bno_app will run. Reopening the
      * session performs the HAL reset sequence, so the chip reboots and
      * reloads the DCD from flash; dynamic calibration stays disabled.
-     * Gate: accel + mag, sustained (gyro bit not meaningful here). */
+     * The motion window comes first (RV needs ~10 s of motion to
+     * converge after a reset, observed with cal enabled), then the
+     * stationary accel/mag watch. */
     printf("\n--- VERIFY: reopening session (chip reset, DCD reload) ---\n");
     sensor_calibrate_stop();
     if (!sensor_calibrate_start()) {
@@ -631,8 +663,15 @@ static int doCalibrate(void)
         goto fail;
     }
 
-    printf("leave the device stationary; watching accuracy for up to "
-           "20 s (needs %d s of good readings)...\n",
+    printf("motion window: slowly rotate the device in yaw back and\n"
+           "forth for ~%u s (like the glider moving) and watch the rv "
+           "line...\n",
+           VERIFY_MOTION_MS / 1000);
+    if (!promptEnter("hold the device, ready to move it")) goto abort;
+    if (!serviceFor(VERIFY_MOTION_MS, PH_VERIFY, true)) goto abort;
+
+    printf("now set the device down stationary; watching accuracy for "
+           "up to 20 s (needs %d s of good readings)...\n",
            SUSTAIN_MS / 1000);
     {
         int rc = waitAccurateSustained(NEED_VERIFY, 20, PH_VERIFY, true);
@@ -648,7 +687,16 @@ static int doCalibrate(void)
         }
     }
 
-    if (sensor_calibrate_getLatestSample(&s)) printVerdict(&s);
+    if (sensor_calibrate_getLatestSample(&s)) {
+        printVerdict(&s);
+        if (s.rvAccuracy < ACC_GOAL) {
+            printf("note: rotation vector still reads %u / %.2f rad "
+                   "under the all-off policy - probe other configs "
+                   "with 'bno_cal --check --mask 0xNN' before relying "
+                   "on RV status in flight.\n",
+                   s.rvAccuracy, (double)s.rvErrRad);
+        }
+    }
     sensor_calibrate_stop();
     csvClose();
     printf("RESULT: CALIBRATED AND VERIFIED (exit 0)\n");
@@ -669,17 +717,41 @@ fail:
 int main(int argc, char **argv)
 {
     bool checkOnly = false;
+    bool haveMask = false;
+    uint8_t mask = 0;
+    unsigned long tmp;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--check") == 0) {
             checkOnly = true;
+        } else if (strcmp(argv[i], "--mask") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "error: --mask needs a value, e.g. "
+                                "--mask 0x05\n");
+                return EXIT_ERROR;
+            }
+            tmp = strtoul(argv[++i], NULL, 0);
+            if (tmp > 0xFF) {
+                fprintf(stderr, "error: --mask value out of range "
+                                "(0x00-0xFF)\n");
+                return EXIT_ERROR;
+            }
+            mask = (uint8_t)tmp;
+            haveMask = true;
         } else {
-            fprintf(stderr, "usage: bno_cal [--check]\n");
+            fprintf(stderr,
+                    "usage: bno_cal [--check [--mask 0xNN]]\n");
             return EXIT_ERROR;
         }
     }
 
+    if (haveMask && !checkOnly) {
+        fprintf(stderr, "error: --mask is only valid together with "
+                        "--check\n");
+        return EXIT_ERROR;
+    }
+
     signal(SIGINT, onSigint);
 
-    return checkOnly ? doCheck() : doCalibrate();
+    return checkOnly ? doCheck(mask) : doCalibrate();
 }
