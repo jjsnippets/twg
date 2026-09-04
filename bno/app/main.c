@@ -16,6 +16,9 @@
 #include <stdio.h>
 #include <time.h>
 
+#include "sh2.h"
+#include "sh2_err.h"
+
 #include "imu_sample.h"
 #include "realtime.h"
 #include "sensor_reader.h"
@@ -39,6 +42,25 @@ int main(void)
 {
     if (!sensor_reader_start()) {
         fprintf(stderr, "main: sensor_reader_start failed\n");
+        return 1;
+    }
+
+    /*
+     * Flight-time calibration policy: fly on the saved DCD only.
+     *
+     * sh2_open() just reset the BNO085 and loaded the dynamic
+     * calibration data (DCD) that bno_cal previously saved to flash.
+     * The dynamic-calibration enable bits themselves are RAM-only
+     * state that revert to chip defaults on every reset, so bno_cal
+     * cannot set them on our behalf — every program must choose its
+     * own policy at session start. Disable all dynamic calibration
+     * here so the saved DCD is the only calibration input during
+     * acquisition. (The gyro is still bias-corrected automatically
+     * whenever the device is stationary, regardless of this setting.)
+     */
+    if (sh2_setCalConfig(0) != SH2_OK) {
+        fprintf(stderr, "main: sh2_setCalConfig(disable all) failed\n");
+        sensor_reader_stop();
         return 1;
     }
 

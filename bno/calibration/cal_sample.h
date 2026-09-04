@@ -1,0 +1,55 @@
+#ifndef CAL_SAMPLE_H
+#define CAL_SAMPLE_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#define CAL_SAMPLE_STRUCT_VERSION 1
+
+/*
+ * cal_sample.h — data contract for the calibration tool.
+ *
+ * Counterpart of app/imu_sample.h with one deliberate divergence: it
+ * carries no fused orientation or motion data at all. Calibration only
+ * needs the per-sensor accuracy bits (0-3, taken from each report's
+ * status byte; the rotation vector carries its own accuracy in the
+ * payload) and the calibrated magnetic field vector the operator
+ * swings through during the magnetometer phase.
+ *
+ * This contract is intentionally separate from app/imu_sample.h: the
+ * calibration tool runs outside the acquisition phase and never shares
+ * samples with bno_app. The only thing that crosses from bno_cal to
+ * bno_app is the DCD saved in the BNO085's flash.
+ */
+typedef struct {
+    uint8_t version;            /* CAL_SAMPLE_STRUCT_VERSION */
+
+    /*
+     * Monotonically increasing per decoded sensor event, incremented
+     * in sensor_calibrate.c's sensorCallback(). Starts at 0. If the
+     * consumer polls faster than events arrive it sees the same seq
+     * repeated (a genuine duplicate, not a new event).
+     */
+    uint32_t seq;
+
+    uint64_t tHost_uS;          /* host CLOCK_MONOTONIC at decode time */
+    uint64_t tDevice_uS;        /* BNO085 event timestamp */
+
+    /*
+     * Accuracy bits, 0-3: 0 unreliable, 1 low, 2 medium, 3 high.
+     * accel/gyro/mag come from each calibrated report's status byte;
+     * rvAccuracy comes from the rotation vector payload.
+     */
+    uint8_t accelAccuracy;
+    uint8_t gyroAccuracy;
+    uint8_t magAccuracy;
+    uint8_t rvAccuracy;
+
+    bool haveMag;               /* a magnetic field report has arrived */
+
+    float magX_uT;              /* calibrated magnetic field [uT] */
+    float magY_uT;
+    float magZ_uT;
+} CalSample_t;
+
+#endif /* CAL_SAMPLE_H */
