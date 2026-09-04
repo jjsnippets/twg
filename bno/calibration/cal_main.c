@@ -3,31 +3,41 @@
 /*
  * cal_main.c — bno_cal: guided BNO085 dynamic-calibration tool.
  *
- * Walks the operator through the CEVA "BNO085 IMU Sensor Calibration"
- * procedure (doc 1000-4044) using the vendored SH-2 library's dynamic
+ * Walks the operator through the CEVA "BNO08X Sensor Calibration
+ * Procedure" (doc 1000-4044) using the vendored SH-2 library's dynamic
  * calibration API:
  *
  *   1. enable ME calibration for accelerometer + gyro + magnetometer
  *      (bitwise OR of the SH2_CAL_* bits — a logical OR collapses the
- *      mask to 0x01, the SparkFun Example_20 bug);
- *   2. accelerometer: six unique resting orientations, ~2 s each;
- *   3. gyroscope: device stationary on a surface for a few seconds;
- *   4. magnetometer: ~180-degree back-and-forth swings about each
- *      axis until the magnetic field accuracy reaches 2 or 3;
- *   5. hold still ~6 s (the hub snapshots dynamic cal data to RAM
- *      every 5 s and Save DCD persists the last snapshot), then
- *      sh2_saveDcdNow() writes the DCD to flash (FRS record 0x1F1F);
+ *      mask to 0x01, the SparkFun Example_20 bug). The gyro flag is
+ *      required for hand-held calibration per 1000-4044;
+ *   2. accelerometer: 4-6 unique resting orientations, ~1 s each;
+ *   3. gyroscope: device stationary on a surface for ~2-3 s;
+ *   4. magnetometer: ~180-degree back-and-forth rotations about each
+ *      axis (roll, pitch, yaw), ~2 s per axis, repeated until the
+ *      Magnetic Field status bit reads 2 or 3 — per 1000-4044 this is
+ *      THE progress metric for the whole procedure;
+ *   5. hold still ~10 s (the hub snapshots dynamic cal data to RAM
+ *      every 5 seconds and Save DCD persists the last-stored snapshot
+ *      — BNO08X datasheet section 3.4), then sh2_saveDcdNow() writes
+ *      the DCD to flash (FRS record 0x1F1F). The save is REFUSED if
+ *      the accel/mag accuracy degraded during the hold: the operator
+ *      is sent back to swinging instead of persisting a worse fit;
  *   6. close and reopen the session — the HAL open toggles RST, so
  *      the chip reboots and reloads the DCD from flash — then verify
  *      with all dynamic calibration disabled, exactly the way bno_app
  *      runs, so the verdict describes what acquisition will see.
  *
- * Verification gate: accelerometer AND magnetometer accuracy >= 2.
- * The gyro bit is deliberately NOT gated: it reads 0 whenever the
- * gyro dynamic calibration flag is disabled (i.e. under the bno_app
- * all-off policy), regardless of the DCD — measured on hardware and
- * a known BNO08x behavior. Gyro calibration is instead confirmed
- * during step 3, where the flag is on and the bit is meaningful.
+ * Verification gate: accelerometer AND magnetometer accuracy >= 2,
+ * sustained for >= 3 s. The gyro bit is deliberately NOT gated:
+ * measured on this unit it reads 0 in every session where the gyro
+ * dynamic-cal flag is off (the bno_app all-off policy) and 3 in every
+ * session where it is on; CEVA documents no relation between the flag
+ * and the bit, and the BNO08X datasheet (section 3.1.3) states gyro
+ * zero-rate offset "will always be corrected when the device becomes
+ * very stable" regardless. Gyro calibration is therefore confirmed
+ * during step 3 (flag on), informationally.
+ *
  * The rotation vector's radian error estimate is printed as a
  * diagnostic but not gated.
  *
@@ -83,11 +93,24 @@
 #define NEED_MAG   (1u << 2)
 
 /*
- * Verify/--check gate: accel + mag only. The gyro bit reads 0 while
- * the gyro cal flag is off (the bno_app policy these modes mirror),
- * so it cannot be gated there.
+ * Verify/--check and pre-save gate: accel + mag only. The gyro bit
+ * reads 0 while the gyro cal flag is off (observed on this unit; see
+ * file header), so it cannot be gated there.
  */
 #define NEED_VERIFY (NEED_ACCEL | NEED_MAG)
+
+/* A gate only counts when the accuracy has held for this long. The
+ * mag status bit fluctuates at rest (observed 0-3 within seconds), so
+ * a single good sample is not trustworthy. */
+#define SUSTAIN_MS 3000
+
+/* Calibration report rate of the Magnetic Field output: 1000-4044
+ * requires 50 Hz for proper magnetometer calibration (set in
+ * sensor_calibrate.c). One full roll/pitch/yaw swing pattern at the
+ * documented ~2 s per axis takes ~12 s; require two full patterns of
+ * fresh motion per round. */
+#define MAG_MIN_SWING_MS 25000
+#define MAX_SAVE_ATTEMPTS 3
 
 #define SERVICE_LOOP_US   1000     /* ~1 kHz service, like the app loop */
 #define DISPLAY_PERIOD_US 500000   /* live status line refresh */
@@ -223,7 +246,8 @@ static void printVerdict(const CalSample_t *s)
     printf("  gyroscope accuracy:     %u (%s)%s\n",
            s->gyroAccuracy, accName(s->gyroAccuracy),
            (s->gyroAccuracy < ACC_GOAL)
-               ? "  [reads 0 while gyro dynamic cal is disabled - expected]"
+               ? "  [reads 0 while gyro dynamic cal is off - observed on"
+                 " this unit; not gated]"
                : "");
     printf("  magnetometer accuracy:  %u (%s)\n",
            s->magAccuracy, accName(s->magAccuracy));
@@ -293,14 +317,22 @@ static bool serviceFor(unsigned duration_ms, CalPhase_t phase, bool live)
 }
 
 /*
- * Services the session until the requested accuracies reach ACC_GOAL,
- * the timeout (seconds) expires, or the user aborts.
- * Returns 0 = gate met, 1 = timeout, 2 = abort.
+ * Services the session until the requested accuracies reach ACC_GOAL
+ * AND hold there continuously for SUSTAIN_MS, the timeout (seconds)
+ * expires, or the user aborts. Sustained gating matters: the mag
+ * status bit fluctuates at rest, and a single good sample is not
+ * proof of a usable calibration (observed: mag 2 during swings
+ * dropping to 1 at rest, which is exactly what a mid-hold DCD
+ * snapshot then persists).
+ *
+ * Returns 0 = gate met and sustained, 1 = timeout, 2 = abort.
  */
-static int waitAccurate(unsigned need, unsigned timeout_s, CalPhase_t phase)
+static int waitAccurateSustained(unsigned need, unsigned timeout_s,
+                                 CalPhase_t phase, bool live)
 {
     uint64_t tEnd = hostNowUs() + (uint64_t)timeout_s * 1000000ULL;
     uint64_t tLastDisplay = 0;
+    uint64_t tGoodSince = 0;
     CalSample_t s;
 
     while (hostNowUs() < tEnd) {
@@ -308,13 +340,20 @@ static int waitAccurate(unsigned need, unsigned timeout_s, CalPhase_t phase)
         sensor_calibrate_service();
         if (sensor_calibrate_getLatestSample(&s)) {
             csvWrite(&s, phase);
-            if ((hostNowUs() - tLastDisplay) >= DISPLAY_PERIOD_US) {
+            if (live && (hostNowUs() - tLastDisplay) >= DISPLAY_PERIOD_US) {
                 printLiveLine(&s);
                 tLastDisplay = hostNowUs();
             }
             if (accurateEnough(&s, need)) {
-                printf("\n");
-                return 0;
+                if (tGoodSince == 0) {
+                    tGoodSince = hostNowUs();
+                } else if ((hostNowUs() - tGoodSince) >=
+                           (uint64_t)SUSTAIN_MS * 1000ULL) {
+                    printf("\n");
+                    return 0;
+                }
+            } else {
+                tGoodSince = 0;
             }
         }
         usleep(SERVICE_LOOP_US);
@@ -331,6 +370,7 @@ static int doCheck(void)
 {
     CalSample_t s;
     uint8_t calCfg = 0;
+    int rc;
 
     printf("bno_cal --check: opening session (read-only inspection)...\n");
     if (!sensor_calibrate_start()) {
@@ -352,11 +392,15 @@ static int doCheck(void)
     if (sh2_getCalConfig(&calCfg) == SH2_OK) {
         printCalConfig(calCfg);
     }
-    printf("note: gyro accuracy reads 0 while gyro dynamic cal is off; "
-           "it is not part of the verdict.\n");
+    printf("note: the gyro accuracy bit reads 0 while gyro dynamic cal "
+           "is off (observed on this unit); it is not part of the "
+           "verdict.\n");
 
-    printf("monitoring accuracy for 5 s (keep the device stationary)...\n");
-    if (!serviceFor(5000, PH_VERIFY, true)) {
+    printf("monitoring accuracy for up to 10 s (keep the device "
+           "stationary; needs %d s of good readings)...\n",
+           SUSTAIN_MS / 1000);
+    rc = waitAccurateSustained(NEED_VERIFY, 10, PH_VERIFY, true);
+    if (rc == 2) {
         sensor_calibrate_stop();
         return EXIT_ABORT;
     }
@@ -369,7 +413,7 @@ static int doCheck(void)
     printVerdict(&s);
     sensor_calibrate_stop();
 
-    if (accurateEnough(&s, NEED_VERIFY)) {
+    if (rc == 0) {
         printf("RESULT: READY - saved calibration looks good (exit 0)\n");
         return EXIT_OK;
     }
@@ -380,6 +424,39 @@ static int doCheck(void)
 /* ------------------------------------------------------------------ */
 /* Guided calibration flow                                             */
 /* ------------------------------------------------------------------ */
+
+/*
+ * Magnetometer swing phase. Returns 0 = sustained mag accuracy met,
+ * 1 = rounds exhausted without success, 2 = user abort.
+ */
+static int magPhase(void)
+{
+    for (unsigned round = 1; round <= 5; ++round) {
+        int rc;
+
+        printf("round %u: hold the device in hand and perform FULL\n"
+               "swing patterns: rotate it ~180 degrees and back about\n"
+               "EACH axis in turn - roll it over, pitch it over, then\n"
+               "yaw it left and right (~2 s per swing, per CEVA 1000-\n"
+               "4044). Keep repeating patterns for the whole round.\n",
+               round);
+        if (!promptEnter("start swinging (device in hand)")) return 2;
+
+        /* Minimum fresh-motion window: two full roll/pitch/yaw
+         * patterns, even if the accuracy gate is already met from a
+         * previously saved DCD. */
+        if (!serviceFor(MAG_MIN_SWING_MS, PH_MAG, true)) return 2;
+
+        rc = waitAccurateSustained(NEED_MAG, 30, PH_MAG, true);
+        if (rc == 2) return 2;
+        if (rc == 0) return 0;
+
+        printf("mag accuracy not sustained at %d yet; do another round "
+               "of full patterns.\n",
+               ACC_GOAL);
+    }
+    return 1;
+}
 
 static int doCalibrate(void)
 {
@@ -393,6 +470,7 @@ static int doCalibrate(void)
     };
     CalSample_t s;
     uint8_t calMask;
+    bool saved = false;
 
     printf("=== BNO085 guided calibration ===\n\n");
     printf("Before starting:\n");
@@ -412,9 +490,7 @@ static int doCalibrate(void)
         return EXIT_ERROR;
     }
 
-    /* Step 1: enable dynamic calibration for all three sensors.
-     * Bitwise OR of the SH2_CAL_* bits — the gyro flag is required for
-     * hand-held calibration per CEVA 1000-4044. */
+    /* Step 1: enable dynamic calibration for all three sensors. */
     calMask = SH2_CAL_ACCEL | SH2_CAL_GYRO | SH2_CAL_MAG;
     if (sh2_setCalConfig(calMask) != SH2_OK ||
         sh2_getCalConfig(&calMask) != SH2_OK) {
@@ -436,7 +512,7 @@ static int doCalibrate(void)
             if (!serviceFor(2000, PH_ACCEL, true)) goto abort;
         }
         {
-            int rc = waitAccurate(NEED_ACCEL, 10, PH_ACCEL);
+            int rc = waitAccurateSustained(NEED_ACCEL, 10, PH_ACCEL, true);
             if (rc == 2) goto abort;
             if (rc == 0) break;
             if (round == 3) {
@@ -447,65 +523,88 @@ static int doCalibrate(void)
         }
     }
 
-    /* Step 3: gyroscope — rest. The gyro accuracy bit is only
-     * meaningful in this phase: the gyro cal flag is on here. */
+    /* Step 3: gyroscope — rest. Informational only: per 1000-4044 the
+     * gyro calibrates after ~2-3 s on a stationary surface; the gyro
+     * accuracy bit is meaningful here because the gyro cal flag is
+     * on, but a low reading does not abort the flow. */
     printf("\n--- GYROSCOPE: keep the device stationary on a surface ---\n");
     if (!promptEnter("place the device flat and do not touch it")) goto abort;
     {
-        int rc = waitAccurate(NEED_GYRO, 15, PH_GYRO);
+        int rc = waitAccurateSustained(NEED_GYRO, 15, PH_GYRO, true);
         if (rc == 2) goto abort;
         if (rc == 1) {
-            printf("gyro accuracy did not reach %d; continuing\n", ACC_GOAL);
+            printf("gyro accuracy did not reach %d; continuing "
+                   "(informational)\n",
+                   ACC_GOAL);
         }
     }
 
-    /* Step 4: magnetometer — 180-degree back-and-forth swings. */
-    printf("\n--- MAGNETOMETER: 180-degree back-and-forth swings ---\n");
-    for (unsigned round = 1; round <= 5; ++round) {
-        printf("round %u: hold the device in hand and swing it slowly\n"
-               "(~2 s per swing) ~180 degrees and back about EACH axis\n"
-               "in turn: roll it over, pitch it over, then yaw it left\n"
-               "and right. Watch the mag accuracy below; target is %d.\n",
-               round, ACC_GOAL);
-        if (!promptEnter("start swinging (device in hand)")) goto abort;
-        /* minimum 10 s of swings so fresh data is always gathered,
-         * even if the accuracy gate is already met from an old DCD */
-        if (!serviceFor(10000, PH_MAG, true)) goto abort;
+    /* Steps 4 + 5: magnetometer swings, then hold + save. Retried as
+     * a unit: if the accuracy degrades during the hold, do NOT save —
+     * the DCD snapshot (taken every 5 s per the BNO08X datasheet
+     * section 3.4) would persist the degraded fit. */
+    for (unsigned attempt = 1; attempt <= MAX_SAVE_ATTEMPTS && !saved;
+         ++attempt) {
+        int rc;
+
+        printf("\n--- MAGNETOMETER: 180-degree swing patterns "
+               "(attempt %u/%u) ---\n",
+               attempt, MAX_SAVE_ATTEMPTS);
+        rc = magPhase();
+        if (rc == 2) goto abort;
+        if (rc == 1) {
+            fprintf(stderr,
+                    "error: magnetometer accuracy did not sustain at %d; "
+                    "check the magnetic environment and retry\n",
+                    ACC_GOAL);
+            goto fail;
+        }
+
+        /* Hold still so the hub's 5-second RAM snapshots all land
+         * inside a good window, then confirm the state is still good
+         * before saving. */
+        printf("\n--- SAVE: hold the device still in its resting "
+               "position (~10 s) ---\n");
+        if (!serviceFor(10000, PH_HOLD, false)) goto abort;
+
+        rc = waitAccurateSustained(NEED_VERIFY, 5, PH_HOLD, false);
+        if (rc == 2) goto abort;
+        if (rc == 1) {
+            if (sensor_calibrate_getLatestSample(&s)) {
+                printf("accuracy degraded at rest (acc=%u mag=%u); NOT "
+                       "saving this state - swing again\n",
+                       s.accelAccuracy, s.magAccuracy);
+            }
+            continue;
+        }
+
         {
-            int rc = waitAccurate(NEED_MAG, 50, PH_MAG);
-            if (rc == 2) goto abort;
-            if (rc == 0) break;
-            if (round == 5) {
+            int src = sh2_saveDcdNow();
+            if (src != SH2_OK) {
+                printf("save DCD failed (rc=%d); holding 5 s more and "
+                       "retrying once...\n",
+                       src);
+                if (!serviceFor(5000, PH_HOLD, false)) goto abort;
+                src = sh2_saveDcdNow();
+            }
+            if (src != SH2_OK) {
                 fprintf(stderr,
-                        "error: magnetometer accuracy did not reach %d; "
-                        "check the magnetic environment and retry\n",
-                        ACC_GOAL);
+                        "error: sh2_saveDcdNow failed (rc=%d); "
+                        "DCD NOT saved\n",
+                        src);
                 goto fail;
             }
         }
+        printf("DCD saved to flash (FRS record 0x1F1F).\n");
+        saved = true;
     }
-
-    /* Step 5: hold still so the hub's 5-second RAM snapshot includes
-     * the final estimates, then save the DCD to flash. */
-    printf("\n--- SAVE: hold the device still in its resting position ---\n");
-    if (!serviceFor(6000, PH_HOLD, false)) goto abort;
-
-    {
-        int rc = sh2_saveDcdNow();
-        if (rc != SH2_OK) {
-            printf("save DCD failed (rc=%d); holding 5 s more and "
-                   "retrying once...\n", rc);
-            if (!serviceFor(5000, PH_HOLD, false)) goto abort;
-            rc = sh2_saveDcdNow();
-        }
-        if (rc != SH2_OK) {
-            fprintf(stderr,
-                    "error: sh2_saveDcdNow failed (rc=%d); DCD NOT saved\n",
-                    rc);
-            goto fail;
-        }
+    if (!saved) {
+        fprintf(stderr,
+                "error: calibration state kept degrading at rest after "
+                "%u attempts; nothing saved\n",
+                MAX_SAVE_ATTEMPTS);
+        goto fail;
     }
-    printf("DCD saved to flash (FRS record 0x1F1F).\n");
 
     /* Courtesy: leave the session in the flight-ready state. This does
      * not survive the reset below (or any future sh2_open) — bno_app
@@ -518,8 +617,7 @@ static int doCalibrate(void)
     /* Step 6: verify exactly the way bno_app will run. Reopening the
      * session performs the HAL reset sequence, so the chip reboots and
      * reloads the DCD from flash; dynamic calibration stays disabled.
-     * Gate: accel + mag (the gyro bit reads 0 by design with the gyro
-     * cal flag off; gyro was confirmed in step 3). */
+     * Gate: accel + mag, sustained (gyro bit not meaningful here). */
     printf("\n--- VERIFY: reopening session (chip reset, DCD reload) ---\n");
     sensor_calibrate_stop();
     if (!sensor_calibrate_start()) {
@@ -534,9 +632,10 @@ static int doCalibrate(void)
     }
 
     printf("leave the device stationary; watching accuracy for up to "
-           "15 s...\n");
+           "20 s (needs %d s of good readings)...\n",
+           SUSTAIN_MS / 1000);
     {
-        int rc = waitAccurate(NEED_VERIFY, 15, PH_VERIFY);
+        int rc = waitAccurateSustained(NEED_VERIFY, 20, PH_VERIFY, true);
         if (rc == 2) goto abort;
         if (rc == 1) {
             if (sensor_calibrate_getLatestSample(&s)) printVerdict(&s);
