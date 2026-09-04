@@ -22,6 +22,15 @@
  *      with all dynamic calibration disabled, exactly the way bno_app
  *      runs, so the verdict describes what acquisition will see.
  *
+ * Verification gate: accelerometer AND magnetometer accuracy >= 2.
+ * The gyro bit is deliberately NOT gated: it reads 0 whenever the
+ * gyro dynamic calibration flag is disabled (i.e. under the bno_app
+ * all-off policy), regardless of the DCD — measured on hardware and
+ * a known BNO08x behavior. Gyro calibration is instead confirmed
+ * during step 3, where the flag is on and the bit is meaningful.
+ * The rotation vector's radian error estimate is printed as a
+ * diagnostic but not gated.
+ *
  * The old DCD is never cleared: Save DCD overwrites the flash record
  * wholesale, so recalibration is safe without a clear step.
  *
@@ -72,6 +81,13 @@
 #define NEED_ACCEL (1u << 0)
 #define NEED_GYRO  (1u << 1)
 #define NEED_MAG   (1u << 2)
+
+/*
+ * Verify/--check gate: accel + mag only. The gyro bit reads 0 while
+ * the gyro cal flag is off (the bno_app policy these modes mirror),
+ * so it cannot be gated there.
+ */
+#define NEED_VERIFY (NEED_ACCEL | NEED_MAG)
 
 #define SERVICE_LOOP_US   1000     /* ~1 kHz service, like the app loop */
 #define DISPLAY_PERIOD_US 500000   /* live status line refresh */
@@ -131,7 +147,7 @@ static void csvOpen(void)
     }
     fprintf(sCsv,
             "host_us,device_us,phase,seq,accel_acc,gyro_acc,mag_acc,rv_acc,"
-            "mag_ut_x,mag_ut_y,mag_ut_z\n");
+            "rv_err_rad,mag_ut_x,mag_ut_y,mag_ut_z\n");
     printf("bno_cal: logging accuracy trace to %s\n", name);
     sCsvLastSeq = 0;
 }
@@ -144,10 +160,10 @@ static void csvWrite(const CalSample_t *s, CalPhase_t phase)
     sCsvLastSeq = s->seq;
     fprintf(sCsv,
             "%" PRIu64 ",%" PRIu64 ",%s,%" PRIu32 ",%u,%u,%u,%u,"
-            "%.3f,%.3f,%.3f\n",
+            "%.4f,%.3f,%.3f,%.3f\n",
             s->tHost_uS, s->tDevice_uS, phaseName(phase), s->seq,
             s->accelAccuracy, s->gyroAccuracy, s->magAccuracy,
-            s->rvAccuracy,
+            s->rvAccuracy, (double)s->rvErrRad,
             (double)s->magX_uT, (double)s->magY_uT, (double)s->magZ_uT);
 }
 
@@ -192,10 +208,10 @@ static bool accurateEnough(const CalSample_t *s, unsigned need)
 
 static void printLiveLine(const CalSample_t *s)
 {
-    printf("  [acc %u  gyr %u  mag %u  rv %u]  "
+    printf("  [acc %u  gyr %u  mag %u  rv %u]  rv_err=%5.2f rad  "
            "mag=(%7.2f %7.2f %7.2f) uT\r",
            s->accelAccuracy, s->gyroAccuracy, s->magAccuracy,
-           s->rvAccuracy,
+           s->rvAccuracy, (double)s->rvErrRad,
            (double)s->magX_uT, (double)s->magY_uT, (double)s->magZ_uT);
     fflush(stdout);
 }
@@ -204,12 +220,17 @@ static void printVerdict(const CalSample_t *s)
 {
     printf("  accelerometer accuracy: %u (%s)\n",
            s->accelAccuracy, accName(s->accelAccuracy));
-    printf("  gyroscope accuracy:     %u (%s)\n",
-           s->gyroAccuracy, accName(s->gyroAccuracy));
+    printf("  gyroscope accuracy:     %u (%s)%s\n",
+           s->gyroAccuracy, accName(s->gyroAccuracy),
+           (s->gyroAccuracy < ACC_GOAL)
+               ? "  [reads 0 while gyro dynamic cal is disabled - expected]"
+               : "");
     printf("  magnetometer accuracy:  %u (%s)\n",
            s->magAccuracy, accName(s->magAccuracy));
-    printf("  rotation vector accuracy: %u (%s)\n",
-           s->rvAccuracy, accName(s->rvAccuracy));
+    printf("  rotation vector:        accuracy %u (%s), "
+           "heading error est. %.2f rad\n",
+           s->rvAccuracy, accName(s->rvAccuracy),
+           (double)s->rvErrRad);
 }
 
 static void printCalConfig(uint8_t mask)
@@ -331,6 +352,8 @@ static int doCheck(void)
     if (sh2_getCalConfig(&calCfg) == SH2_OK) {
         printCalConfig(calCfg);
     }
+    printf("note: gyro accuracy reads 0 while gyro dynamic cal is off; "
+           "it is not part of the verdict.\n");
 
     printf("monitoring accuracy for 5 s (keep the device stationary)...\n");
     if (!serviceFor(5000, PH_VERIFY, true)) {
@@ -346,8 +369,7 @@ static int doCheck(void)
     printVerdict(&s);
     sensor_calibrate_stop();
 
-    if (s.accelAccuracy >= ACC_GOAL && s.gyroAccuracy >= ACC_GOAL &&
-        s.magAccuracy >= ACC_GOAL) {
+    if (accurateEnough(&s, NEED_VERIFY)) {
         printf("RESULT: READY - saved calibration looks good (exit 0)\n");
         return EXIT_OK;
     }
@@ -425,7 +447,8 @@ static int doCalibrate(void)
         }
     }
 
-    /* Step 3: gyroscope — rest. */
+    /* Step 3: gyroscope — rest. The gyro accuracy bit is only
+     * meaningful in this phase: the gyro cal flag is on here. */
     printf("\n--- GYROSCOPE: keep the device stationary on a surface ---\n");
     if (!promptEnter("place the device flat and do not touch it")) goto abort;
     {
@@ -494,7 +517,9 @@ static int doCalibrate(void)
 
     /* Step 6: verify exactly the way bno_app will run. Reopening the
      * session performs the HAL reset sequence, so the chip reboots and
-     * reloads the DCD from flash; dynamic calibration stays disabled. */
+     * reloads the DCD from flash; dynamic calibration stays disabled.
+     * Gate: accel + mag (the gyro bit reads 0 by design with the gyro
+     * cal flag off; gyro was confirmed in step 3). */
     printf("\n--- VERIFY: reopening session (chip reset, DCD reload) ---\n");
     sensor_calibrate_stop();
     if (!sensor_calibrate_start()) {
@@ -511,8 +536,7 @@ static int doCalibrate(void)
     printf("leave the device stationary; watching accuracy for up to "
            "15 s...\n");
     {
-        int rc = waitAccurate(NEED_ACCEL | NEED_GYRO | NEED_MAG, 15,
-                              PH_VERIFY);
+        int rc = waitAccurate(NEED_VERIFY, 15, PH_VERIFY);
         if (rc == 2) goto abort;
         if (rc == 1) {
             if (sensor_calibrate_getLatestSample(&s)) printVerdict(&s);

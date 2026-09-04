@@ -96,9 +96,16 @@ static void sensorCallback(void *cookie, sh2_SensorEvent_t *pEvent)
             break;
 
         case SH2_ROTATION_VECTOR:
-            /* the rotation vector carries accuracy in its payload */
-            sLatestSample.rvAccuracy =
-                (uint8_t)value.un.rotationVector.accuracy;
+            /*
+             * Status bits from the report header, like every other
+             * report. (The payload's 'accuracy' member is an error
+             * estimate in RADIANS, not the 0-3 scale — it is kept
+             * separately as rvErrRad. Reading the payload field as a
+             * 0-3 accuracy inverted its meaning: a large value means
+             * a LARGE heading error.)
+             */
+            sLatestSample.rvAccuracy = (uint8_t)value.status;
+            sLatestSample.rvErrRad = value.un.rotationVector.accuracy;
             break;
 
         default:
