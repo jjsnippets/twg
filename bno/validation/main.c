@@ -218,6 +218,8 @@ int main(int argc, char **argv)
         RT_SleepUntil(LOOP_DT_SEC);
     }
 
+    sensor_validate_resetSeq();
+
     uint64_t t_log0   = now_ns();
     uint64_t last_1hz = t_log0;
     uint64_t ticks    = 0;

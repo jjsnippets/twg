@@ -39,7 +39,8 @@ typedef struct {
 
 typedef struct {
     uint32_t version;       /* IMU_VALIDATE_STRUCT_VERSION */
-    uint32_t seq;           /* +1 per decoded event (any of the three), since start */
+    uint32_t seq;           /* +1 per decoded event (any of the three), counts from
+                               the post-settle reset (sensor_validate_resetSeq) */
     uint64_t host_ts_ns;    /* CLOCK_MONOTONIC ns of the newest decoded event */
 
     /* Rotation vector (SH2_ROTATION_VECTOR) */

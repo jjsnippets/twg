@@ -199,3 +199,8 @@ bool sensor_validate_getLatestSample(ImuValidateSample_t *outSample)
     *outSample = sLatest;
     return true;
 }
+
+void sensor_validate_resetSeq(void)
+{
+    sSeqCounter = 0;
+}

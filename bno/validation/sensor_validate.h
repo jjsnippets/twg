@@ -44,4 +44,11 @@ void sensor_validate_stop(void);
  */
 bool sensor_validate_getLatestSample(ImuValidateSample_t *outSample);
 
+/*
+ * Sets the sequence counter to 0. Call after the settle drain, before
+ * the log loop, so the logged seq counts capture-window events only
+ * (same contract as sensor_reader_resetSeq() in bno_app).
+ */
+void sensor_validate_resetSeq(void);
+
 #endif /* SENSOR_VALIDATE_H */
