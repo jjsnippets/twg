@@ -18,7 +18,7 @@
 
 #include <stdint.h>
 
-#define IMU_VALIDATE_STRUCT_VERSION 1u
+#define IMU_VALIDATE_STRUCT_VERSION 2u
 
 /* validMask bits — same meanings as app/imu_sample.h */
 #define IMU_VALIDATE_VALID_RV    (1u << 0)
@@ -47,7 +47,7 @@ typedef struct {
     float yaw;              /* rad */
     float pitch;            /* rad */
     float roll;             /* rad */
-    float rvAccuracy;       /* rad, rotation-vector accuracy estimate */
+    float rvErrRad;         /* rad, rotation-vector accuracy estimate */
 
     /* Linear acceleration (SH2_LINEAR_ACCELERATION) */
     ImuGroupMeta_t accel;

@@ -127,7 +127,7 @@ static void write_record(const CsvRecord_t *r)
         r->imu.yaw,
         r->imu.pitch,
         r->imu.roll,
-        r->imu.rvAccuracy,
+        r->imu.rvErrRad,
         r->imu.accel.sensor_ts_us,
         r->imu.accel.host_ts_ns,
         (unsigned)r->imu.accel.report_seq,

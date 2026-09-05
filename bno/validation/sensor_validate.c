@@ -85,7 +85,7 @@ static void sensorCallback(void *cookie, sh2_SensorEvent_t *pEvent)
         sLatest.yaw        = q_to_yaw(rv->real, rv->i, rv->j, rv->k);
         sLatest.pitch      = q_to_pitch(rv->real, rv->i, rv->j, rv->k);
         sLatest.roll       = q_to_roll(rv->real, rv->i, rv->j, rv->k);
-        sLatest.rvAccuracy = rv->accuracy;
+        sLatest.rvErrRad   = rv->accuracy;
         sLatest.validMask |= IMU_VALIDATE_VALID_RV;
         sHasSample = true;
         break;
