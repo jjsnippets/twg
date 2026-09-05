@@ -73,16 +73,18 @@ Host interface requirements:
 ## Directory layout
 
 ```text
-rpi4b prod code/bno/
+bno/
 ├── Makefile                 builds bin/bno_app and the test binaries
-├── app/
+├── app/                     production application + Raspberry Pi HAL
 │   ├── imu_sample.h         ImuSample_t — the shared data contract
 │   ├── main.c               application loop (integration point)
 │   ├── realtime.c/.h        SCHED_FIFO + mlockall, absolute CLOCK_MONOTONIC sleep
 │   ├── sensor_reader.c/.h   SH-2 session owner, decodes into latest ImuSample_t
 │   └── sh2_hal_rpi.c        Raspberry Pi sh2_Hal_t transport (SPI + libgpiod)
-├── sh2/                     CEVA SH-2 reference library (vendored, unmodified)
-├── tests/                   bring-up and validation programs
+├── calibration/             BNO085 calibration tools (see calibration/readme.md)
+├── validation/              encoder-vs-IMU validation harnesses
+├── sh2/                     vendored CEVA sh2 library (submodule, unmodified)
+├── tests/                   bring-up and timing test programs
 ├── bin/                     (generated) binaries
 └── build/                   (generated) objects
 ```
@@ -152,11 +154,11 @@ packets/s. **Any future consumer that adds work to the loop must preserve the
 
 | Field | Units | Meaning |
 |---|---|---|
-| `version` | — | struct version (`IMU_SAMPLE_STRUCT_VERSION` = 2) |
+| `version` | — | struct version (`IMU_SAMPLE_STRUCT_VERSION` = 3) |
 | `seq` | — | +1 per decoded event (any of the three sensors), since start |
 | `timestamp_uS` | µs | device-side timestamp of the most recent event |
 | `yaw`, `pitch`, `roll` | rad | orientation from the rotation-vector quaternion |
-| `orientationAccuracy` | rad | rotation-vector accuracy estimate |
+| `orientationErrRad` | rad | rotation-vector heading-error estimate (lower is better; NOT the 0–3 status scale) |
 | `ax`, `ay`, `az` | m/s² | linear acceleration (gravity removed) |
 | `gx`, `gy`, `gz` | rad/s | calibrated angular velocity |
 | `validMask` | bit flags | bit 0 orientation, bit 1 accel, bit 2 gyro |
@@ -200,9 +202,11 @@ On the Pi (Raspberry Pi OS; requires `gcc`, `make`, `libgpiod-dev` v1):
 ```bash
 sudo apt install libgpiod-dev     # if not already present
 cd "rpi4b prod code/bno"
-make          # builds bin/bno_app
-make tests    # builds the five test binaries
+cd bno
+make                       # builds bin/bno_app
+make tests                 # builds the five test binaries
 sudo ./bin/bno_app
+cd calibration && make     # builds bin/bno_cal and bin/bno_cal_clear
 ```
 
 `sudo` is required (spidev + gpiochip0 access and SCHED_FIFO rtprio limits).
@@ -252,6 +256,24 @@ sensor configuration. This project supplies only the transport
 Do not hand-patch `sh2/`. If behavior looks wrong, suspect the HAL or app
 layers first, and re-run `test_report_len` before and after any change. If
 CEVA publishes updated sources, replace the directory wholesale.
+
+## Calibration
+
+The BNO085's internal calibration is managed by the tools in
+`calibration/` (see `calibration/readme.md` for full details):
+
+- `bno_cal` — guided dynamic calibration per CEVA BNO08X Sensor Calibration
+  Procedure, plus `--check` (field go/no-go) and `--check --mask` (cal-config
+  probes).
+- `bno_cal_clear` — full DCD erase (flash + RAM) for documenting the
+  uncalibrated baseline.
+
+Field procedure: run `bno_cal --check` (expect exit 0) before every
+deployment; recalibrate with `bno_cal` in the deployment area when the
+magnetic environment changes. Both `bno_app` and `sensor_validate`
+disable all dynamic calibration at startup and fly on the saved DCD —
+the enable bits are RAM-only and revert at every reset, so the policy
+is set per program, not per calibration.
 
 ## Provenance
 
