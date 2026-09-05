@@ -30,4 +30,9 @@ void sensor_reader_stop(void);
  */
 bool sensor_reader_getLatestSample(ImuSample_t *outSample);
 
+/*
+ * Sets the sequence number to 0
+ */
+void sensor_reader_resetSeq();
+
 #endif /* SENSOR_READER_H */

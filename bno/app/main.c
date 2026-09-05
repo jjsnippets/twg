@@ -89,6 +89,7 @@ int main(void)
     clock_gettime(CLOCK_MONOTONIC, &t0);
 
     double elapsed = 0.0;
+    sensor_reader_resetSeq();
 
     while (elapsed < (double)RUN_DURATION_SEC) {
         sensor_reader_service();

@@ -150,3 +150,8 @@ bool sensor_reader_getLatestSample(ImuSample_t *outSample)
     *outSample = sLatestSample;
     return true;
 }
+
+void sensor_reader_resetSeq()
+{
+    sSeqCounter = 0;
+}
