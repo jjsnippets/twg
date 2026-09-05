@@ -82,7 +82,7 @@ bno/
 │   ├── sensor_reader.c/.h   SH-2 session owner, decodes into latest ImuSample_t
 │   └── sh2_hal_rpi.c        Raspberry Pi sh2_Hal_t transport (SPI + libgpiod)
 ├── calibration/             BNO085 calibration tools (see calibration/readme.md)
-├── validation/              encoder-vs-IMU validation harnesses
+├── validation/              encoder-vs-IMU validation harnesses (see validation/readme.md)
 ├── sh2/                     vendored CEVA sh2 library (submodule, unmodified)
 ├── tests/                   bring-up and timing test programs
 ├── bin/                     (generated) binaries
