@@ -164,6 +164,18 @@ bool sensor_validate_start(void)
         return false;
     }
 
+    /*
+     * Flight-time calibration policy: mirror bno_app exactly (all
+     * dynamic calibration off, fly on the saved DCD) so validation
+     * evidence describes the config the acquisition binary runs.
+     * The enable bits are RAM-only and revert to chip defaults at
+     * every reset, so every sh2 consumer must set its own policy.
+     */
+    if (sh2_setCalConfig(0) != SH2_OK) {
+        sh2_close();
+        return false;
+    }
+
     return true;
 }
 

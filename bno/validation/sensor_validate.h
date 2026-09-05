@@ -8,6 +8,9 @@
  *
  * Single-threaded, like the app reader: call sensor_validate_service()
  * and sensor_validate_getLatestSample() from the same ~1 ms loop.
+ * 
+ * Also disables all dynamic calibration (sh2_setCalConfig(0)),
+ * mirroring bno_app's flight policy
  *
  * Build: make validate   (validation/Makefile)
  */
