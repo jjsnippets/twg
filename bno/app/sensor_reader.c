@@ -63,7 +63,7 @@ static void sensorCallback(void *cookie, sh2_SensorEvent_t *pEvent)
             sLatestSample.yaw   = (float)q_to_yaw(rv->real, rv->i, rv->j, rv->k);
             sLatestSample.pitch = (float)q_to_pitch(rv->real, rv->i, rv->j, rv->k);
             sLatestSample.roll  = (float)q_to_roll(rv->real, rv->i, rv->j, rv->k);
-            sLatestSample.orientationAccuracy = rv->accuracy;
+            sLatestSample.orientationErrRad = rv->accuracy;
             sLatestSample.validMask |= IMU_SAMPLE_VALID_ORIENTATION;
             break;
         }

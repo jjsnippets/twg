@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define IMU_SAMPLE_STRUCT_VERSION 2
+#define IMU_SAMPLE_STRUCT_VERSION 3
 
 typedef struct {
     uint8_t  version;        /* IMU_SAMPLE_STRUCT_VERSION */
@@ -13,7 +13,7 @@ typedef struct {
      * decoded event. Always increases by 1 per real event; if a
      * consumer polls faster than new events arrive, it will observe
      * the same seq value repeated (a genuine duplicate, not a new
-     * sample), which is now directly visible in the printed seq
+     * event). Consumers can detect new data by comparing this
      * field instead of requiring a value-by-value comparison. */
     uint32_t seq;
 
@@ -30,7 +30,12 @@ typedef struct {
     float yaw;
     float pitch;
     float roll;
-    float orientationAccuracy;
+    /* Estimated heading error from the rotation-vector payload, in
+     * RADIANS (lower is better; ~3 rad means "no estimate"). This is
+     * NOT the 0-3 status/accuracy scale used by the calibration
+     * tools' status bytes. Renamed from orientationAccuracy (v2),
+     * which misleadingly suggested the 0-3 scale. */
+    float orientationErrRad;
 
     float ax;
     float ay;
