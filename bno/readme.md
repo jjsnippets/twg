@@ -194,6 +194,14 @@ Read these semantics before consuming:
    channel 3. Wire packets are 23 B (rotation vector) and 19 B
    (accelerometer/gyro) including the 4-byte SHTP header, one event per
    packet.
+8. **No status bits in the sample — and the gyro bit would read 0
+   anyway.** `ImuSample_t` deliberately carries no per-report status
+   bytes. Under the flight policy (all dynamic calibration off) the
+   BNO085 reports the gyro status bit as 0 (unreliable) by design — the
+   real-time ZRO estimator is halted while the saved DCD keeps
+   bias-correcting the data — so readiness must be judged from
+   `orientationErrRad` (<= ~0.35 rad once converged), never from a
+   gyro status bit.
 
 ## Building and running
 
@@ -275,6 +283,13 @@ disable all dynamic calibration at startup and fly on the saved DCD —
 the enable bits are RAM-only and revert at every reset, so the policy
 is set per program, not per calibration.
 
+Note: under the all-off flight policy the BNO085 reports the gyro
+status bit as 0 (unreliable) by design (the ZRO estimator is halted;
+the saved DCD still bias-corrects the data), and the rotation vector
+needs ~10 s of motion after a reset to converge. Neither is a fault:
+`bno_cal --check` accounts for both, and consumers gate readiness on
+`orientationErrRad`, not status bits.
+
 ## Provenance
 
 - HAL rewrite (manual CS + two-phase length-driven reads): PR #3
@@ -299,6 +314,9 @@ is set per program, not per calibration.
   `sensor_reader_start()` enables the three reports.
 - Failed host-initiated writes (asleep device, wake timeout) return 0 and are
   retried by the sh2 library; they are normal.
+- With all dynamic calibration off (the flight policy), the gyro status
+  bit reads 0 by design; gate readiness on `orientationErrRad`, never on
+  gyro status.
 
 ## References
 

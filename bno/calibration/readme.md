@@ -74,6 +74,17 @@ calibration off), prints the ME cal config plus the accuracy bits after
 ~10 s, and exits 0 (READY) or 3 (NOT CALIBRATED). Run this before every
 deployment.
 
+Pass criteria: accelerometer >= 2, magnetometer >= 2, and rotation
+vector status >= 2 with a heading error estimate <= 0.35 rad (~20 deg).
+The gyro bit is not part of the verdict — it reads 0 whenever the gyro
+cal flag is off (see Known behaviors). Expected output on a calibrated
+unit:
+
+```text
+[acc 2  gyr 0  mag 2  rv 2]  rv_err= 0.14 rad
+RESULT: READY - saved calibration looks good (exit 0)
+```
+
 ### `--check --mask 0xNN` (probe mode)
 
 Same as `--check` but with an arbitrary ME cal mask — e.g. `0x05`
@@ -132,19 +143,24 @@ every reset, so every SH-2 consumer must set its own policy — `bno_cal`
 cannot set it on anyone's behalf. (The gyro is still bias-corrected
 when the device is very stable, per the BNO08X datasheet §3.1.3.)
 
-## Known behaviors (measured on this unit, 2026-09-04)
+## Known behaviors (measured on this unit; gyro bit + DCD confirmed 2026-09-07)
 
 - **Gyro status bit reads 0 whenever the gyro cal flag is off**, and 3
-  whenever it is on, regardless of the DCD. CEVA documents no relation
-  between the flag and the bit; it is therefore never gated on, only
-  displayed.
-- **Rotation vector status reads 0 with its error estimate pinned at
-  ~1.45 rad while stationary under the all-off policy**, versus status
-  3 / ~0.1 rad with calibration enabled. RV convergence after a reset
-  needs ~10 s of device motion in every configuration tested. Whether
-  the all-off policy affects only the RV *status* or the RV *data* is
-  an open item — the encoder validation rig is the instrument that
-  settles it.
+  whenever it is on, regardless of the DCD. Confirmed 2026-09-07
+  across a guided calibration, `--check` probes of masks
+  0x00/0x01/0x02/0x07, and a full Pi power-down/unplug/reboot cycle:
+  the bit tracks the runtime flag exactly. It is therefore never gated
+  on, only displayed.
+- **DCD persistence is verified**: after the 2026-09-07 calibration
+  the device survived shutdown, unplugging and reboot, and the
+  rotation vector came back converged (status 2–3, error ~0.1–0.2 rad)
+  under the all-off flight policy.
+- **RV needs a motion window after a reset**: the earlier observation
+  of RV status 0 pinned at ~1.45 rad while stationary under the
+  all-off policy (2026-09-04) was a warm-up artifact — after ~10 s of
+  gentle motion the RV reports status 2–3 with a ~0.1–0.2 rad error
+  estimate even with all dynamic calibration off. The verify step's
+  motion window exists for this reason.
 - **The mag status bit fluctuates at rest** (0–3 within seconds) and
   the DCD snapshot is taken every 5 s, which is why the save is gated
   on a sustained-good state rather than a single sample.
