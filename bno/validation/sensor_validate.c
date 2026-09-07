@@ -170,6 +170,13 @@ bool sensor_validate_start(void)
      * evidence describes the config the acquisition binary runs.
      * The enable bits are RAM-only and revert to chip defaults at
      * every reset, so every sh2 consumer must set its own policy.
+     *
+     * Note: under this all-off policy the BNO085 reports the gyro
+     * status bit as 0 (unreliable) by design — the real-time ZRO
+     * estimator is halted — while the saved DCD keeps bias-correcting
+     * the gyro data. A gyro status of 0 in the CSV is therefore
+     * expected, not a fault; judge readiness from the rotation
+     * vector's status byte and rvErrRad instead.
      */
     if (sh2_setCalConfig(0) != SH2_OK) {
         sh2_close();

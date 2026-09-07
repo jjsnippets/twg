@@ -19,6 +19,13 @@
  * directory. Replaces bno_app while running: one SPI HAL instance
  * per process.
  *
+ * Note: sensor_validate mirrors bno_app's all-off calibration policy,
+ * under which the BNO085 reports the gyro status bit as 0
+ * (unreliable) by design (the ZRO estimator is halted; the saved DCD
+ * still bias-corrects the data). A gyro status of 0 in the CSV is
+ * expected, not a fault — judge RV health from rv_accuracy /
+ * rv_err_rad instead.
+ *
  * Build: make validate   (validation/Makefile)
  * Usage: ./bin/sensor_validate [-o out.csv] [-d seconds]
  */
@@ -332,8 +339,8 @@ int main(int argc, char **argv)
            : g_enc_snap.invalid ? "(INVALID TRANSITIONS)"
                                 : "(clean)");
     if (have_imu) {
-        printf("imu          : seq=%" PRIu32 " validMask=0x%02x\n",
-               final_imu.seq, final_imu.validMask);
+        printf("imu          : seq=%" PRIu32 " validMask=0x%02x rv_err=%.3f rad\n",
+               final_imu.seq, final_imu.validMask, final_imu.rvErrRad);
     } else {
         printf("imu          : no events decoded\n");
     }
