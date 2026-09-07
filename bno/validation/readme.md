@@ -13,9 +13,10 @@ formal acceptance criteria are applied post-hoc by a separate program
 
 Related documentation:
 - `../readme.md` — app architecture, data contract, sudo/RT policy
-- `../calibration/readme.md` — `bno_cal` guided calibration and the
+- `../calibration/readme.md` — `bno_cal` guided calibration, the
   flight-time calibration policy (both acquisition programs fly on the
-  saved DCD with all dynamic calibration disabled)
+  saved DCD with all dynamic calibration disabled), and `bno_orient`
+  swing-axis tare
 
 ## Hardware setup
 
@@ -48,6 +49,8 @@ These are recorded as run metadata only; they do not affect the capture:
 
 - Arm length: **[TBD] m** (`ARM_LENGTH_M` in `main.c`)
 - IMU mount orientation / which IMU axis lies in the swing plane: **[TBD]**
+  (the persisted `bno_orient` tare encodes this alignment — re-tare
+  after any remount)
 - Pivot shaft diameter / encoder sleeve: **[TBD]**
 - Encoder mounting: base at pivot, shaft end accessible: **[TBD]**
 
@@ -61,13 +64,21 @@ When a rig fact is settled, update `ARM_LENGTH_M` and `RUN_NOTES` in
    deployment area whenever the magnetic environment changes. In the
    CSV, `rv_accuracy` = 3.1416 (π) means "unreliable" — if it reads π
    throughout a capture, the calibration is absent or degraded.
-2. **sudo**: required for spidev + gpiochip0 access and SCHED_FIFO
+2. **Orientation (tare)**: `bno_orient --persist` must have been run
+   with the fixture at its swing-axis zero (see
+   `../calibration/readme.md`), so logged yaw zero equals swing zero
+   and the angle-vs-angle comparison needs no post-hoc offset. Confirm
+   with `bno_orient --check` (yaw ≈ 0 at the zero); re-run after
+   remounting the IMU or changing the mechanical zero. The tare lives
+   in a separate flash record from the DCD — recalibrating does not
+   disturb it.
+3. **sudo**: required for spidev + gpiochip0 access and SCHED_FIFO
    rtprio limits (same policy as `bno_app`).
-3. **No competing sh2 consumer**: `bno_app`, `bno_cal`, or any other
+4. **No competing sh2 consumer**: `bno_app`, `bno_cal`, or any other
    program holding the BNO085 SPI/HAL must not be running — one HAL
    instance per process. `sensor_validate` replaces `bno_app` for the
    duration of a capture.
-4. **GPIO lines free**: `gpioinfo gpiochip0` should show lines 17, 27,
+5. **GPIO lines free**: `gpioinfo gpiochip0` should show lines 17, 27,
    and 22 unused.
 
 ## Build
@@ -177,9 +188,10 @@ Sequencing notes:
 
 ## Capture procedure
 
-1. Pre-flight: `bno_cal --check` (expect exit 0); confirm no other sh2
-   consumer is running; `gpioinfo gpiochip0` shows 17/27/22 free; glance
-   at wiring and DIP switches.
+1. Pre-flight: `bno_cal --check` (expect exit 0); `bno_orient --check`
+   (yaw ≈ 0 at the swing zero — if not, run `bno_orient --persist`);
+   confirm no other sh2 consumer is running; `gpioinfo gpiochip0`
+   shows 17/27/22 free; glance at wiring and DIP switches.
 2. If rig facts are known, set `ARM_LENGTH_M` and `RUN_NOTES` in
    `main.c` and rebuild; otherwise leave the placeholders.
 3. `sudo ./bin/sensor_validate -o <run-name>.csv -d <capture seconds>`

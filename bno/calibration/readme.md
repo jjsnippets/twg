@@ -8,10 +8,17 @@ for judging IMU output afterwards; it is never an input to the BNO085's
 own calibration. The only thing that crosses from here to `bno_app` is
 the DCD saved in the BNO085's flash.
 
-The procedure implemented here is CEVA's "BNO08X Sensor Calibration
-Procedure" (doc 1000-4044), driven through the vendored SH-2 library's
-dynamic-calibration API (`sh2_setCalConfig`, `sh2_saveDcdNow`,
-`sh2_clearDcdAndReset`, `sh2_setFrs`).
+This directory also holds `bno_orient`, the **frame-alignment (tare)**
+tool. Dynamic calibration fixes the sensor's internal physics; tare
+rotates the fused output frame so its zero matches the fixture's swing
+axis. The two are independent — the tare is stored in the BNO085's
+separate sensor-orientation flash record, so taring never touches a
+calibration and calibrating never disturbs a tare.
+
+The calibration procedure implemented here is CEVA's "BNO08X Sensor
+Calibration Procedure" (doc 1000-4044), driven through the vendored
+SH-2 library's dynamic-calibration API (`sh2_setCalConfig`,
+`sh2_saveDcdNow`, `sh2_clearDcdAndReset`, `sh2_setFrs`).
 
 ## Binaries
 
@@ -19,19 +26,24 @@ dynamic-calibration API (`sh2_setCalConfig`, `sh2_saveDcdNow`,
 |---|---|
 | `bin/bno_cal` | Guided calibration, field go/no-go check, cal-config probes |
 | `bin/bno_cal_clear` | Full DCD erase (flash + RAM) with confirmation prompt |
+| `bin/bno_orient` | Swing-axis tare; `--persist` stores the frame in flash |
 
 Build:
 
 ```sh
 cd bno/calibration
-make          # builds bin/bno_cal and bin/bno_cal_clear
+make          # builds bin/bno_cal, bin/bno_cal_clear and bin/bno_orient
 make clear    # builds only bin/bno_cal_clear
+make orient   # builds only bin/bno_orient
 ```
 
-Both link the production decode chain (`../sh2`, the Pi HAL in
-`../app`, and the shared session owner `sensor_calibrate.c`). Neither
-may run at the same time as `bno_app` or the validation binaries —
-one SPI HAL instance per process.
+`bno_cal` and `bno_cal_clear` link the shared session owner
+`sensor_calibrate.c`; `bno_orient` uses its own (`sensor_orient.c`,
+which decodes the full rotation-vector quaternion — `CalSample_t`
+carries accuracy bits only). All link the production decode chain
+(`../sh2` and the Pi HAL in `../app`). None may run at the same time
+as `bno_app` or the validation binaries — one SPI HAL instance per
+process.
 
 ## bno_cal — guided calibration
 
@@ -134,6 +146,59 @@ the RAM clear, leaving the existing calibration intact.
 Prints the accuracy state before and after (~5 s each) for
 documentation. Exit codes: 0 cleared, 1 error, 2 declined/aborted.
 
+## bno_orient — swing-axis tare (frame alignment)
+
+```sh
+sudo ./bin/bno_orient              # Z-axis (heading) tare at the fixture's
+                                   # swing-axis zero; volatile
+sudo ./bin/bno_orient --persist    # tare, write to flash, verify across a
+                                   # session reopen
+sudo ./bin/bno_orient --all        # full 3-axis tare (level + mag North!)
+sudo ./bin/bno_orient --clear      # drop the volatile tare
+sudo ./bin/bno_orient --check      # read-only: heading + RV accuracy
+```
+
+Rotates the fused output frame so that the attitude held at tare time
+reads as zero — aligning IMU yaw zero with the rig's swing-axis zero,
+which makes the encoder-vs-IMU angle comparison direct (no post-hoc
+θ₀ offset in analysis).
+
+Semantics (CEVA "BNO085 Tare Function" note; SH-2 Reference Manual,
+Tare command):
+
+- **Tare Now** (`sh2_setTareNow`) is volatile: the next session open
+  performs the HAL reset, so the chip reboots and the tare is lost.
+  `--persist` (`sh2_persistTare`) writes it to the separate
+  sensor-orientation flash record, so every later session — `bno_app`
+  and `sensor_validate` included — boots in the tared frame.
+- **The default is the Z-axis (heading) tare**: the fixture just needs
+  to sit level at its swing-axis zero; no magnetic-North alignment is
+  required. `--all` additionally zeroes pitch and roll and requires
+  the device dead level **and** pointed at magnetic North when the
+  tare is applied.
+- **`--clear` drops only the volatile tare**: a tare previously
+  persisted to flash reloads at the next reset and must be overwritten
+  by a fresh tare + `--persist`.
+
+Flow: opens the session under `bno_app`'s flight policy (all dynamic
+calibration off), settles the rotation vector (accuracy ≥ 2, up to
+15 s — aborts with a "run bno_cal first" hint otherwise), prints the
+current yaw/pitch/roll, prompts at the swing-axis zero, tares, and
+with `--persist` reopens the session to verify the tare survived the
+reset (the same reopen-verify pattern as `bno_cal`'s step 6).
+
+Interactions with the other tools:
+
+- `bno_cal` and `bno_cal_clear` never touch the tare, and `bno_orient`
+  never touches the DCD — recalibrating, clearing calibration and
+  taring are all independent operations.
+- Re-run `bno_orient --persist` whenever the IMU is remounted or the
+  fixture's mechanical zero changes.
+
+Exit codes: 0 success (verified across reset with `--persist`),
+1 runtime error (SPI/SH-2 failure, heading never settled), 2 aborted
+by the user.
+
 ## Flight-time calibration policy (bno_app and sensor_validate)
 
 Both acquisition programs disable all dynamic calibration
@@ -172,3 +237,6 @@ when the device is very stable, per the BNO08X datasheet §3.1.3.)
 Gyroscope Calibrated and Rotation Vector at 10 Hz for their status
 bits — ~80 events/s, serviced from a plain ~1 kHz `usleep` loop (no
 SCHED_FIFO needed for an operator-paced tool).
+
+`sensor_orient.c` (`bno_orient`) subscribes only to the Rotation
+Vector at 20 Hz, decoded in full (quaternion + accuracy).
