@@ -11,6 +11,14 @@
  *
  * The design is intentionally single-threaded. The application owns the
  * service cadence by calling sensor_reader_service() from its real-time loop.
+ *
+ * Note: bno_app runs with all dynamic calibration disabled
+ * (sh2_setCalConfig(0) in main.c). Under that policy the BNO085 reports
+ * the gyro status bit as 0 (unreliable) by design — the real-time ZRO
+ * estimator is halted — while the saved DCD keeps bias-correcting the
+ * gyro data. ImuSample_t deliberately carries no status bits; consumers
+ * judge readiness from the rotation-vector outputs (orientationErrRad),
+ * never from a gyro status bit.
  */
 
 #include <stdbool.h>

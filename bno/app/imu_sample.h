@@ -34,7 +34,14 @@ typedef struct {
      * RADIANS (lower is better; ~3 rad means "no estimate"). This is
      * NOT the 0-3 status/accuracy scale used by the calibration
      * tools' status bytes. Renamed from orientationAccuracy (v2),
-     * which misleadingly suggested the 0-3 scale. */
+     * which misleadingly suggested the 0-3 scale.
+     *
+     * Note: When SH2 dynamic calibration is disabled (mask 0x00), the
+     * BNO085 firmware reports the gyro status bit as 0 (unreliable)
+     * by design because the real-time ZRO estimator is halted, while
+     * the saved DCD keeps bias-correcting the gyro data itself.
+     * Pre-flight health checks must evaluate rotation vector accuracy
+     * and this error estimate rather than the gyro status bit. */
     float orientationErrRad;
 
     float ax;

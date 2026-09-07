@@ -57,6 +57,14 @@ int main(void)
      * here so the saved DCD is the only calibration input during
      * acquisition. (The gyro is still bias-corrected automatically
      * whenever the device is stationary, regardless of this setting.)
+     *
+     * Note: with all dynamic calibration disabled the BNO085 reports
+     * the gyro status bit as 0 (unreliable) by design — the real-time
+     * ZRO estimator is halted — while the saved DCD keeps
+     * bias-correcting the gyro data itself. Health/readiness checks
+     * must never gate on the gyro status bit under this policy; use
+     * the rotation vector status and ImuSample_t.orientationErrRad
+     * (expected <= ~0.35 rad once converged) instead.
      */
     if (sh2_setCalConfig(0) != SH2_OK) {
         fprintf(stderr, "main: sh2_setCalConfig(disable all) failed\n");

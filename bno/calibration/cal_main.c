@@ -29,27 +29,22 @@
  *      runs, so the verdict describes what acquisition will see.
  *
  * Verification gate: accelerometer AND magnetometer accuracy >= 2,
- * sustained for >= 3 s. The gyro bit is deliberately NOT gated:
- * measured on this unit it reads 0 in every session where the gyro
- * dynamic-cal flag is off (the bno_app all-off policy) and 3 in every
- * session where it is on; CEVA documents no relation between the flag
- * and the bit, and the BNO08X datasheet (section 3.1.3) states gyro
- * zero-rate offset "will always be corrected when the device becomes
- * very stable" regardless. Gyro calibration is therefore confirmed
- * during step 3 (flag on), informationally.
+ * sustained for >= 3 s, plus rotation vector status >= 2 with a
+ * heading error estimate <= 0.35 rad.
  *
- * KNOWN OPEN ITEM (observed 2026-09-04): with all dynamic calibration
- * disabled, the rotation vector reports status 0 with its heading
- * error estimate pinned at ~1.45 rad, while with calibration enabled
- * it reports status 3 / ~0.1 rad in the same environment with the
- * same DCD. RV convergence after a reset also takes ~10 s of device
- * motion even with calibration enabled. The verify step therefore
- * includes a motion window, and --check --mask allows probing other
- * cal configs, to determine whether the flight-time all-off policy
- * affects only the RV status bits or the RV data itself.
- *
- * The rotation vector's radian error estimate is printed as a
- * diagnostic but not gated.
+ * Note: When SH2 dynamic calibration is disabled (mask 0x00), the BNO085
+ * firmware reports gyro accuracy as 0 (unreliable) by design because the
+ * real-time ZRO estimator is halted. Pre-flight health checks must evaluate
+ * rotation vector accuracy and error estimate rather than gyro_status.
+ * Confirmed 2026-09-07 across a guided calibration, --check probes of
+ * masks 0x00/0x01/0x02/0x07, and a full Pi power-down/unplug/reboot
+ * cycle: the gyro bit tracks the runtime flag exactly (0 when the gyro
+ * cal flag is off, 3 when it is on) while the DCD-loaded calibration
+ * keeps the rotation vector converged. The earlier status-0 / ~1.45 rad
+ * RV observation under the all-off policy (2026-09-04) was a warm-up
+ * artifact: after the ~10 s motion window the RV reports status 2-3 at
+ * ~0.1-0.2 rad even with all dynamic calibration off. Gyro calibration
+ * is therefore confirmed during step 3 (flag on), informationally.
  *
  * The old DCD is never cleared: Save DCD overwrites the flash record
  * wholesale, so recalibration is safe without a clear step.
@@ -102,11 +97,13 @@
 
 /* Accuracy gate: 0 unreliable, 1 low, 2 medium, 3 high. */
 #define ACC_GOAL 2
+#define MAX_HEADING_ERR_RAD 0.35f  /* ~20 degrees */
 
 /* Masks for which accuracies a phase waits on. */
 #define NEED_ACCEL (1u << 0)
 #define NEED_GYRO  (1u << 1)
 #define NEED_MAG   (1u << 2)
+#define NEED_RV    (1u << 3)
 
 /*
  * Verify/--check and pre-save gate: accel + mag only. The gyro bit
@@ -245,6 +242,28 @@ static bool accurateEnough(const CalSample_t *s, unsigned need)
     if ((need & NEED_ACCEL) && s->accelAccuracy < ACC_GOAL) return false;
     if ((need & NEED_GYRO)  && s->gyroAccuracy  < ACC_GOAL) return false;
     if ((need & NEED_MAG)   && s->magAccuracy   < ACC_GOAL) return false;
+    if ((need & NEED_RV)    && (s->rvAccuracy   < ACC_GOAL ||
+                                s->rvErrRad > MAX_HEADING_ERR_RAD)) return false;
+    return true;
+}
+
+/*
+ * Note: When SH2 dynamic calibration is disabled (mask 0x00), the BNO085
+ * firmware reports gyro accuracy as 0 (unreliable) by design because the
+ * real-time ZRO estimator is halted. Pre-flight health checks must evaluate
+ * rotation vector accuracy and error estimate rather than gyro_status.
+ */
+static bool isFlightReady(const CalSample_t *s, uint8_t calMask)
+{
+    if (s->accelAccuracy < ACC_GOAL) return false;
+    if (s->magAccuracy   < ACC_GOAL) return false;
+    if (s->rvAccuracy    < ACC_GOAL) return false;
+    if (s->rvErrRad      > MAX_HEADING_ERR_RAD) return false;
+
+    /* Gyro accuracy is only meaningful when the gyro cal flag is on. */
+    if ((calMask & SH2_CAL_GYRO) && s->gyroAccuracy < ACC_GOAL) {
+        return false;
+    }
     return true;
 }
 
@@ -390,7 +409,7 @@ static int waitAccurateSustained(unsigned need, unsigned timeout_s,
  * bno_app flight policy; other values are probes), watches accuracy
  * for up to 10 s and prints the result.
  *
- * mask == 0: pass/fail verdict on accel+mag (the go/no-go mode).
+ * mask == 0: pass/fail verdict on accel+mag+rv (the go/no-go mode).
  * mask != 0: probe mode — informational output only, always EXIT_OK.
  */
 static int doCheck(uint8_t mask)
@@ -419,7 +438,6 @@ static int doCheck(uint8_t mask)
                "cal is off (observed on this unit); it is not part of "
                "the verdict.\n");
     }
-
     printf("monitoring accuracy for up to 10 s (keep the device "
            "stationary; needs %d s of good readings)...\n",
            SUSTAIN_MS / 1000);
@@ -443,7 +461,7 @@ static int doCheck(uint8_t mask)
                mask);
         return EXIT_OK;
     }
-    if (rc == 0) {
+    if (rc == 0 && isFlightReady(&s, mask)) {
         printf("RESULT: READY - saved calibration looks good (exit 0)\n");
         return EXIT_OK;
     }
@@ -689,12 +707,16 @@ static int doCalibrate(void)
 
     if (sensor_calibrate_getLatestSample(&s)) {
         printVerdict(&s);
-        if (s.rvAccuracy < ACC_GOAL) {
-            printf("note: rotation vector still reads %u / %.2f rad "
-                   "under the all-off policy - probe other configs "
-                   "with 'bno_cal --check --mask 0xNN' before relying "
-                   "on RV status in flight.\n",
-                   s.rvAccuracy, (double)s.rvErrRad);
+        if (!isFlightReady(&s, 0)) {
+            printf("note: rotation vector reads %u / %.2f rad "
+                   "(expected >= %d and <= %.2f rad) - probe other "
+                   "configs with 'bno_cal --check --mask 0xNN' before "
+                   "relying on RV status in flight.\n",
+                   s.rvAccuracy, (double)s.rvErrRad, ACC_GOAL,
+                   (double)MAX_HEADING_ERR_RAD);
+            sensor_calibrate_stop();
+            csvClose();
+            return EXIT_NOT_CALIBRATED;
         }
     }
     sensor_calibrate_stop();
