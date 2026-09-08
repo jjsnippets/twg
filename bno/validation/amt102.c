@@ -23,20 +23,21 @@
 
 #define GPIO_CHIP_NAME "gpiochip0"
 
-/* Default Raspberry Pi 4B physical wiring */
+/* Wiring matching production validation header */
 #define PIN_CH_A 5   /* GPIO 5 (Pin 29) */
 #define PIN_CH_B 6   /* GPIO 6 (Pin 31) */
 #define PIN_CH_X 13  /* GPIO 13 (Pin 33) */
 
-/* AMT102-V PPR in x4 mode = 2048 * 4 = 8192 counts per 360 degrees */
 #define COUNTS_PER_REV 8192.0
 
 static struct gpiod_chip *sChip = NULL;
 static struct gpiod_line_bulk sLines;
-static QuadDecoder_t sDecoder;
+static quad_decoder_t sDecoder;
 
 static uint64_t sLastEdgeTsNs = 0;
 static uint64_t sEdgesAB = 0;
+static uint64_t sXPulses = 0;
+static int sLastX = 0;
 
 int amt102_init(void)
 {
@@ -54,7 +55,6 @@ int amt102_init(void)
         return -1;
     }
 
-    /* Request both edges on all three lines for maximum resolution */
     struct gpiod_line_request_config config = {
         .consumer = "amt102_validate",
         .request_type = GPIOD_LINE_REQUEST_EVENT_BOTH_EDGES,
@@ -67,7 +67,6 @@ int amt102_init(void)
         return -1;
     }
 
-    /* Read initial values to seed decoder state */
     struct gpiod_line *lineA = gpiod_line_bulk_get_line(&sLines, 0);
     struct gpiod_line *lineB = gpiod_line_bulk_get_line(&sLines, 1);
     struct gpiod_line *lineX = gpiod_line_bulk_get_line(&sLines, 2);
@@ -76,9 +75,13 @@ int amt102_init(void)
     int valB = gpiod_line_get_value(lineB);
     int valX = gpiod_line_get_value(lineX);
 
-    quad_decode_init(&sDecoder, valA > 0, valB > 0, valX > 0);
+    quad_decode_init(&sDecoder);
+    quad_decode_step(&sDecoder, valA > 0, valB > 0);
+
+    sLastX = valX > 0;
     sLastEdgeTsNs = 0;
     sEdgesAB = 0;
+    sXPulses = 0;
 
     return 0;
 }
@@ -87,11 +90,9 @@ void amt102_poll(void)
 {
     if (!sChip) return;
 
-    /* Non-blocking read of all queued edge events across all lines */
     struct gpiod_line_event event;
     struct gpiod_line_bulk eventLines;
 
-    /* Poll with timeout 0 for non-blocking drain */
     while (gpiod_line_bulk_event_wait(&sLines, NULL, &eventLines) > 0) {
         unsigned int num_lines = gpiod_line_bulk_num_lines(&eventLines);
         for (unsigned int i = 0; i < num_lines; i++) {
@@ -102,7 +103,6 @@ void amt102_poll(void)
                                  (uint64_t)event.ts.tv_nsec;
                 sLastEdgeTsNs = ts_ns;
 
-                /* Sample current lines */
                 struct gpiod_line *lA = gpiod_line_bulk_get_line(&sLines, 0);
                 struct gpiod_line *lB = gpiod_line_bulk_get_line(&sLines, 1);
                 struct gpiod_line *lX = gpiod_line_bulk_get_line(&sLines, 2);
@@ -113,9 +113,13 @@ void amt102_poll(void)
 
                 if (offset == PIN_CH_A || offset == PIN_CH_B) {
                     sEdgesAB++;
+                    quad_decode_step(&sDecoder, vA > 0, vB > 0);
+                } else if (offset == PIN_CH_X) {
+                    if (!sLastX && vX > 0) {
+                        sXPulses++;
+                    }
+                    sLastX = vX > 0;
                 }
-
-                quad_decode_feed_edge(&sDecoder, vA > 0, vB > 0, vX > 0);
             }
         }
     }
@@ -125,18 +129,19 @@ void amt102_snapshot(Amt102Snapshot_t *out)
 {
     if (!out) return;
 
-    out->count               = quad_decode_count(&sDecoder);
-    out->angle_deg           = ((double)out->count * 360.0) / COUNTS_PER_REV;
+    out->count               = sDecoder.count;
+    out->angle_deg           = ((double)sDecoder.count * 360.0) / COUNTS_PER_REV;
     out->last_edge_ts_ns     = sLastEdgeTsNs;
-    out->x_pulses            = quad_decode_x_pulses(&sDecoder);
-    out->invalid_transitions = quad_decode_invalid_count(&sDecoder);
+    out->x_pulses            = sXPulses;
+    out->invalid_transitions = sDecoder.invalid;
     out->edges_ab            = sEdgesAB;
 }
 
 void amt102_reset_count(void)
 {
-    quad_decode_reset_count(&sDecoder);
+    quad_decode_init(&sDecoder);
     sEdgesAB = 0;
+    sXPulses = 0;
 }
 
 void amt102_close(void)
