@@ -23,6 +23,8 @@
  * Usage: ./bin/bno_validate [-o out.csv] [-d seconds]
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include <errno.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -46,6 +48,7 @@
 #define LOOP_DT_SEC         0.001   /* 1 kHz service cadence */
 #define LOG_DECIMATION      10      /* 1 kHz / 10 = 100 Hz records */
 #define COUNTS_PER_REV      8192.0  /* 2048 PPR x 4 */
+#define RAD2DEG             57.29577951308232
 
 /* Placeholders: override in your copy per build */
 #define ARM_LENGTH_M        0.0     /* axis to sensor center (placeholder) */
@@ -270,14 +273,19 @@ int main(int argc, char **argv)
                 imu_seq_prev = rec.imu.seq;
 
                 double sec = (double)(t_now - t_log0) / 1e9;
-                printf("[t=%5.1fs] enc=%+8.2f deg (d_enc=%+5" PRId64 ") | imu yaw=%+6.2f deg (d_imu=%3u) rv_acc=%u err=%.2f rad | drops=%" PRIu64 "\n",
+                printf("[t=%5.1fs] enc=%+7.2f deg (d=%+5" PRId64 ") | "
+                       "q=(%+.3f,%+.3f,%+.3f,%+.3f) | "
+                       "ypr=(%+6.2f,%+6.2f,%+6.2f) deg | "
+                       "acc=%u err=%.2frad | drops=%" PRIu64 "\n",
                        sec,
                        rec.enc_angle_deg,
                        d_enc,
-                       rec.imu.yaw * 57.29577951308232,
-                       d_imu,
+                       rec.imu.rv_qw, rec.imu.rv_qx, rec.imu.rv_qy, rec.imu.rv_qz,
+                       (double)(rec.imu.yaw * RAD2DEG),
+                       (double)(rec.imu.pitch * RAD2DEG),
+                       (double)(rec.imu.roll * RAD2DEG),
                        rec.imu.rv.status,
-                       rec.imu.rvErrRad,
+                       (double)rec.imu.rvErrRad,
                        rec.drops);
                 fflush(stdout);
                 last_1hz = t_now;
