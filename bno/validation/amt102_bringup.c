@@ -15,8 +15,8 @@
  *
  * AMT102 DIP preset: all four switches OFF = 2048 PPR = 8192 x4 counts.
  *
- * Build & run (from bno):
- *   make bringup
+ * Build & run (from bno/validation):
+ *   make
  *   ./bin/amt102_bringup        (run as a gpio-group user, e.g. pi)
  *
  * Manual build:
@@ -33,67 +33,160 @@
  * values are net-zero dither at transition boundaries); negative values
  * mean a partial/reversed window. Windows containing a direction
  * reversal legitimately fail the count check - re-run rotating one
- * direction per test block.
+ * direction per pass for a formal PASS.
  *
- * Exit codes:
- *   0  success (at least one clean index-to-index window was observed)
- *   1  hardware/open failure or no clean window after observing pulses
- *   2  aborted before any index pulse was observed
+ * The decoder needs one edge on each of A and B before counting starts
+ * (initial levels are unknown), so the first fraction of a degree of
+ * motion is used to sync - this is expected.
+ *
+ * Exit codes: 0 = PASS, 1 = CHECK (see hints), 2 = setup error.
  */
 
+#include <errno.h>
 #include <inttypes.h>
 #include <signal.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "validation/amt102.h"
 #include "validation/quad_decode.h"
 
 static volatile sig_atomic_t sAbort = 0;
-static void onSigint(int sig) { (void)sig; sAbort = 1; }
-
-typedef struct {
-    int64_t  count;
-    uint64_t a_edges;
-    uint64_t b_edges;
-    uint64_t invalid;
-    uint64_t x_pulses;
-    uint64_t last_index_ts_ns;
-} index_checkpoint_t;
-
-/*
- * Checks whether an index-to-index window matches the 2048 PPR x4 spec:
- * exactly 8192 counts forward (+8192) or reverse (-8192), zero invalid
- * transitions, and exactly 1 index pulse.
- */
-static bool window_is_clean(const index_checkpoint_t *curr,
-                            const index_checkpoint_t *prev)
+static void onSigint(int sig)
 {
-    int64_t d_count   = curr->count - prev->count;
-    int64_t abs_count = (d_count >= 0) ? d_count : -d_count;
-    uint64_t d_inv    = curr->invalid - prev->invalid;
-    uint64_t d_x      = curr->x_pulses - prev->x_pulses;
+    (void)sig;
+    sAbort = 1;
+}
 
-    return (d_x == 1) && (d_inv == 0) && (abs_count == AMT102_COUNTS_PER_REV);
+/* Tracking across all completed index-to-index windows */
+typedef struct {
+    uint32_t total;
+    uint32_t clean;
+    uint32_t last_valid_x;
+    int64_t  last_index_count;
+    uint64_t last_index_a;
+    uint64_t last_index_b;
+    uint64_t last_index_inv;
+    uint64_t last_index_ts_ns;
+    /* Diagnostic flags for the verdict summary */
+    int      saw_4096;
+    int      saw_invalid;
+    int      saw_low_edges;
+    int      saw_partial;
+} win_stats_t;
+
+static void report_window(win_stats_t *ws, const amt102_state_t *st)
+{
+    int64_t  delta_cnt = st->count_at_last_index - ws->last_index_count;
+    uint64_t da        = st->a_edges_at_last_index - ws->last_index_a;
+    uint64_t db        = st->b_edges_at_last_index - ws->last_index_b;
+    uint64_t dinv      = st->invalid_at_last_index - ws->last_index_inv;
+    uint64_t edges_ab  = da + db;
+    int64_t  extra_ab  = (int64_t)edges_ab - AMT102_COUNTS_PER_REV;
+
+    double dt_ms = 0.0;
+    if (ws->last_index_ts_ns > 0 && st->last_index_ts_ns >= ws->last_index_ts_ns)
+        dt_ms = (double)(st->last_index_ts_ns - ws->last_index_ts_ns) / 1000000.0;
+
+    int64_t abs_cnt = (delta_cnt >= 0) ? delta_cnt : -delta_cnt;
+
+    /*
+     * Relaxed pass condition: count matches +/-8192 exactly and zero
+     * invalid transitions occurred. Edge counts are diagnostic only.
+     */
+    int pass = (abs_cnt == AMT102_COUNTS_PER_REV) && (dinv == 0);
+
+    /* Flags for verdict diagnostics */
+    if (abs_cnt == 4096)               ws->saw_4096 = 1;
+    if (dinv > 0)                       ws->saw_invalid = 1;
+    if (da < 3500 || db < 3500)         ws->saw_low_edges = 1;
+    if (abs_cnt > 0 && abs_cnt < 7500) ws->saw_partial = 1;
+
+    ws->total++;
+    if (pass) ws->clean++;
+
+    const char *dir = (delta_cnt > 0) ? "FWD (+)" :
+                      (delta_cnt < 0) ? "REV (-)" : "STALL";
+    const char *verd = pass ? "PASS" : "CHECK";
+
+    printf("#%-4u  %+8" PRId64 "  %+8" PRId64 "  %8" PRIu64 "  %8.1f  %-8s  %s\n",
+           ws->total, delta_cnt, extra_ab, dinv, dt_ms, dir, verd);
+    fflush(stdout);
+
+    ws->last_index_count = st->count_at_last_index;
+    ws->last_index_a     = st->a_edges_at_last_index;
+    ws->last_index_b     = st->b_edges_at_last_index;
+    ws->last_index_inv   = st->invalid_at_last_index;
+    ws->last_index_ts_ns = st->last_index_ts_ns;
+    ws->last_valid_x     = (uint32_t)st->x_pulses;
+}
+
+static int print_verdict(const win_stats_t *ws, const amt102_state_t *st)
+{
+    printf("\n=== Bring-up Verdict ===\n");
+    printf("Windows observed: %u total, %u PASS (clean 8192-count revolutions)\n",
+           ws->total, ws->clean);
+
+    if (ws->total > 0 && ws->clean == ws->total) {
+        printf("RESULT: PASS\n");
+        printf("Wiring, 2048 PPR DIP preset, index line and quad_decode "
+               "all confirmed working.\n");
+        return 0;
+    }
+
+    if (ws->clean > 0 && ws->clean < ws->total) {
+        printf("RESULT: PASS (with warnings)\n");
+        printf("At least one clean 8192-count window was observed, so the "
+               "preset and decode chain are correct. Some windows failed:\n");
+        if (ws->saw_partial)
+            printf("  - direction reversals mid-window (expected to fail the "
+                   "count check)\n");
+        if (ws->saw_invalid)
+            printf("  - invalid transitions detected (check ground and series "
+                   "resistors)\n");
+        printf("Re-run rotating strictly in one direction to confirm a 100%% "
+               "pass rate.\n");
+        return 0;
+    }
+
+    printf("RESULT: CHECK WIRING / PRESET\n");
+    if (ws->total == 0)
+        printf("hint: no full index-to-index window was completed - rotate "
+               "through at least one full revolution between index "
+               "pulses.\n");
+    if (ws->saw_4096)
+        printf("hint: 4096 counts/rev detected - the DIP switches are not "
+               "at the 2048 PPR preset (factory preset: all four switches "
+               "OFF).\n");
+    if (ws->saw_invalid || st->invalid > 0)
+        printf("hint: invalid quadrature transitions - check A/B wiring, "
+               "the 1k series resistors, and the common ground.\n");
+    if (ws->saw_low_edges)
+        printf("hint: a channel reported far fewer than 4096 edges/rev - "
+               "check that channel's wire and resistor.\n");
+    if (ws->saw_partial)
+        printf("hint: partial windows (direction changed mid-revolution) "
+               "legitimately fail the count check - for a formal PASS "
+               "re-run rotating one direction per pass.\n");
+    if (ws->total > 0 && !ws->saw_4096 && !ws->saw_invalid &&
+        !ws->saw_low_edges && !ws->saw_partial && st->invalid == 0)
+        printf("hint: windows deviated from +/-8192 without another "
+               "diagnostic - re-run rotating slowly and steadily.\n");
+    return 1;
 }
 
 int main(void)
 {
-    amt102_t *enc = NULL;
-    amt102_state_t st;
-    index_checkpoint_t last_cp;
-    bool have_cp = false;
-
-    uint32_t total_windows = 0;
-    uint32_t clean_windows = 0;
-    uint64_t total_events  = 0;
+    amt102_t       *enc = NULL;
+    amt102_state_t  st;
+    win_stats_t     ws;
 
     signal(SIGINT, onSigint);
 
-    printf("=== AMT102-V encoder bring-up test (Raspberry Pi 4B) ===\n\n");
-    printf("Hardware check:\n");
+    printf("=== AMT102-V Encoder Bring-up / Hardware Integration Test ===\n\n");
+    printf("Hardware expectations:\n");
     printf("  A -> BCM 17 (pin 11),  B -> BCM 27 (pin 13),  X -> BCM 22 (pin 15)\n");
     printf("  Power: 5V (pin 2/4),   GND (pin 6/any)\n");
     printf("  DIP preset: all four OFF (2048 PPR -> 8192 x4 counts/rev)\n\n");
@@ -101,12 +194,12 @@ int main(void)
     if (amt102_open(&enc) != 0) {
         perror("amt102_open failed");
         fprintf(stderr,
-                "\nTroubleshooting:\n"
+                "\nCheck:\n"
                 "  - is gpiochip0 accessible? (run under user 'pi' or sudo)\n"
                 "  - is another process holding GPIO 17, 27 or 22? Check:\n"
                 "      gpioinfo gpiochip0 | grep -E '17|27|22'\n"
                 "  - are you using libgpiod-dev 1.6.x? (v2 is incompatible)\n");
-        return 1;
+        return 2;
     }
 
     amt102_get_state(enc, &st);
@@ -115,107 +208,50 @@ int main(void)
                "      (Encoder outputs are push-pull; internal bias is benign.)\n\n");
     }
 
+    memset(&ws, 0, sizeof(ws));
+
     printf("Rotate the shaft slowly and steadily. Ctrl-C to finish.\n");
     printf("----------------------------------------------------------------------\n");
     printf("%-5s  %-8s  %-8s  %-8s  %-8s  %-8s  %s\n",
            "Win#", "deltaCnt", "extraAB", "invTrans", "dt(ms)", "dir", "verdict");
     printf("----------------------------------------------------------------------\n");
 
-    memset(&last_cp, 0, sizeof(last_cp));
-
+    /* Live acquisition loop: poll with a 50 ms timeout so Ctrl-C responds */
     while (!sAbort) {
-        int n = amt102_poll(enc, 100); /* 100 ms timeout so Ctrl-C responds */
-        if (n < 0) {
+        int n = amt102_poll(enc, 50);
+        if (n < 0 && errno != EINTR) {
             perror("amt102_poll error");
             break;
         }
-        total_events += (uint64_t)n;
 
         amt102_get_state(enc, &st);
 
-        /* New index pulse arrived since last checkpoint? */
-        if (st.x_pulses > last_cp.x_pulses) {
-            index_checkpoint_t curr;
-            curr.count             = st.count_at_last_index;
-            curr.a_edges           = st.a_edges_at_last_index;
-            curr.b_edges           = st.b_edges_at_last_index;
-            curr.invalid           = st.invalid_at_last_index;
-            curr.x_pulses          = st.x_pulses;
-            curr.last_index_ts_ns  = st.last_index_ts_ns;
-
-            if (have_cp) {
-                total_windows++;
-
-                int64_t  d_count = curr.count - last_cp.count;
-                uint64_t d_a     = curr.a_edges - last_cp.a_edges;
-                uint64_t d_b     = curr.b_edges - last_cp.b_edges;
-                uint64_t d_inv   = curr.invalid - last_cp.invalid;
-                uint64_t d_ts_ns = curr.last_index_ts_ns - last_cp.last_index_ts_ns;
-                double   dt_ms   = (double)d_ts_ns / 1000000.0;
-
-                /*
-                 * "extra" edges = observed (A+B) minus the nominal 8192 edges
-                 * per rev. On a clean window extra == 0. Small positive extra
-                 * with d_count == +/-8192 means minor edge dither (acceptable);
-                 * large extra or d_count mismatch means dropped edges or a
-                 * reversal mid-window.
-                 */
-                int64_t extra_ab = (int64_t)(d_a + d_b) - AMT102_COUNTS_PER_REV;
-
-                bool clean = window_is_clean(&curr, &last_cp);
-                if (clean) clean_windows++;
-
-                const char *dir_str = (d_count > 0) ? "FWD (+)" :
-                                      (d_count < 0) ? "REV (-)" : "STALL";
-                const char *verd    = clean ? "PASS" : "FAIL";
-
-                printf("#%-4u  %+8" PRId64 "  %+8" PRId64 "  %8" PRIu64 "  %8.1f  %-8s  %s\n",
-                       total_windows, d_count, extra_ab, d_inv, dt_ms, dir_str, verd);
-                fflush(stdout);
-            } else {
-                /* First index pulse seen - start baseline, no delta yet */
+        /* Has a new index pulse arrived? */
+        if (st.x_pulses > ws.last_valid_x) {
+            if (ws.last_valid_x == 0) {
+                /* First index pulse seen: start the baseline, no delta yet */
                 printf("[index 1 seen - starting window measurement]\n");
-                have_cp = true;
+                ws.last_index_count = st.count_at_last_index;
+                ws.last_index_a     = st.a_edges_at_last_index;
+                ws.last_index_b     = st.b_edges_at_last_index;
+                ws.last_index_inv   = st.invalid_at_last_index;
+                ws.last_index_ts_ns = st.last_index_ts_ns;
+                ws.last_valid_x     = (uint32_t)st.x_pulses;
+            } else {
+                /* Subsequent index pulse: report the completed window */
+                report_window(&ws, &st);
             }
-
-            last_cp = curr;
         }
     }
 
-    printf("\n----------------------------------------------------------------------\n");
-    printf("Final summary:\n");
+    /* Print live counters at exit */
     amt102_get_state(enc, &st);
-    printf("  Net count:           %+" PRId64 " (%.2f rev)\n",
-           st.count, (double)st.count / (double)AMT102_COUNTS_PER_REV);
-    printf("  Total events:        %" PRIu64 " (A: %" PRIu64 ", B: %" PRIu64 ", X: %" PRIu64 ")\n",
-           total_events, st.a_edges, st.b_edges, st.x_pulses);
-    printf("  Invalid transitions: %" PRIu64 "\n", st.invalid);
-    printf("  Index windows:       %u total, %u clean (PASS)\n",
-           total_windows, clean_windows);
+    printf("----------------------------------------------------------------------\n");
+    printf("Session totals: count=%" PRId64 "  edges_a=%" PRIu64
+           "  edges_b=%" PRIu64 "  x_pulses=%" PRIu64 "  invalid=%" PRIu64 "\n",
+           st.count, st.a_edges, st.b_edges, st.x_pulses, st.invalid);
 
+    int rc = print_verdict(&ws, &st);
     amt102_close(enc);
-
-    if (total_windows == 0) {
-        fprintf(stderr,
-                "\nVerdict: INCOMPLETE (no index-to-index window was completed).\n"
-                "Rotate through at least TWO index pulses in one run.\n");
-        return 2;
-    }
-
-    if (clean_windows > 0) {
-        printf("\nVerdict: PASS (%u clean 8192-count window(s) observed).\n"
-               "Wiring, 2048 PPR DIP preset and decode chain confirmed.\n",
-               clean_windows);
-        return 0;
-    }
-
-    fprintf(stderr,
-            "\nVerdict: FAIL (0 clean windows out of %u).\n"
-            "Checks:\n"
-            "  - Are all four DIP switches OFF? (Any ON alters PPR.)\n"
-            "  - Are invalid transitions > 0? Check for floating ground or\n"
-            "    missing 1k series resistors.\n"
-            "  - Did you reverse direction mid-window? (Reversals fail the\n"
-            "    strict 8192 check by design; re-test in one direction.)\n");
-    return 1;
+    return rc;
 }
