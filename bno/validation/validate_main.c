@@ -23,8 +23,6 @@
  * Usage: ./bin/bno_validate [-o out.csv] [-d seconds]
  */
 
-#define _POSIX_C_SOURCE 200809L
-
 #include <errno.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -43,305 +41,258 @@
 #include "app/realtime.h"
 #include "validation/validate_sensor.h"
 
-#define SERVICE_PERIOD_US   1000      /* 1 kHz service cadence: ~1 ms sleep */
-#define CONSUMER_DIVIDER    10        /* run consumer every 10 ticks = 100 Hz */
-#define WARMUP_DRAIN_MS     10000     /* 10 s motion/warm-up before CSV logging */
-#define DEFAULT_OUT_PATH    "validate.csv"
+#define RT_PRIORITY         90      /* keep in sync with app/main.c */
+#define SETTLE_SEC          0.3     /* service-only drain after start */
+#define LOOP_DT_SEC         0.001   /* 1 kHz service cadence */
+#define LOG_DECIMATION      10      /* 1 kHz / 10 = 100 Hz records */
+#define COUNTS_PER_REV      8192.0  /* 2048 PPR x 4 */
 
-/* Rig facts (placeholders — override with -a / -n) */
-#define DEFAULT_ARM_M       0.0       /* unknown arm length by default */
-#define DEFAULT_NOTES       ""
+/* Placeholders: override in your copy per build */
+#define ARM_LENGTH_M        0.0     /* axis to sensor center (placeholder) */
+#define RUN_NOTES           ""
 
-static volatile sig_atomic_t sRunning = 1;
-static void onSigint(int sig)
+static volatile sig_atomic_t g_stop = 0;
+static void on_signal(int sig)
 {
     (void)sig;
-    sRunning = 0;
+    g_stop = 1;
 }
 
-static uint64_t hostNowNs(void)
+/* Shared encoder snapshot: written by the encoder thread, read by the RT thread. */
+static pthread_mutex_t g_enc_mtx;
+static amt102_state_t  g_enc_snap;
+static volatile int    g_enc_err = 0;
+
+static uint64_t now_ns(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ((uint64_t)ts.tv_sec * 1000000000ULL) +
-           ((uint64_t)ts.tv_nsec);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-/* ------------------------------------------------------------------ */
-/* Encoder polling thread (SCHED_OTHER, priority default)             */
-/* ------------------------------------------------------------------ */
+static int mutex_init_pi(pthread_mutex_t *m)
+{
+    pthread_mutexattr_t a;
+    bool pi = false;
 
-typedef struct {
-    pthread_mutex_t lock;
-    amt102_state_t  st;
-    bool            alive;
-} SharedEncoder_t;
+    if (pthread_mutexattr_init(&a) == 0) {
+        if (pthread_mutexattr_setprotocol(&a, PTHREAD_PRIO_INHERIT) == 0) {
+            pi = true;
+        }
+    }
 
-static SharedEncoder_t sEncShare = {
-    .lock  = PTHREAD_MUTEX_INITIALIZER,
-    .alive = false,
-};
+    int rc = pthread_mutex_init(m, pi ? &a : NULL);
+    pthread_mutexattr_destroy(&a);
+    return rc;
+}
 
-static void *encoderThread(void *arg)
+static void *encoder_thread(void *arg)
 {
     amt102_t *enc = (amt102_t *)arg;
-    amt102_state_t local;
 
-    while (sRunning) {
-        /*
-         * 5 ms poll timeout keeps event queue small (never overflows the
-         * 256-event batch buffer even at peak swing angular velocity).
-         */
-        int n = amt102_poll(enc, 5);
-        if (n < 0 && errno != EINTR) {
-            fprintf(stderr, "sensor_validate: amt102_poll failed: %s\n",
-                    strerror(errno));
+    while (!g_stop) {
+        int n = amt102_poll(enc, 100);
+        if (n < 0) {
+            fprintf(stderr, "\nencoder: event read failed: %s\n", strerror(errno));
+            g_enc_err = 1;
+            g_stop = 1;
             break;
         }
-        amt102_get_state(enc, &local);
 
-        pthread_mutex_lock(&sEncShare.lock);
-        sEncShare.st = local;
-        sEncShare.alive = true;
-        pthread_mutex_unlock(&sEncShare.lock);
+        amt102_state_t st;
+        amt102_get_state(enc, &st);
+        pthread_mutex_lock(&g_enc_mtx);
+        g_enc_snap = st;
+        pthread_mutex_unlock(&g_enc_mtx);
     }
     return NULL;
 }
 
-/* ------------------------------------------------------------------ */
-/* CLI argument parsing                                               */
-/* ------------------------------------------------------------------ */
-
-typedef struct {
-    const char *outPath;
-    unsigned    durationSec;   /* 0 = run until Ctrl-C */
-    double      armLengthM;
-    const char *notes;
-} Args_t;
-
-static bool parseArgs(int argc, char **argv, Args_t *out)
-{
-    out->outPath     = DEFAULT_OUT_PATH;
-    out->durationSec = 0;
-    out->armLengthM  = DEFAULT_ARM_M;
-    out->notes       = DEFAULT_NOTES;
-
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "-o") == 0) {
-            if (i + 1 >= argc) return false;
-            out->outPath = argv[++i];
-        } else if (strcmp(argv[i], "-d") == 0) {
-            if (i + 1 >= argc) return false;
-            char *end;
-            unsigned long v = strtoul(argv[++i], &end, 10);
-            if (*end != '\0' || v == 0) return false;
-            out->durationSec = (unsigned)v;
-        } else if (strcmp(argv[i], "-a") == 0) {
-            if (i + 1 >= argc) return false;
-            char *end;
-            double v = strtod(argv[++i], &end);
-            if (*end != '\0' || v < 0.0) return false;
-            out->armLengthM = v;
-        } else if (strcmp(argv[i], "-n") == 0) {
-            if (i + 1 >= argc) return false;
-            out->notes = argv[++i];
-        } else if (strcmp(argv[i], "-h") == 0 ||
-                   strcmp(argv[i], "--help") == 0) {
-            return false;
-        } else {
-            fprintf(stderr, "unknown option: %s\n", argv[i]);
-            return false;
-        }
-    }
-    return true;
-}
-
-static void printUsage(const char *prog)
+static void usage(const char *prog)
 {
     fprintf(stderr,
-            "usage: %s [-o file.csv] [-d seconds] [-a arm_length_m] "
-            "[-n \"run notes\"]\n"
-            "\n"
-            "  -o file.csv   output path (default: %s)\n"
-            "  -d seconds    capture duration (default: run until Ctrl-C)\n"
-            "  -a meters     arm length from swing axis to IMU center (default: 0.0)\n"
-            "  -n \"notes\"    free-form notes string saved in the CSV header\n",
-            prog, DEFAULT_OUT_PATH);
+            "usage: %s [-o out.csv] [-d seconds]\n"
+            "  -o out.csv    output CSV (default: bno_validate_YYYYMMDD_HHMMSS.csv)\n"
+            "  -d seconds    log duration after settle; 0 = run until Ctrl+C (default 0)\n",
+            prog);
 }
 
-/* ------------------------------------------------------------------ */
-/* Main                                                               */
-/* ------------------------------------------------------------------ */
+static void default_path(char *buf, size_t len)
+{
+    char stamp[16];
+    time_t t = time(NULL);
+    struct tm tmv;
+
+    localtime_r(&t, &tmv);
+    strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &tmv);
+    snprintf(buf, len, "bno_validate_%s.csv", stamp);
+}
 
 int main(int argc, char **argv)
 {
-    Args_t args;
-    if (!parseArgs(argc, argv, &args)) {
-        printUsage(argv[0]);
-        return 1;
+    const char *out_path = NULL;
+    double duration_sec = 0.0;
+    char pathbuf[64];
+    int opt;
+
+    while ((opt = getopt(argc, argv, "o:d:h")) != -1) {
+        switch (opt) {
+        case 'o':
+            out_path = optarg;
+            break;
+        case 'd':
+            duration_sec = strtod(optarg, NULL);
+            if (duration_sec < 0.0) {
+                usage(argv[0]);
+                return 1;
+            }
+            break;
+        default:
+            usage(argv[0]);
+            return (opt == 'h') ? 0 : 1;
+        }
+    }
+    if (!out_path) {
+        default_path(pathbuf, sizeof(pathbuf));
+        out_path = pathbuf;
     }
 
-    signal(SIGINT, onSigint);
-    signal(SIGTERM, onSigint);
+    signal(SIGINT, on_signal);
+    signal(SIGTERM, on_signal);
 
-    printf("=== sensor_validate: synchronized encoder + IMU capture ===\n\n");
-    printf("Configuration:\n");
-    printf("  output CSV:     %s\n", args.outPath);
-    if (args.durationSec > 0) {
-        printf("  duration:       %u s (fixed)\n", args.durationSec);
-    } else {
-        printf("  duration:       indefinite (press Ctrl-C to finish)\n");
-    }
-    printf("  arm length:     %.4f m%s\n", args.armLengthM,
-           (args.armLengthM == 0.0) ? "  [unspecified - set with -a]" : "");
-    if (args.notes[0] != '\0') {
-        printf("  run notes:      %s\n", args.notes);
-    }
-    printf("  cadence:        100 Hz synchronized tick (1 kHz service loop)\n\n");
-
-    /* Step 1: Open the AMT102 encoder via libgpiod */
-    printf("opening AMT102 encoder on GPIO 17 (A), 27 (B), 22 (X)...\n");
     amt102_t *enc = NULL;
     if (amt102_open(&enc) != 0) {
-        perror("error: amt102_open failed");
-        fprintf(stderr,
-                "hint: is another process holding GPIO 17, 27 or 22? "
-                "Check: gpioinfo gpiochip0 | grep -E '17|27|22'\n");
-        return 1;
+        fprintf(stderr, "error: cannot open AMT102 on gpiochip0: %s\n", strerror(errno));
+        fprintf(stderr, "hint: check that lines 17/27/22 are unused (gpioinfo gpiochip0)\n");
+        return 2;
     }
 
-    /* Step 2: Open the BNO085 SH-2 session over SPI */
-    printf("opening BNO085 SH-2 session over SPI @ 3 MHz...\n");
+    if (csv_log_start(out_path, ARM_LENGTH_M, RUN_NOTES) != 0) {
+        fprintf(stderr, "error: cannot open %s: %s\n", out_path, strerror(errno));
+        amt102_close(enc);
+        return 2;
+    }
+
     if (!sensor_validate_start()) {
-        fprintf(stderr,
-                "error: sensor_validate_start failed\n"
-                "hint: is bno_app or another sh2 consumer still running? "
-                "one SPI HAL instance per process\n");
+        fprintf(stderr, "error: sensor_validate_start failed (BNO085/SPI)\n");
+        fprintf(stderr, "hint: is bno_app or another sh2 consumer still running?"
+                        " one HAL instance per process\n");
+        csv_log_stop(NULL);
         amt102_close(enc);
-        return 1;
+        return 2;
     }
 
-    /* Step 3: Open the CSV logger */
-    printf("opening CSV logger: %s...\n", args.outPath);
-    if (csv_log_start(args.outPath, args.armLengthM, args.notes) != 0) {
-        fprintf(stderr, "error: csv_log_start failed: %s\n",
-                strerror(errno));
-        sensor_validate_stop();
-        amt102_close(enc);
-        return 1;
+    if (mutex_init_pi(&g_enc_mtx) != 0) {
+        pthread_mutex_init(&g_enc_mtx, NULL);
+    }
+    memset(&g_enc_snap, 0, sizeof(g_enc_snap));
+
+    printf("bno_validate: csv=%s\n", out_path);
+    printf("encoder AMT102 2048 PPR (8192 cpr) | imu RV+LA+GyroCal @100 Hz (dynamic cal off) | tick 100 Hz (struct v%u)\n",
+           IMU_VALIDATE_STRUCT_VERSION);
+    if (duration_sec > 0.0) {
+        printf("logging %.1f s after %.1f s settle; Ctrl+C stops early\n",
+               duration_sec, SETTLE_SEC);
+    } else {
+        printf("logging until Ctrl+C (%.1f s settle first)\n", SETTLE_SEC);
     }
 
-    /* Step 4: Spawn the encoder polling thread (SCHED_OTHER) BEFORE StartRT */
-    pthread_t encThread;
-    if (pthread_create(&encThread, NULL, encoderThread, enc) != 0) {
-        fprintf(stderr, "error: pthread_create failed: %s\n",
-                strerror(errno));
+    pthread_t enc_tid;
+    if (pthread_create(&enc_tid, NULL, encoder_thread, enc) != 0) {
+        fprintf(stderr, "error: cannot start encoder thread\n");
         csv_log_stop(NULL);
         sensor_validate_stop();
         amt102_close(enc);
-        return 1;
+        return 2;
     }
 
-    /*
-     * Step 5: Elevate THIS thread (only) to real-time priority (SCHED_FIFO 90).
-     * The encoder thread and the logger thread remain SCHED_OTHER, so SD-card
-     * write stalls cannot preempt or perturb the 1 kHz service cadence.
-     */
-    StartRT(90, SERVICE_PERIOD_US);
+    /* Threads exist; now this thread (only) becomes SCHED_FIFO. */
+    if (StartRT(RT_PRIORITY, LOOP_DT_SEC) != 0) {
+        fprintf(stderr, "main: WARNING: StartRT failed; continuing at default scheduling\n");
+    }
 
-    /*
-     * Step 6: Warm-up drain.
-     * Service both sensors for WARMUP_DRAIN_MS (~10 s). The rotation vector
-     * needs ~10 s of motion to converge after a reset under the all-off
-     * dynamic cal policy (observed on this unit; see bno/calibration/readme.md).
-     * The operator can move the fixture gently during this window.
-     */
-    printf("warming up sensors for %d s (move fixture gently to settle RV)...\n",
-           WARMUP_DRAIN_MS / 1000);
-    uint64_t tWarmupEnd = hostNowNs() + (uint64_t)WARMUP_DRAIN_MS * 1000000000ULL;
-    while (sRunning && hostNowNs() < tWarmupEnd) {
+    /* Settle: service the session, do not log yet. */
+    uint64_t t0 = now_ns();
+    while (!g_stop && (now_ns() - t0) < (uint64_t)(SETTLE_SEC * 1e9)) {
         sensor_validate_service();
-        RT_SleepUntil(SERVICE_PERIOD_US);
+        RT_SleepUntil(LOOP_DT_SEC);
     }
+
     sensor_validate_resetSeq();
-    printf("warm-up complete; entering 100 Hz capture loop\n");
-    printf("press Ctrl-C to finish\n\n");
 
-    /*
-     * Step 7: Acquisition loop.
-     * Runs at 1 kHz (~1 ms). Every CONSUMER_DIVIDER ticks (~10 ms = 100 Hz):
-     *   - reads the latest encoder snapshot from the mutex
-     *   - reads the latest ImuValidateSample_t from the SH-2 session
-     *   - captures a fresh CLOCK_MONOTONIC host timestamp
-     *   - pushes the combined row into the csv_log ring
-     */
-    uint32_t tickCount    = 0;
-    uint32_t rowsPushed   = 0;
-    uint64_t tCaptureStart = hostNowNs();
-    uint64_t tCaptureEnd   = (args.durationSec > 0)
-        ? tCaptureStart + (uint64_t)args.durationSec * 1000000000ULL
-        : 0;
+    uint64_t t_log0   = now_ns();
+    uint64_t last_1hz = t_log0;
+    uint64_t ticks    = 0;
 
-    while (sRunning) {
+    amt102_state_t st_prev;
+    pthread_mutex_lock(&g_enc_mtx);
+    st_prev = g_enc_snap;
+    pthread_mutex_unlock(&g_enc_mtx);
+    uint32_t imu_seq_prev = 0;
+
+    unsigned loop = 0;
+    while (!g_stop) {
         sensor_validate_service();
 
-        tickCount++;
-        if ((tickCount % CONSUMER_DIVIDER) == 0) {
+        if (duration_sec > 0.0 &&
+            (now_ns() - t_log0) >= (uint64_t)(duration_sec * 1e9)) {
+            break;
+        }
+
+        if ((loop % LOG_DECIMATION) == 0) {
+            amt102_state_t st;
+            pthread_mutex_lock(&g_enc_mtx);
+            st = g_enc_snap;
+            pthread_mutex_unlock(&g_enc_mtx);
+
             CsvRecord_t rec;
             memset(&rec, 0, sizeof(rec));
+            rec.host_ts_ns      = now_ns();
+            rec.enc_count       = st.count;
+            rec.enc_angle_deg   = (double)st.count * (360.0 / COUNTS_PER_REV);
+            rec.enc_event_ts_ns = st.last_event_ts_ns;
+            rec.enc_x_pulses    = st.x_pulses;
+            rec.enc_invalid     = st.invalid;
+            rec.enc_edges_ab    = st.a_edges + st.b_edges;
 
-            rec.host_ts_ns = hostNowNs();
-
-            /* Snapshot the encoder */
-            pthread_mutex_lock(&sEncShare.lock);
-            amt102_state_t est = sEncShare.st;
-            pthread_mutex_unlock(&sEncShare.lock);
-
-            rec.enc_count        = est.count;
-            rec.enc_angle_deg    = (double)est.count * (360.0 / (double)AMT102_COUNTS_PER_REV);
-            rec.enc_event_ts_ns  = est.last_event_ts_ns;
-            rec.enc_x_pulses     = est.x_pulses;
-            rec.enc_invalid      = est.invalid;
-            rec.enc_edges_ab     = est.a_edges + est.b_edges;
-
-            /* Snapshot the IMU (per-group timestamps preserved) */
-            sensor_validate_getLatestSample(&rec.imu);
-
+            (void)sensor_validate_getLatestSample(&rec.imu);
             rec.drops = csv_log_dropped();
 
-            csv_log_push(&rec);
-            rowsPushed++;
+            (void)csv_log_push(&rec);
+            ticks++;
 
-            /* Live console heartbeat: refresh once per second (every 100 rows) */
-            if ((rowsPushed % 100) == 0) {
-                printf("  [t=%5.1f s] enc=%+8.2f deg (cnt %+" PRId64 ") | "
-                       "rv_yaw=%+6.2f deg (acc %u, err %.2f rad) | "
-                       "rows=%-6u drops=%" PRIu64 "\r",
-                       (double)(rec.host_ts_ns - tCaptureStart) / 1e9,
+            /* Heartbeat once per second */
+            uint64_t t_now = now_ns();
+            if ((t_now - last_1hz) >= 1000000000ull) {
+                int64_t d_enc = st.count - st_prev.count;
+                uint32_t d_imu = rec.imu.seq - imu_seq_prev;
+                st_prev = st;
+                imu_seq_prev = rec.imu.seq;
+
+                double sec = (double)(t_now - t_log0) / 1e9;
+                printf("[t=%5.1fs] enc=%+8.2f deg (d_enc=%+5" PRId64 ") | imu yaw=%+6.2f deg (d_imu=%3u) rv_acc=%u err=%.2f rad | drops=%" PRIu64 "\n",
+                       sec,
                        rec.enc_angle_deg,
-                       rec.enc_count,
-                       (double)(rec.imu.yaw * 57.29577951308232),
+                       d_enc,
+                       rec.imu.yaw * 57.29577951308232,
+                       d_imu,
                        rec.imu.rv.status,
-                       (double)rec.imu.rvErrRad,
-                       rowsPushed,
+                       rec.imu.rvErrRad,
                        rec.drops);
                 fflush(stdout);
-            }
-
-            if (tCaptureEnd > 0 && hostNowNs() >= tCaptureEnd) {
-                printf("\nfixed duration (%u s) elapsed\n", args.durationSec);
-                break;
+                last_1hz = t_now;
             }
         }
 
-        RT_SleepUntil(SERVICE_PERIOD_US);
+        RT_SleepUntil(LOOP_DT_SEC);
+        loop++;
     }
 
-    printf("\nstopping capture; closing sessions...\n");
+    printf("\nsensor_validate: stopping...\n");
 
     /* Stop threads and tear down */
-    sRunning = 0;
-    pthread_join(encThread, NULL);
+    g_stop = 1;
+    pthread_join(enc_tid, NULL);
 
     CsvLogStats_t stats;
     csv_log_stop(&stats);
@@ -349,15 +300,11 @@ int main(int argc, char **argv)
     sensor_validate_stop();
     amt102_close(enc);
 
-    printf("\n=== Capture complete ===\n");
-    printf("  CSV file:         %s\n", args.outPath);
-    printf("  Rows written:     %" PRIu64 "\n", stats.records_written);
-    printf("  Ring drops:       %" PRIu64 "\n", stats.records_dropped);
-    printf("  Duration:         %.3f s\n", stats.duration_sec);
-    if (stats.duration_sec > 0.0) {
-        printf("  Effective rate:   %.1f Hz\n",
-               (double)stats.records_written / stats.duration_sec);
-    }
-    printf("========================\n");
-    return 0;
+    printf("done: records=%" PRIu64 " drops=%" PRIu64 " duration=%.3f s (%.2f Hz)\n",
+           stats.records_written,
+           stats.records_dropped,
+           stats.duration_sec,
+           stats.duration_sec > 0 ? (double)stats.records_written / stats.duration_sec : 0.0);
+
+    return (g_enc_err != 0) ? 1 : 0;
 }
