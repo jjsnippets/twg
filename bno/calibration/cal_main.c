@@ -2,23 +2,20 @@
  * calibration/cal_main.c — Guided BNO085 dynamic calibration CLI.
  *
  * Runs the guided calibration flow:
- *   1. Opens an SH2 session via cal_sensor.c.
+ *   1. Opens an SH2 session via sensor_calibrate.c (cal_sensor.c).
  *   2. Enables ME dynamic calibration for accelerometer, gyro, and
  *      magnetometer via sh2_setCalConfig(0x07).
  *   3. Guides the user through the motions required by the Hillcrest
  *      algorithms:
- *        - Accel: 4-6 stationary orientations (~1 s each, e.g. on
- *                 each face of a cube).
- *        - Gyro:  Stationary rest (~2-3 s) on a stable surface.
- *        - Mag:   Figure-8 / rotation in all 3 axes until status
- *                 reaches 3 (High).
- *   4. Freezes all dynamic calibration via sh2_setCalConfig(0x00)
- *      BEFORE saving to flash. This is critical: the Hillcrest ME
- *      firmware requires cal config to be 0 at save time so that the
- *      saved DCD record stores a static calibration snapshot (and
- *      avoids the vendor-example bug where SparkFun Example_20
- *      passed 0x01, leaving the gyro flag cleared in DCD).
- *   5. Persists the calibration to flash via sh2_saveDcdNow().
+ *        - Accel: 6 stationary orientations (~2 s each, on each face
+ *                 of a cube).
+ *        - Gyro:  Stationary rest (~2-3 s) on a flat surface.
+ *        - Mag:   Full 180-degree swing patterns in yaw, pitch, and
+ *                 roll (repeat until status reaches 3 / High).
+ *   4. Holds still at rest to let the hub's periodic DCD snapshot
+ *      capture the good state, and confirms accuracy does not
+ *      degrade before saving.
+ *   5. Saves to the DCD flash record via sh2_saveDcdNow().
  *   6. Verifies the saved state: resets the sensor, queries the DCD
  *      status, and confirms accuracy bits remain valid across reboot.
  *
@@ -81,6 +78,11 @@
 
 #define NEED_VERIFY (NEED_ACCEL | NEED_MAG)
 
+#define MAG_MIN_SWING_MS    8000
+#define VERIFY_MOTION_MS    10000
+#define MAX_SAVE_ATTEMPTS   3
+#define MAX_HEADING_ERR_RAD 0.35f
+
 typedef enum {
     PH_STARTUP = 0,
     PH_ACCEL,
@@ -134,6 +136,28 @@ static const char *accName(uint8_t acc)
     }
 }
 
+static void csvOpen(void)
+{
+    char fname[64];
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    strftime(fname, sizeof(fname), "cal_%Y%m%d_%H%M%S.csv", &tm);
+
+    sCsvFp = fopen(fname, "w");
+    if (!sCsvFp) {
+        fprintf(stderr, "warning: cannot open %s for writing: %s\n",
+                fname, strerror(errno));
+        return;
+    }
+    fprintf(sCsvFp,
+            "# bno_cal trajectory log\n"
+            "# host_us,phase,accel_acc,gyro_acc,mag_acc,rv_acc,"
+            "rv_err_rad,mag_x_uT,mag_y_uT,mag_z_uT\n");
+    fflush(sCsvFp);
+    printf("logging calibration trajectory to %s\n", fname);
+}
+
 static void csvWrite(const CalSample_t *s, CalPhase_t p)
 {
     if (!sCsvFp) return;
@@ -148,6 +172,14 @@ static void csvWrite(const CalSample_t *s, CalPhase_t p)
             (double)s->magX_uT,
             (double)s->magY_uT,
             (double)s->magZ_uT);
+}
+
+static void csvClose(void)
+{
+    if (sCsvFp) {
+        fclose(sCsvFp);
+        sCsvFp = NULL;
+    }
 }
 
 static bool accurateEnough(const CalSample_t *s, unsigned need)
@@ -374,38 +406,117 @@ static int doCheck(uint8_t mask, bool haveMask)
 /* Guided calibration flow                                             */
 /* ------------------------------------------------------------------ */
 
+static int magPhase(void)
+{
+    for (unsigned round = 1; round <= 5; ++round) {
+        int rc;
+
+        printf("round %u: hold the device in hand and perform FULL\n"
+               "swing patterns: rotate it ~180 degrees and back about\n"
+               "EACH axis in turn - roll it over, pitch it over, then\n"
+               "yaw it left and right (~2 s per swing, per CEVA 1000-\n"
+               "4044). Keep repeating patterns for the whole round.\n",
+               round);
+        if (!promptEnter("start swinging (device in hand)")) return 2;
+
+        /* Minimum fresh-motion window: two full roll/pitch/yaw
+         * patterns, even if the accuracy gate is already met from a
+         * previously saved DCD. */
+        if (!serviceFor(MAG_MIN_SWING_MS, PH_MAG, true)) return 2;
+
+        rc = waitAccurateSustained(NEED_MAG, 30, PH_MAG, true);
+        if (rc == 2) return 2;
+        if (rc == 0) return 0;
+
+        printf("mag accuracy not sustained at %d yet; do another round "
+               "of full patterns.\n",
+               ACC_GOAL);
+    }
+    return 1;
+}
+
 static int doCalibrate(void)
 {
-    char csvFilename[64];
-    time_t rawtime;
-    struct tm *timeinfo;
+    static const char *const accelPositions[6] = {
+        "1/6: device flat, label side up",
+        "2/6: device flat, label side down",
+        "3/6: device resting on its left edge",
+        "4/6: device resting on its right edge",
+        "5/6: device resting on its top edge",
+        "6/6: device resting on its bottom edge",
+    };
     CalSample_t s;
     uint8_t calMask;
-    int rc;
+    bool saved = false;
 
-    time(&rawtime);
-    timeinfo = localtime(&rawtime);
-    strftime(csvFilename, sizeof(csvFilename),
-             "bno_cal_%Y%m%d_%H%M%S.csv", timeinfo);
+    printf("=== BNO085 guided calibration ===\n\n");
+    printf("Before starting:\n");
+    printf("  - move away from desks, PCs, monitors, cables and magnets\n");
+    printf("    (the magnetometer bakes this environment into the DCD)\n");
+    printf("  - calibrate the device in its final mounting, in the area\n");
+    printf("    where it will be deployed\n");
+    printf("  - make sure bno_app and the validation binaries are stopped\n");
+    printf("  - abort any time: 'q' at a prompt or Ctrl-C\n\n");
 
-    sCsvFp = fopen(csvFilename, "w");
-    if (sCsvFp) {
-        fprintf(sCsvFp, "# bno_cal log started %s", asctime(timeinfo));
-        fprintf(sCsvFp, "# timestamp_us,phase,accel_acc,gyro_acc,mag_acc,rv_acc,rv_err_rad,mag_x,mag_y,mag_z\n");
-    }
+    csvOpen();
 
-    printf("====================================================\n");
-    printf("  BNO085 Dynamic Calibration (bno_cal)\n");
-    printf("====================================================\n\n");
-
+    printf("opening SH-2 session...\n");
     if (!cal_sensor_start()) {
         reportOpenFailure();
-        if (sCsvFp) fclose(sCsvFp);
+        csvClose();
         return EXIT_ERROR;
     }
 
-    /* Phase 1: Enable dynamic calibration for Accel, Gyro, Mag */
+    /* Step 1: enable dynamic calibration for all three sensors. */
     calMask = SH2_CAL_ACCEL | SH2_CAL_GYRO | SH2_CAL_MAG;
     if (sh2_setCalConfig(calMask) != SH2_OK ||
         sh2_getCalConfig(&calMask) != SH2_OK) {
-        fprintf(stderr, "error: failed to configure dynamic calibration\\n\");\n        cal_sensor_stop();\n        if (sCsvFp) fclose(sCsvFp);\n        return EXIT_ERROR;\n    }\n    printCalConfig(calMask);\n\n    /* Phase 2: Gyro calibration */\n    printf(\"\\n[Phase 1/3] Gyroscope calibration\\n\");\n    printf(\"Place the sensor stationary on a stable flat surface.\\n\");\n    if (!promptEnter(\"Ready to calibrate gyroscope?\")) goto abort;\n\n    printf(\"Calibrating gyro (keep stationary)...\");\n    fflush(stdout);\n    rc = waitAccurateSustained(NEED_GYRO, 15, PH_GYRO, true);\n    if (rc == 2) goto abort;\n    if (rc != 0) {\n        printf(\"warning: gyro accuracy did not reach %d within timeout\\n\", ACC_GOAL);\n    } else {\n        printf(\"Gyroscope calibration settled.\\n\");\n    }\n\n    /* Phase 3: Accelerometer calibration */\n    printf(\"\\n[Phase 2/3] Accelerometer calibration\\n\");\n    printf(\"Slowly rotate the device to 4-6 distinct stationary orientations\\n\");\n    printf(\"(hold each orientation still for 1-2 seconds, like faces of a cube).\\n\");\n    if (!promptEnter(\"Ready to calibrate accelerometer?\")) goto abort;\n\n    rc = waitAccurateSustained(NEED_ACCEL, 30, PH_ACCEL, true);\n    if (rc == 2) goto abort;\n    if (rc != 0) {\n        printf(\"warning: accelerometer accuracy did not reach %d within timeout\\n\", ACC_GOAL);\n    } else {\n        printf(\"Accelerometer calibration settled.\\n\");\n    }\n\n    /* Phase 4: Magnetometer calibration */\n    printf(\"\\n[Phase 3/3] Magnetometer calibration\\n\");\n    printf(\"Slowly rotate the device in figure-8 motions across all 3 axes.\\n\");\n    if (!promptEnter(\"Ready to calibrate magnetometer?\")) goto abort;\n\n    rc = waitAccurateSustained(NEED_MAG, 45, PH_MAG, true);\n    if (rc == 2) goto abort;\n    if (rc != 0) {\n        printf(\"warning: magnetometer accuracy did not reach %d within timeout\\n\", ACC_GOAL);\n    } else {\n        printf(\"Magnetometer calibration settled.\\n\");\n    }\n\n    /* Phase 5: Hold steady before snapshot */\n    printf(\"\\nCalibration motions complete. Hold the device stationary...\\n\");\n    serviceFor(3000, PH_HOLD, true);\n\n    /* Phase 6: Freeze dynamic cal before saving to flash */\n    printf(\"Freezing dynamic calibration (mask 0x00) before persisting to flash...\\n\");\n    if (sh2_setCalConfig(0) != SH2_OK) {\n        fprintf(stderr, \"error: failed to clear dynamic cal config\\n\");\n        cal_sensor_stop();\n        if (sCsvFp) fclose(sCsvFp);\n        return EXIT_ERROR;\n    }\n\n    /* Phase 7: Persist calibration to flash */\n    printf(\"Persisting calibration to DCD flash record...\\n\");\n    if (sh2_saveDcdNow() != SH2_OK) {\n        fprintf(stderr, \"error: sh2_saveDcdNow failed\\n\");\n        cal_sensor_stop();\n        if (sCsvFp) fclose(sCsvFp);\n        return EXIT_ERROR;\n    }\n    printf(\"Calibration successfully saved to flash.\\n\");\n\n    /* Phase 8: Verify across reset */\n    printf(\"Resetting sensor to verify saved calibration reload...\\n\");\n    cal_sensor_stop();\n    usleep(300000);\n\n    if (!cal_sensor_start()) {\n        fprintf(stderr, \"error: re-opening session failed after reset\\n\");\n        if (sCsvFp) fclose(sCsvFp);\n        return EXIT_ERROR;\n    }\n\n    sh2_setCalConfig(0);\n    printf(\"Verifying restored calibration across reset...\\n\");\n    rc = waitAccurateSustained(NEED_VERIFY, 10, PH_VERIFY, true);\n\n    if (cal_sensor_getLatestSample(&s)) {\n        printf(\"\\nPost-reset verification summary:\\n\");\n        printVerdict(&s);\n    }\n    cal_sensor_stop();\n\n    if (sCsvFp) {\n        fclose(sCsvFp);\n        printf(\"\\nLogged calibration trajectory to %s\\n\", csvFilename);\n    }\n\n    if (rc == 0 && isFlightReady(&s, 0)) {\n        printf(\"RESULT: SUCCESS - BNO085 calibrated and verified.\\n\");\n        return EXIT_OK;\n    }\n\n    printf(\"RESULT: WARNING - verification did not reach target accuracy.\\n\");\n    return EXIT_NOT_CALIBRATED;\n\nabort:\n    printf(\"\\nCalibration aborted by user.\\n\");\n    cal_sensor_stop();\n    if (sCsvFp) fclose(sCsvFp);\n    return EXIT_ABORT;\n}\n\nint main(int argc, char **argv)\n{\n    bool checkOnly = false;\n    bool haveMask = false;\n    uint8_t mask = 0;\n\n    for (int i = 1; i < argc; i++) {\n        if (strcmp(argv[i], \"--check\") == 0) {\n            checkOnly = true;\n        } else if (strcmp(argv[i], \"--mask\") == 0) {\n            if (i + 1 >= argc) {\n                fprintf(stderr, \"error: --mask needs a value, e.g. \"\n                                \"--mask 0x05\\n\");\n                return EXIT_ERROR;\n            }\n            char *endp = NULL;\n            unsigned long tmp = strtoul(argv[++i], &endp, 0);\n            if (!endp || *endp != '\\0' || tmp > 0x07) {\n                fprintf(stderr, \"error: --mask value out of range \"\n                                \"(0x00 to 0x07): '%s'\\n\", argv[i]);\n                return EXIT_ERROR;\n            }\n            mask = (uint8_t)tmp;\n            haveMask = true;\n        } else {\n            fprintf(stderr, \"error: unrecognized option '%s'\\n\"\n                            \"usage: bno_cal [--check [--mask 0xNN]]\\n\",\n                    argv[i]);\n            return EXIT_ERROR;\n        }\n    }\n\n    if (haveMask && !checkOnly) {\n        fprintf(stderr, \"error: --mask is only valid together with \"\n                        \"--check\\n\");\n        return EXIT_ERROR;\n    }\n\n    signal(SIGINT, onSigint);\n    return checkOnly ? doCheck(mask, haveMask) : doCalibrate();\n}\n
+        fprintf(stderr, "error: sh2_setCalConfig/getCalConfig failed\n");
+        goto fail;
+    }
+    printCalConfig(calMask);
+
+    /* Step 2: accelerometer — six unique resting orientations. */
+    printf("\n--- ACCELEROMETER: six resting orientations ---\n");
+    for (unsigned round = 1; round <= 3; ++round) {
+        if (round > 1) {
+            printf("accelerometer accuracy below %d after round %u; "
+                   "repeating the six positions\n",
+                   ACC_GOAL, round - 1);
+        }
+        for (int i = 0; i < 6; ++i) {
+            if (!promptEnter(accelPositions[i])) goto abort;
+            if (!serviceFor(2000, PH_ACCEL, true)) goto abort;
+        }
+        {
+            int rc = waitAccurateSustained(NEED_ACCEL, 10, PH_ACCEL, true);
+            if (rc == 2) goto abort;
+            if (rc == 0) break;
+            if (round == 3) {
+                printf("accelerometer accuracy did not reach %d; "
+                       "continuing (it may settle during later phases)\n",
+                       ACC_GOAL);
+            }
+        }
+    }
+
+    /* Step 3: gyroscope — rest. */
+    printf("\n--- GYROSCOPE: keep the device stationary on a surface ---\n");
+    if (!promptEnter("place the device flat and do not touch it")) goto abort;
+    {
+        int rc = waitAccurateSustained(NEED_GYRO, 15, PH_GYRO, true);
+        if (rc == 2) goto abort;
+        if (rc == 1) {
+            printf("gyro accuracy did not reach %d; continuing "
+                   "(informational)\n",
+                   ACC_GOAL);
+        }
+    }
+
+    /* Steps 4 + 5: magnetometer swings, then hold + save. */
+    for (unsigned attempt = 1; attempt <= MAX_SAVE_ATTEMPTS && !saved;
+         ++attempt) {
+        int rc;
+
+        printf("\n--- MAGNETOMETER: 180-degree swing patterns "
+               "(attempt %u/%u) ---\\n\",\n               attempt, MAX_SAVE_ATTEMPTS);\n        rc = magPhase();\n        if (rc == 2) goto abort;\n        if (rc == 1) {\n            fprintf(stderr,\n                    \"error: magnetometer accuracy did not sustain at %d; \"\n                    \"check the magnetic environment and retry\\n\",\n                    ACC_GOAL);\n            goto fail;\n        }\n\n        /* Hold still so the hub's 5-second RAM snapshots all land\n         * inside a good window, then confirm the state is still good\n         * before saving. */\n        printf(\"\\n--- SAVE: hold the device still in its resting \"\n               \"position (~10 s) ---\\n\");\n        if (!serviceFor(10000, PH_HOLD, false)) goto abort;\n\n        rc = waitAccurateSustained(NEED_VERIFY, 5, PH_HOLD, false);\n        if (rc == 2) goto abort;\n        if (rc == 1) {\n            if (cal_sensor_getLatestSample(&s)) {\n                printf(\"accuracy degraded at rest (acc=%u mag=%u); NOT \"\n                       \"saving this state - swing again\\n\",\n                       s.accelAccuracy, s.magAccuracy);\n            }\n            continue;\n        }\n\n        {\n            int src = sh2_saveDcdNow();\n            if (src != SH2_OK) {\n                printf(\"save DCD failed (rc=%d); holding 5 s more and \"\n                       \"retrying once...\\n\",\n                       src);\n                if (!serviceFor(5000, PH_HOLD, false)) goto abort;\n                src = sh2_saveDcdNow();\n            }\n            if (src != SH2_OK) {\n                fprintf(stderr,\n                        \"error: sh2_saveDcdNow failed (rc=%d); \"\n                        \"DCD NOT saved\\n\",\n                        src);\n                goto fail;\n            }\n        }\n        printf(\"DCD saved to flash (FRS record 0x1F1F).\\n\");\n        saved = true;\n    }\n    if (!saved) {\n        fprintf(stderr,\n                \"error: calibration state kept degrading at rest after \"\n                \"%u attempts; nothing saved\\n\",\n                MAX_SAVE_ATTEMPTS);\n        goto fail;\n    }\n\n    if (sh2_setCalConfig(0) != SH2_OK) {\n        printf(\"note: end-of-session sh2_setCalConfig(0) failed \"\n               \"(cosmetic only)\\n\");\n    }\n\n    /* Step 6: verify across reset */\n    printf(\"\\n--- VERIFY: reopening session (chip reset, DCD reload) ---\\n\");\n    cal_sensor_stop();\n    if (!cal_sensor_start()) {\n        fprintf(stderr, \"error: session reopen failed during verification\\n\");\n        csvClose();\n        return EXIT_ERROR;\n    }\n    if (sh2_setCalConfig(0) != SH2_OK) {\n        fprintf(stderr, \"error: sh2_setCalConfig failed during \"\n                        \"verification\\n\");\n        goto fail;\n    }\n\n    printf(\"motion window: slowly rotate the device in yaw back and\\n\"\n           \"forth for ~%u s (like the glider moving) and watch the rv \"\n           \"line...\\n\",\n           VERIFY_MOTION_MS / 1000);\n    if (!promptEnter(\"hold the device, ready to move it\")) goto abort;\n    if (!serviceFor(VERIFY_MOTION_MS, PH_VERIFY, true)) goto abort;\n\n    printf(\"now set the device down stationary; watching accuracy for \"\n           \"up to 20 s (needs %d s of good readings)...\\n\",\n           SUSTAIN_MS / 1000);\n    {\n        int rc = waitAccurateSustained(NEED_VERIFY, 20, PH_VERIFY, true);\n        if (rc == 2) goto abort;\n        if (rc == 1) {\n            if (cal_sensor_getLatestSample(&s)) printVerdict(&s);\n            fprintf(stderr,\n                    \"error: accuracy did not recover after DCD reload; \"\n                    \"calibration may not have persisted\\n\");\n            cal_sensor_stop();\n            csvClose();\n            return EXIT_NOT_CALIBRATED;\n        }\n    }\n\n    if (cal_sensor_getLatestSample(&s)) {\n        printVerdict(&s);\n        if (!isFlightReady(&s, 0)) {\n            printf(\"note: rotation vector reads %u / %.2f rad \"\n                   \"(expected >= %d and <= %.2f rad) - probe other \"\n                   \"configs with 'bno_cal --check --mask 0xNN' before \"\n                   \"relying on RV status in flight.\\n\",\n                   s.rvAccuracy, (double)s.rvErrRad, ACC_GOAL,\n                   (double)MAX_HEADING_ERR_RAD);\n            cal_sensor_stop();\n            csvClose();\n            return EXIT_NOT_CALIBRATED;\n        }\n    }\n    cal_sensor_stop();\n    csvClose();\n    printf(\"RESULT: CALIBRATED AND VERIFIED (exit 0)\\n\");\n    return EXIT_OK;\n\nabort:\n    printf(\"\\nbno_cal: aborted by user (exit 2)\\n\");\n    cal_sensor_stop();\n    csvClose();\n    return EXIT_ABORT;\n\nfail:\n    cal_sensor_stop();\n    csvClose();\n    return EXIT_ERROR;\n}\n\nint main(int argc, char **argv)\n{\n    bool checkOnly = false;\n    bool haveMask = false;\n    uint8_t mask = 0;\n    unsigned long tmp;\n\n    for (int i = 1; i < argc; ++i) {\n        if (strcmp(argv[i], \"--check\") == 0) {\n            checkOnly = true;\n        } else if (strcmp(argv[i], \"--mask\") == 0) {\n            if (i + 1 >= argc) {\n                fprintf(stderr, \"error: --mask needs a value, e.g. \"\n                                \"--mask 0x05\\n\");\n                return EXIT_ERROR;\n            }\n            tmp = strtoul(argv[++i], NULL, 0);\n            if (tmp > 0xFF) {\n                fprintf(stderr, \"error: --mask value out of range \"\n                                \"(0x00-0xFF)\\n\");\n                return EXIT_ERROR;\n            }\n            mask = (uint8_t)tmp;\n            haveMask = true;\n        } else {\n            fprintf(stderr,\n                    \"usage: bno_cal [--check [--mask 0xNN]]\\n\");\n            return EXIT_ERROR;\n        }\n    }\n\n    if (haveMask && !checkOnly) {\n        fprintf(stderr, \"error: --mask is only valid together with \"\n                        \"--check\\n\");\n        return EXIT_ERROR;\n    }\n\n    signal(SIGINT, onSigint);\n\n    return checkOnly ? doCheck(mask, haveMask) : doCalibrate();\n}\n
