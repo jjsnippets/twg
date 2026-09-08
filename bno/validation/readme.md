@@ -129,8 +129,8 @@ Runtime structure:
   timestamping happen in kernel interrupt context, and the user-space
   thread only drains a kernel-buffered queue.
 - **Calibration policy:** `sh2_setCalConfig(0)` at session start;
-  `sensor_validate` flies on the saved DCD only, mirroring `bno_app`
-  (see `../calibration/readme.md`).
+  `sensor_validate` flies on the saved DCD only with all dynamic
+  calibration disabled, mirroring `bno_app` (see `../calibration/readme.md`).
 - **Settle then seq reset:** after startup there is a 0.3 s service-only
   drain, then `sensor_validate_resetSeq()` zeroes the decode counter —
   same contract as `sensor_reader_resetSeq()` in `bno_app`. Logged `seq`
@@ -163,8 +163,9 @@ analysis is by timestamp, never by row position.
 | `enc_invalid` | — | illegal quadrature transitions since open |
 | `enc_edges_ab` | — | A+B edge events since open |
 | `rv_sensor_ts_us` / `rv_host_ts_ns` / `rv_seq` | µs / ns / – | latest rotation-vector report: device stamp, host decode time, device per-sensor sequence (mod 256) |
+| `rv_qw`, `rv_qx`, `rv_qy`, `rv_qz` | — | raw rotation vector unit quaternion ($w$ real, $x=i$, $y=j$, $z=k$) |
 | `yaw`, `pitch`, `roll` | rad | orientation from the RV quaternion (`euler.c` convention) |
-| `rv_accuracy` | rad | RV accuracy estimate; π = unreliable |
+| `rv_accuracy` | rad | RV accuracy estimate (`rvErrRad`); π = unreliable |
 | `acc_sensor_ts_us` / `acc_host_ts_ns` / `acc_seq` | µs / ns / – | latest linear-acceleration report metadata |
 | `ax`, `ay`, `az` | m/s² | linear acceleration |
 | `gyr_sensor_ts_us` / `gyr_host_ts_ns` / `gyr_seq` | µs / ns / – | latest calibrated-gyro report metadata |

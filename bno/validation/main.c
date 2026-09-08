@@ -189,7 +189,7 @@ int main(int argc, char **argv)
     memset(&g_enc_snap, 0, sizeof(g_enc_snap));
 
     printf("sensor_validate: csv=%s\n", out_path);
-    printf("encoder AMT102 2048 PPR (8192 cpr) | imu RV+LA+GyroCal @100 Hz | tick 100 Hz (struct v%u)\n",
+    printf("encoder AMT102 2048 PPR (8192 cpr) | imu RV+LA+GyroCal @100 Hz (dynamic cal off) | tick 100 Hz (struct v%u)\n",
            IMU_VALIDATE_STRUCT_VERSION);
     if (duration_sec > 0.0) {
         printf("logging %.1f s after %.1f s settle; Ctrl+C stops early\n",
