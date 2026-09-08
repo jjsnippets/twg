@@ -53,8 +53,7 @@ static uint64_t now_ns(void)
 /* Meta events (fls ready, resets, ...): unused here, same as the app. */
 static void asyncEventCallback(void *cookie, sh2_AsyncEvent_t *pEvent)
 {
-    (void)cookie;
-    (void)pEvent;
+    (void)cookie;\n    (void)pEvent;
 }
 
 static void sensorCallback(void *cookie, sh2_SensorEvent_t *pEvent)
@@ -82,6 +81,10 @@ static void sensorCallback(void *cookie, sh2_SensorEvent_t *pEvent)
         sLatest.rv.seq          = seq;
         sLatest.rv.report_seq   = value.sequence;
         sLatest.rv.status       = value.status;
+        sLatest.rv_qw      = rv->real;
+        sLatest.rv_qx      = rv->i;
+        sLatest.rv_qy      = rv->j;
+        sLatest.rv_qz      = rv->k;
         sLatest.yaw        = q_to_yaw(rv->real, rv->i, rv->j, rv->k);
         sLatest.pitch      = q_to_pitch(rv->real, rv->i, rv->j, rv->k);
         sLatest.roll       = q_to_roll(rv->real, rv->i, rv->j, rv->k);
@@ -170,13 +173,6 @@ bool sensor_validate_start(void)
      * evidence describes the config the acquisition binary runs.
      * The enable bits are RAM-only and revert to chip defaults at
      * every reset, so every sh2 consumer must set its own policy.
-     *
-     * Note: under this all-off policy the BNO085 reports the gyro
-     * status bit as 0 (unreliable) by design — the real-time ZRO
-     * estimator is halted — while the saved DCD keeps bias-correcting
-     * the gyro data. A gyro status of 0 in the CSV is therefore
-     * expected, not a fault; judge readiness from the rotation
-     * vector's status byte and rvErrRad instead.
      */
     if (sh2_setCalConfig(0) != SH2_OK) {
         sh2_close();

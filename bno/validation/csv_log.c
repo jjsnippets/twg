@@ -35,7 +35,7 @@
 static const char CSV_COLUMNS[] =
     "host_ts_ns,enc_count,enc_angle_deg,enc_event_ts_ns,enc_x_pulses,"
     "enc_invalid,enc_edges_ab,"
-    "rv_sensor_ts_us,rv_host_ts_ns,rv_seq,yaw,pitch,roll,rv_accuracy,"
+    "rv_sensor_ts_us,rv_host_ts_ns,rv_seq,rv_qw,rv_qx,rv_qy,rv_qz,yaw,pitch,roll,rv_accuracy,"
     "acc_sensor_ts_us,acc_host_ts_ns,acc_seq,ax,ay,az,"
     "gyr_sensor_ts_us,gyr_host_ts_ns,gyr_seq,gx,gy,gz,"
     "valid_mask,drops";
@@ -98,7 +98,7 @@ static void write_header(double arm_len_m, const char *notes)
     fprintf(S.fp, "# notes: %s\n", (notes && notes[0]) ? notes : "none");
     fprintf(S.fp, "# clocks: host_ts_ns/*_host_ts_ns/enc_event_ts_ns = CLOCK_MONOTONIC ns"
                  " (kernel event stamps, same domain); *_sensor_ts_us = BNO085 device stamps\n");
-    fprintf(S.fp, "# units: enc_angle_deg = deg; yaw/pitch/roll/rv_accuracy = rad;"
+    fprintf(S.fp, "# units: enc_angle_deg = deg; rv_qw..rv_qz = unit quat; yaw/pitch/roll/rv_accuracy = rad;"
                  " ax..az = m/s^2; gx..gz = rad/s\n");
     fprintf(S.fp, "# *_seq = device per-sensor rolling sequence (mod 256)\n");
     fprintf(S.fp, "# enc_angle_deg is continuous (unwrapped): enc_count * 360/8192\n");
@@ -110,7 +110,7 @@ static void write_record(const CsvRecord_t *r)
 {
     fprintf(S.fp,
         "%" PRIu64 ",%" PRId64 ",%.4f,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
-        "%" PRIu64 ",%" PRIu64 ",%u,%.6f,%.6f,%.6f,%.6f,"
+        "%" PRIu64 ",%" PRIu64 ",%u,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
         "%" PRIu64 ",%" PRIu64 ",%u,%.6f,%.6f,%.6f,"
         "%" PRIu64 ",%" PRIu64 ",%u,%.6f,%.6f,%.6f,"
         "%u,%" PRIu64 "\n",
@@ -124,6 +124,10 @@ static void write_record(const CsvRecord_t *r)
         r->imu.rv.sensor_ts_us,
         r->imu.rv.host_ts_ns,
         (unsigned)r->imu.rv.report_seq,
+        r->imu.rv_qw,
+        r->imu.rv_qx,
+        r->imu.rv_qy,
+        r->imu.rv_qz,
         r->imu.yaw,
         r->imu.pitch,
         r->imu.roll,
@@ -262,9 +266,9 @@ void csv_log_stop(CsvLogStats_t *out)
         S.stop_ns = now_ns();
         S.duration_sec =
             (S.stop_ns >= S.start_ns) ? (double)(S.stop_ns - S.start_ns) / 1e9 : 0.0;
-        fprintf(S.fp, "# records: %" PRIu64 "\n", S.written);
-        fprintf(S.fp, "# dropped: %" PRIu64 "\n", S.dropped);
-        fprintf(S.fp, "# duration_sec: %.3f\n", S.duration_sec);
+        fprintf(S.fp, "# records: %\" PRIu64 \"\n\", S.written);
+        fprintf(S.fp, "# dropped: %\" PRIu64 \"\n\", S.dropped);
+        fprintf(S.fp, "# duration_sec: %.3f\n\", S.duration_sec);
         fflush(S.fp);
         fsync(fileno(S.fp));
         fclose(S.fp);

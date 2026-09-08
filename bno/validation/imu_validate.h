@@ -18,7 +18,7 @@
 
 #include <stdint.h>
 
-#define IMU_VALIDATE_STRUCT_VERSION 2u
+#define IMU_VALIDATE_STRUCT_VERSION 3u
 
 /* validMask bits — same meanings as app/imu_sample.h */
 #define IMU_VALIDATE_VALID_RV    (1u << 0)
@@ -45,6 +45,10 @@ typedef struct {
 
     /* Rotation vector (SH2_ROTATION_VECTOR) */
     ImuGroupMeta_t rv;
+    float rv_qw;            /* quaternion w (real component) */
+    float rv_qx;            /* quaternion x (i component) */
+    float rv_qy;            /* quaternion y (j component) */
+    float rv_qz;            /* quaternion z (k component) */
     float yaw;              /* rad */
     float pitch;            /* rad */
     float roll;             /* rad */

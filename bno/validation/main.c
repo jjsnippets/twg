@@ -19,13 +19,6 @@
  * directory. Replaces bno_app while running: one SPI HAL instance
  * per process.
  *
- * Note: sensor_validate mirrors bno_app's all-off calibration policy,
- * under which the BNO085 reports the gyro status bit as 0
- * (unreliable) by design (the ZRO estimator is halted; the saved DCD
- * still bias-corrects the data). A gyro status of 0 in the CSV is
- * expected, not a fault — judge RV health from rv_accuracy /
- * rv_err_rad instead.
- *
  * Build: make validate   (validation/Makefile)
  * Usage: ./bin/sensor_validate [-o out.csv] [-d seconds]
  */
@@ -196,7 +189,8 @@ int main(int argc, char **argv)
     memset(&g_enc_snap, 0, sizeof(g_enc_snap));
 
     printf("sensor_validate: csv=%s\n", out_path);
-    printf("encoder AMT102 2048 PPR (8192 cpr) | imu RV+LA+GyroCal @100 Hz | tick 100 Hz\n");
+    printf("encoder AMT102 2048 PPR (8192 cpr) | imu RV+LA+GyroCal @100 Hz | tick 100 Hz (struct v%u)\n",
+           IMU_VALIDATE_STRUCT_VERSION);
     if (duration_sec > 0.0) {
         printf("logging %.1f s after %.1f s settle; Ctrl+C stops early\n",
                duration_sec, SETTLE_SEC);
@@ -290,9 +284,9 @@ int main(int argc, char **argv)
             }
             double imups = (dt > 0.0) ? (double)(seq - imu_seq_prev) / dt : 0.0;
 
-            printf("t=%6.1f ticks=%" PRIu64 " drops=%" PRIu64
-                   " enc=%+" PRId64 " (%8.2f deg) inv=%" PRIu64 " ev/s=%4.0f"
-                   " imu/s=%4.0f mask=0x%02x\n",
+            printf("t=%6.1f ticks=%\" PRIu64 \" drops=%\" PRIu64
+                   \" enc=%+\" PRId64 \" (%8.2f deg) inv=%\" PRIu64 \" ev/s=%4.0f\"
+                   \" imu/s=%4.0f mask=0x%02x\n\",
                    (double)(now - t_log0) / 1e9,
                    ticks,
                    csv_log_dropped(),
@@ -329,9 +323,9 @@ int main(int argc, char **argv)
     printf("\n--- sensor_validate summary ---\n");
     printf("csv          : %s\n", out_path);
     printf("log duration : %.3f s (%" PRIu64 " ticks at 100 Hz)\n", run_sec, ticks);
-    printf("records      : %" PRIu64 " written, %" PRIu64 " dropped\n",
+    printf("records      : %\" PRIu64 \" written, %\" PRIu64 \" dropped\n",
            stats.records_written, stats.records_dropped);
-    printf("encoder      : count=%+" PRId64 " x=%" PRIu64 " invalid=%" PRIu64 " %s\n",
+    printf("encoder      : count=%+\" PRId64 \" x=%\" PRIu64 \" invalid=%\" PRIu64 \" %s\n",
            g_enc_snap.count,
            g_enc_snap.x_pulses,
            g_enc_snap.invalid,
@@ -339,8 +333,8 @@ int main(int argc, char **argv)
            : g_enc_snap.invalid ? "(INVALID TRANSITIONS)"
                                 : "(clean)");
     if (have_imu) {
-        printf("imu          : seq=%" PRIu32 " validMask=0x%02x rv_err=%.3f rad\n",
-               final_imu.seq, final_imu.validMask, final_imu.rvErrRad);
+        printf("imu          : seq=%\" PRIu32 \" validMask=0x%02x\n",
+               final_imu.seq, final_imu.validMask);
     } else {
         printf("imu          : no events decoded\n");
     }
