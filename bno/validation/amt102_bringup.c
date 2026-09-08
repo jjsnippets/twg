@@ -2,8 +2,8 @@
  * amt102_bringup.c — AMT102-V encoder bring-up / hardware integration test
  *
  * Verifies encoder wiring, line states, x4 quadrature decoding, count direction,
- * and index pulses with live terminal telemetry refreshed every 500 ms.
- * Does not require rotating a full 360 degrees to observe counts.
+ * and index pulses with live terminal telemetry printed every 500 ms.
+ * Telemetry lines persist (newline-terminated) for clear history and logging.
  *
  * Wiring (BCM numbering):
  *   A -> 1k -> BCM 17 (pin 11)
@@ -56,6 +56,7 @@ int main(void)
     amt102_t       *enc = NULL;
     amt102_state_t  st;
     uint64_t        total_events = 0;
+    uint64_t        tStartUs = 0;
     uint64_t        tLastDisplay = 0;
 
     signal(SIGINT, onSigint);
@@ -83,14 +84,13 @@ int main(void)
         printf("Note: kernel rejected BIAS_DISABLE; proceeding without it.\n\n");
     }
 
-    printf("Rotate the shaft. Live status refreshes every 500 ms. Press Ctrl-C to stop.\n");
+    printf("Rotate the shaft. Telemetry logs every 500 ms. Press Ctrl-C to finish.\n");
     printf("----------------------------------------------------------------------------------------\n");
 
-    /* Prime initial display timestamp */
-    tLastDisplay = hostNowUs();
+    tStartUs = hostNowUs();
+    tLastDisplay = tStartUs;
 
     while (!sAbort) {
-        /* Poll with short 20 ms timeout so transitions are captured promptly */
         int n = amt102_poll(enc, 20);
         if (n < 0 && errno != EINTR) {
             perror("\namt102_poll error");
@@ -102,16 +102,16 @@ int main(void)
 
         uint64_t now = hostNowUs();
         if ((now - tLastDisplay) >= DISPLAY_PERIOD_US) {
+            double elapsed_s = (double)(now - tStartUs) / 1000000.0;
             double deg = (double)st.count * (360.0 / (double)AMT102_COUNTS_PER_REV);
-            printf("  count=%+8" PRId64 " (%+7.2f deg) | edges: A=%-7" PRIu64 " B=%-7" PRIu64 " | x_pulses=%-3" PRIu64 " | inv=%" PRIu64 "  \r",
-                   st.count, deg, st.a_edges, st.b_edges, st.x_pulses, st.invalid);
+            printf("[t=%5.1fs] count=%+8" PRId64 " (%+7.2f deg) | edges: A=%-7" PRIu64 " B=%-7" PRIu64 " | x_pulses=%-3" PRIu64 " | inv=%" PRIu64 "\n",
+                   elapsed_s, st.count, deg, st.a_edges, st.b_edges, st.x_pulses, st.invalid);
             fflush(stdout);
             tLastDisplay = now;
         }
     }
 
-    /* Clear live line */
-    printf("\n----------------------------------------------------------------------------------------\n");
+    printf("----------------------------------------------------------------------------------------\n");
 
     amt102_get_state(enc, &st);
     double final_deg = (double)st.count * (360.0 / (double)AMT102_COUNTS_PER_REV);
