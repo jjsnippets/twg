@@ -18,7 +18,7 @@
  *      saved DCD record stores a static calibration snapshot (and
  *      avoids the vendor-example bug where SparkFun Example_20
  *      passed 0x01, leaving the gyro flag cleared in DCD).
- *   5. Persists the calibration to flash via sh2_saveDynamicCalibration().
+ *   5. Persists the calibration to flash via sh2_saveDcdNow().
  *   6. Verifies the saved state: resets the sensor, queries the DCD
  *      status, and confirms accuracy bits remain valid across reboot.
  *
@@ -40,8 +40,12 @@
  *   3  not calibrated (--check verdict)
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
+#ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -134,7 +138,7 @@ static void csvWrite(const CalSample_t *s, CalPhase_t p)
 {
     if (!sCsvFp) return;
     fprintf(sCsvFp, "%llu,%s,%u,%u,%u,%u,%.4f,%.2f,%.2f,%.2f\n",
-            (unsigned long long)s->hostTimestampUs,
+            (unsigned long long)s->tHost_uS,
             phaseName(p),
             s->accelAccuracy,
             s->gyroAccuracy,
@@ -404,157 +408,4 @@ static int doCalibrate(void)
     calMask = SH2_CAL_ACCEL | SH2_CAL_GYRO | SH2_CAL_MAG;
     if (sh2_setCalConfig(calMask) != SH2_OK ||
         sh2_getCalConfig(&calMask) != SH2_OK) {
-        fprintf(stderr, "error: failed to configure dynamic calibration\n");
-        cal_sensor_stop();
-        if (sCsvFp) fclose(sCsvFp);
-        return EXIT_ERROR;
-    }
-    printCalConfig(calMask);
-
-    /* Phase 2: Gyro calibration */
-    printf("\n[Phase 1/3] Gyroscope calibration\n");
-    printf("Place the sensor stationary on a stable flat surface.\n");
-    if (!promptEnter("Ready to calibrate gyroscope?")) goto abort;
-
-    printf("Calibrating gyro (keep stationary)...");
-    fflush(stdout);
-    rc = waitAccurateSustained(NEED_GYRO, 15, PH_GYRO, true);
-    if (rc == 2) goto abort;
-    if (rc != 0) {
-        printf("warning: gyro accuracy did not reach %d within timeout\n", ACC_GOAL);
-    } else {
-        printf("Gyroscope calibration settled.\n");
-    }
-
-    /* Phase 3: Accelerometer calibration */
-    printf("\n[Phase 2/3] Accelerometer calibration\n");
-    printf("Slowly rotate the device to 4-6 distinct stationary orientations\n");
-    printf("(hold each orientation still for 1-2 seconds, like faces of a cube).\n");
-    if (!promptEnter("Ready to calibrate accelerometer?")) goto abort;
-
-    rc = waitAccurateSustained(NEED_ACCEL, 30, PH_ACCEL, true);
-    if (rc == 2) goto abort;
-    if (rc != 0) {
-        printf("warning: accelerometer accuracy did not reach %d within timeout\n", ACC_GOAL);
-    } else {
-        printf("Accelerometer calibration settled.\n");
-    }
-
-    /* Phase 4: Magnetometer calibration */
-    printf("\n[Phase 3/3] Magnetometer calibration\n");
-    printf("Slowly rotate the device in figure-8 motions across all 3 axes.\n");
-    if (!promptEnter("Ready to calibrate magnetometer?")) goto abort;
-
-    rc = waitAccurateSustained(NEED_MAG, 45, PH_MAG, true);
-    if (rc == 2) goto abort;
-    if (rc != 0) {
-        printf("warning: magnetometer accuracy did not reach %d within timeout\n", ACC_GOAL);
-    } else {
-        printf("Magnetometer calibration settled.\n");
-    }
-
-    /* Phase 5: Hold steady before snapshot */
-    printf("\nCalibration motions complete. Hold the device stationary...\n");
-    serviceFor(3000, PH_HOLD, true);
-
-    /* Phase 6: Freeze dynamic cal before saving to flash */
-    printf("Freezing dynamic calibration (mask 0x00) before persisting to flash...\n");
-    if (sh2_setCalConfig(0) != SH2_OK) {
-        fprintf(stderr, "error: failed to clear dynamic cal config\n");
-        cal_sensor_stop();
-        if (sCsvFp) fclose(sCsvFp);
-        return EXIT_ERROR;
-    }
-
-    /* Phase 7: Persist calibration to flash */
-    printf("Persisting calibration to DCD flash record...\n");
-    if (sh2_saveDynamicCalibration() != SH2_OK) {
-        fprintf(stderr, "error: sh2_saveDynamicCalibration failed\n");
-        cal_sensor_stop();
-        if (sCsvFp) fclose(sCsvFp);
-        return EXIT_ERROR;
-    }
-    printf("Calibration successfully saved to flash.\n");
-
-    /* Phase 8: Verify across reset */
-    printf("Resetting sensor to verify saved calibration reload...\n");
-    cal_sensor_stop();
-    usleep(300000);
-
-    if (!cal_sensor_start()) {
-        fprintf(stderr, "error: re-opening session failed after reset\n");
-        if (sCsvFp) fclose(sCsvFp);
-        return EXIT_ERROR;
-    }
-
-    sh2_setCalConfig(0);
-    printf("Verifying restored calibration across reset...\n");
-    rc = waitAccurateSustained(NEED_VERIFY, 10, PH_VERIFY, true);
-
-    if (cal_sensor_getLatestSample(&s)) {
-        printf("\nPost-reset verification summary:\n");
-        printVerdict(&s);
-    }
-    cal_sensor_stop();
-
-    if (sCsvFp) {
-        fclose(sCsvFp);
-        printf("\nLogged calibration trajectory to %s\n", csvFilename);
-    }
-
-    if (rc == 0 && isFlightReady(&s, 0)) {
-        printf("RESULT: SUCCESS - BNO085 calibrated and verified.\n");
-        return EXIT_OK;
-    }
-
-    printf("RESULT: WARNING - verification did not reach target accuracy.\n");
-    return EXIT_NOT_CALIBRATED;
-
-abort:
-    printf("\nCalibration aborted by user.\n");
-    cal_sensor_stop();
-    if (sCsvFp) fclose(sCsvFp);
-    return EXIT_ABORT;
-}
-
-int main(int argc, char **argv)
-{
-    bool checkOnly = false;
-    bool haveMask = false;
-    uint8_t mask = 0;
-
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--check") == 0) {
-            checkOnly = true;
-        } else if (strcmp(argv[i], "--mask") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "error: --mask needs a value, e.g. "
-                                "--mask 0x05\n");
-                return EXIT_ERROR;
-            }
-            char *endp = NULL;
-            unsigned long tmp = strtoul(argv[++i], &endp, 0);
-            if (!endp || *endp != '\0' || tmp > 0x07) {
-                fprintf(stderr, "error: --mask value out of range "
-                                "(0x00 to 0x07): '%s'\n", argv[i]);
-                return EXIT_ERROR;
-            }
-            mask = (uint8_t)tmp;
-            haveMask = true;
-        } else {
-            fprintf(stderr, "error: unrecognized option '%s'\n"
-                            "usage: bno_cal [--check [--mask 0xNN]]\n",
-                    argv[i]);
-            return EXIT_ERROR;
-        }
-    }
-
-    if (haveMask && !checkOnly) {
-        fprintf(stderr, "error: --mask is only valid together with "
-                        "--check\n");
-        return EXIT_ERROR;
-    }
-
-    signal(SIGINT, onSigint);
-    return checkOnly ? doCheck(mask, haveMask) : doCalibrate();
-}
+        fprintf(stderr, "error: failed to configure dynamic calibration\\n\");\n        cal_sensor_stop();\n        if (sCsvFp) fclose(sCsvFp);\n        return EXIT_ERROR;\n    }\n    printCalConfig(calMask);\n\n    /* Phase 2: Gyro calibration */\n    printf(\"\\n[Phase 1/3] Gyroscope calibration\\n\");\n    printf(\"Place the sensor stationary on a stable flat surface.\\n\");\n    if (!promptEnter(\"Ready to calibrate gyroscope?\")) goto abort;\n\n    printf(\"Calibrating gyro (keep stationary)...\");\n    fflush(stdout);\n    rc = waitAccurateSustained(NEED_GYRO, 15, PH_GYRO, true);\n    if (rc == 2) goto abort;\n    if (rc != 0) {\n        printf(\"warning: gyro accuracy did not reach %d within timeout\\n\", ACC_GOAL);\n    } else {\n        printf(\"Gyroscope calibration settled.\\n\");\n    }\n\n    /* Phase 3: Accelerometer calibration */\n    printf(\"\\n[Phase 2/3] Accelerometer calibration\\n\");\n    printf(\"Slowly rotate the device to 4-6 distinct stationary orientations\\n\");\n    printf(\"(hold each orientation still for 1-2 seconds, like faces of a cube).\\n\");\n    if (!promptEnter(\"Ready to calibrate accelerometer?\")) goto abort;\n\n    rc = waitAccurateSustained(NEED_ACCEL, 30, PH_ACCEL, true);\n    if (rc == 2) goto abort;\n    if (rc != 0) {\n        printf(\"warning: accelerometer accuracy did not reach %d within timeout\\n\", ACC_GOAL);\n    } else {\n        printf(\"Accelerometer calibration settled.\\n\");\n    }\n\n    /* Phase 4: Magnetometer calibration */\n    printf(\"\\n[Phase 3/3] Magnetometer calibration\\n\");\n    printf(\"Slowly rotate the device in figure-8 motions across all 3 axes.\\n\");\n    if (!promptEnter(\"Ready to calibrate magnetometer?\")) goto abort;\n\n    rc = waitAccurateSustained(NEED_MAG, 45, PH_MAG, true);\n    if (rc == 2) goto abort;\n    if (rc != 0) {\n        printf(\"warning: magnetometer accuracy did not reach %d within timeout\\n\", ACC_GOAL);\n    } else {\n        printf(\"Magnetometer calibration settled.\\n\");\n    }\n\n    /* Phase 5: Hold steady before snapshot */\n    printf(\"\\nCalibration motions complete. Hold the device stationary...\\n\");\n    serviceFor(3000, PH_HOLD, true);\n\n    /* Phase 6: Freeze dynamic cal before saving to flash */\n    printf(\"Freezing dynamic calibration (mask 0x00) before persisting to flash...\\n\");\n    if (sh2_setCalConfig(0) != SH2_OK) {\n        fprintf(stderr, \"error: failed to clear dynamic cal config\\n\");\n        cal_sensor_stop();\n        if (sCsvFp) fclose(sCsvFp);\n        return EXIT_ERROR;\n    }\n\n    /* Phase 7: Persist calibration to flash */\n    printf(\"Persisting calibration to DCD flash record...\\n\");\n    if (sh2_saveDcdNow() != SH2_OK) {\n        fprintf(stderr, \"error: sh2_saveDcdNow failed\\n\");\n        cal_sensor_stop();\n        if (sCsvFp) fclose(sCsvFp);\n        return EXIT_ERROR;\n    }\n    printf(\"Calibration successfully saved to flash.\\n\");\n\n    /* Phase 8: Verify across reset */\n    printf(\"Resetting sensor to verify saved calibration reload...\\n\");\n    cal_sensor_stop();\n    usleep(300000);\n\n    if (!cal_sensor_start()) {\n        fprintf(stderr, \"error: re-opening session failed after reset\\n\");\n        if (sCsvFp) fclose(sCsvFp);\n        return EXIT_ERROR;\n    }\n\n    sh2_setCalConfig(0);\n    printf(\"Verifying restored calibration across reset...\\n\");\n    rc = waitAccurateSustained(NEED_VERIFY, 10, PH_VERIFY, true);\n\n    if (cal_sensor_getLatestSample(&s)) {\n        printf(\"\\nPost-reset verification summary:\\n\");\n        printVerdict(&s);\n    }\n    cal_sensor_stop();\n\n    if (sCsvFp) {\n        fclose(sCsvFp);\n        printf(\"\\nLogged calibration trajectory to %s\\n\", csvFilename);\n    }\n\n    if (rc == 0 && isFlightReady(&s, 0)) {\n        printf(\"RESULT: SUCCESS - BNO085 calibrated and verified.\\n\");\n        return EXIT_OK;\n    }\n\n    printf(\"RESULT: WARNING - verification did not reach target accuracy.\\n\");\n    return EXIT_NOT_CALIBRATED;\n\nabort:\n    printf(\"\\nCalibration aborted by user.\\n\");\n    cal_sensor_stop();\n    if (sCsvFp) fclose(sCsvFp);\n    return EXIT_ABORT;\n}\n\nint main(int argc, char **argv)\n{\n    bool checkOnly = false;\n    bool haveMask = false;\n    uint8_t mask = 0;\n\n    for (int i = 1; i < argc; i++) {\n        if (strcmp(argv[i], \"--check\") == 0) {\n            checkOnly = true;\n        } else if (strcmp(argv[i], \"--mask\") == 0) {\n            if (i + 1 >= argc) {\n                fprintf(stderr, \"error: --mask needs a value, e.g. \"\n                                \"--mask 0x05\\n\");\n                return EXIT_ERROR;\n            }\n            char *endp = NULL;\n            unsigned long tmp = strtoul(argv[++i], &endp, 0);\n            if (!endp || *endp != '\\0' || tmp > 0x07) {\n                fprintf(stderr, \"error: --mask value out of range \"\n                                \"(0x00 to 0x07): '%s'\\n\", argv[i]);\n                return EXIT_ERROR;\n            }\n            mask = (uint8_t)tmp;\n            haveMask = true;\n        } else {\n            fprintf(stderr, \"error: unrecognized option '%s'\\n\"\n                            \"usage: bno_cal [--check [--mask 0xNN]]\\n\",\n                    argv[i]);\n            return EXIT_ERROR;\n        }\n    }\n\n    if (haveMask && !checkOnly) {\n        fprintf(stderr, \"error: --mask is only valid together with \"\n                        \"--check\\n\");\n        return EXIT_ERROR;\n    }\n\n    signal(SIGINT, onSigint);\n    return checkOnly ? doCheck(mask, haveMask) : doCalibrate();\n}\n
