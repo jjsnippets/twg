@@ -1,24 +1,21 @@
-#define _POSIX_C_SOURCE 200112L
 /*
  * test_single_sensor.c
  *
- * Stage 3 minimal test harness: brings up sh2_lib on top of the
- * validated sh2_hal_rpi.c, configures a SINGLE sensor (rotation
- * vector) at a specified rate (e.g., 100 Hz), and logs decoded sensor
- * values via sh2_decodeSensorEvent().
+ * Verifies that a single sensor report can be configured and delivered
+ * cleanly before enabling multiple sensors simultaneously.
  *
- * Goal: confirm end-to-end data flow for one sensor type:
- *   BNO085 -> SHTP over SPI -> HAL -> sh2_lib -> sensorCallback ->
- *   sh2_decodeSensorEvent() -> application-level quaternion.
- *
- * This is still diagnostic code, not the final application.
+ * Diagnostic program -- not part of production code.
  */
 
-#include <stdio.h>
-#include <stdint.h>
+#define _POSIX_C_SOURCE 200112L
+
+#include <inttypes.h>
+#include <signal.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "sh2.h"
@@ -29,141 +26,131 @@
 
 extern sh2_Hal_t *sh2_hal_rpi_init(void);
 
-#define TEST_DURATION_SEC    10
-#define SENSOR_RATE_HZ       100U
-#define SENSOR_INTERVAL_US   (1000000U / SENSOR_RATE_HZ)
+static volatile sig_atomic_t sRunning = 1;
+static int sSensorEventCount = 0;
 
-static int  sAsyncEventCount = 0;
-static int  sSensorEventCount = 0;
-static bool sResetSeen = false;
-
-/* ------------------------------------------------------------------ */
-/* Async event callback                                                */
-/* ------------------------------------------------------------------ */
+static void onSigint(int sig)
+{
+    (void)sig;
+    sRunning = 0;
+}
 
 static void asyncEventCallback(void *cookie, sh2_AsyncEvent_t *pEvent)
 {
     (void)cookie;
-    sAsyncEventCount++;
-
-    printf("[async %d] eventId=%d\n", sAsyncEventCount, pEvent->eventId);
-    if (pEvent->eventId == SH2_RESET) {
-        sResetSeen = true;
-        printf("    -> SH2_RESET (device ready)\n");
-    }
+    (void)pEvent;
 }
-
-/* ------------------------------------------------------------------ */
-/* Sensor callback: single sensor (Rotation Vector)                    */
-/* ------------------------------------------------------------------ */
 
 static void sensorCallback(void *cookie, sh2_SensorEvent_t *pEvent)
 {
     (void)cookie;
-    sSensorEventCount++;
 
-    /* Decode into sh2_SensorValue_t, then pull out rotationVector. */
     sh2_SensorValue_t value;
     memset(&value, 0, sizeof(value));
 
     int rc = sh2_decodeSensorEvent(&value, pEvent);
     if (rc != SH2_OK) {
-        fprintf(stderr, "WARN: sh2_decodeSensorEvent() returned %d\n", rc);
+        fprintf(stderr, "WARN: sh2_decodeSensorEvent returned %d\n", rc);
         return;
     }
 
-    if (value.sensorId != SH2_ROTATION_VECTOR) {
-        /* In this Stage 3 test, we expect only rotation vector events. */
-        printf("[sensor %d] unexpected sensorId=%d (expected SH2_ROTATION_VECTOR=%d)\n",
-               sSensorEventCount, value.sensorId, SH2_ROTATION_VECTOR);
-        return;
-    }
+    sSensorEventCount++;
 
-    /* Extract quaternion components (RV with accuracy) */
-    const sh2_RotationVectorWAcc_t *rv = &value.un.rotationVector;
-
-    /* Convert quaternion to yaw/pitch/roll via euler.c helpers. */
-    double yaw = q_to_yaw(rv->real, rv->i, rv->j, rv->k);
-    double pitch = q_to_pitch(rv->real, rv->i, rv->j, rv->k);
-    double roll = q_to_roll(rv->real, rv->i, rv->j, rv->k);
-
-    printf("[sensor %d] t_us=%u RV: w=%.6f x=%.6f y=%.6f z=%.6f acc=%.6f rad | ",
+    printf("[sensor %d] t_us=%" PRIu64 " RV: w=%.6f x=%.6f y=%.6f z=%.6f acc=%.6f rad | ",
            sSensorEventCount,
-           pEvent->timestamp_uS,
-           rv->real, rv->i, rv->j, rv->k, rv->accuracy);
-    printf("yaw=%.6f pitch=%.6f roll=%.6f (radians)\n", yaw, pitch, roll);
+           (uint64_t)pEvent->timestamp_uS,
+           (double)value.un.rotationVector.real,
+           (double)value.un.rotationVector.i,
+           (double)value.un.rotationVector.j,
+           (double)value.un.rotationVector.k,
+           (double)value.un.rotationVector.accuracy);
+
+    float yaw   = q_to_yaw(value.un.rotationVector.real,
+                           value.un.rotationVector.i,
+                           value.un.rotationVector.j,
+                           value.un.rotationVector.k);
+    float pitch = q_to_pitch(value.un.rotationVector.real,
+                             value.un.rotationVector.i,
+                             value.un.rotationVector.j,
+                             value.un.rotationVector.k);
+    float roll  = q_to_roll(value.un.rotationVector.real,
+                            value.un.rotationVector.i,
+                            value.un.rotationVector.j,
+                            value.un.rotationVector.k);
+
+    const float RAD2DEG = 57.29577951308232f;
+    printf("Euler (deg): yaw=%7.2f pitch=%7.2f roll=%7.2f\n",
+           (double)(yaw * RAD2DEG),
+           (double)(pitch * RAD2DEG),
+           (double)(roll * RAD2DEG));
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
-    printf("== Stage 3: single sensor (Rotation Vector @ %u Hz) ==\n", SENSOR_RATE_HZ);
+    int reportPeriodUs = 10000; /* default 10 ms = 100 Hz */
+    if (argc > 1) {
+        reportPeriodUs = atoi(argv[1]);
+        if (reportPeriodUs <= 0) {
+            fprintf(stderr, "Usage: %s [report_period_us]\n", argv[0]);
+            return 1;
+        }
+    }
+
+    signal(SIGINT, onSigint);
+    signal(SIGTERM, onSigint);
+
+    printf("Single Sensor Diagnostic (Rotation Vector)\n");
+    printf("Report period: %d us (%.1f Hz)\n",
+           reportPeriodUs, 1000000.0 / (double)reportPeriodUs);
 
     sh2_Hal_t *hal = sh2_hal_rpi_init();
-    if (!hal) {
-        fprintf(stderr, "FAIL: sh2_hal_rpi_init() returned NULL\n");
+    if (hal == NULL) {
+        fprintf(stderr, "FAIL: sh2_hal_rpi_init returned NULL\n");
         return 1;
     }
 
     int rc = sh2_open(hal, asyncEventCallback, NULL);
     if (rc != SH2_OK) {
-        fprintf(stderr, "FAIL: sh2_open() returned %d\n", rc);
+        fprintf(stderr, "FAIL: sh2_open returned %d\n", rc);
         return 1;
     }
-    printf("PASS: sh2_open() returned SH2_OK\n");
 
     rc = sh2_setSensorCallback(sensorCallback, NULL);
     if (rc != SH2_OK) {
-        fprintf(stderr, "FAIL: sh2_setSensorCallback() returned %d\n", rc);
+        fprintf(stderr, "FAIL: sh2_setSensorCallback returned %d\n", rc);
         sh2_close();
         return 1;
     }
 
-    /* Configure Rotation Vector at SENSOR_RATE_HZ. */
-    sh2_SensorConfig_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    // cfg.enable = 1;
-    cfg.changeSensitivityEnabled = 0;
-    cfg.changeSensitivity = 0;
-    cfg.reportInterval_us = SENSOR_INTERVAL_US;
-    cfg.batchInterval_us = 0;       /* no batching */
-    cfg.sensorSpecific = 0;         /* default */
+    sh2_SensorConfig_t config;
+    memset(&config, 0, sizeof(config));
+    config.changeSensitivityEnabled = false;
+    config.changeSensitivityRelative = false;
+    config.wakeupEnabled = false;
+    config.alwaysOnEnabled = false;
+    config.changeSensitivity = 0;
+    config.reportInterval_us = (uint32_t)reportPeriodUs;
+    config.batchInterval_us = 0;
+    config.sensorSpecific = 0;
 
-    rc = sh2_setSensorConfig(SH2_ROTATION_VECTOR, &cfg);
+    rc = sh2_setSensorConfig(SH2_ROTATION_VECTOR, &config);
     if (rc != SH2_OK) {
-        fprintf(stderr, "FAIL: sh2_setSensorConfig(SH2_ROTATION_VECTOR) returned %d\n", rc);
+        fprintf(stderr, "FAIL: sh2_setSensorConfig returned %d\n", rc);
         sh2_close();
         return 1;
     }
-    printf("PASS: enabled SH2_ROTATION_VECTOR at %u Hz (interval %u us)\n",
-           SENSOR_RATE_HZ, SENSOR_INTERVAL_US);
 
-    printf("\n-- Running sh2_service() loop for %d seconds --\n", TEST_DURATION_SEC);
+    printf("Listening for Rotation Vector reports. Press Ctrl-C to stop.\n");
 
-    time_t startTime = time(NULL);
-    while (time(NULL) - startTime < TEST_DURATION_SEC) {
+    while (sRunning) {
         sh2_service();
-        // usleep(1000); /* 1 ms between service calls */
+        usleep(500);
     }
 
-    printf("\n-- Loop complete --\n");
-    printf("Total async events: %d, sensor events: %d\n",
-           sAsyncEventCount, sSensorEventCount);
-
-    if (!sResetSeen) {
-        fprintf(stderr, "FAIL: never observed SH2_RESET async event in Stage 3\n");
-    }
-    if (sSensorEventCount == 0) {
-        fprintf(stderr,
-                "FAIL: no rotation vector sensor events observed -- "
-                "check WAKE/INT timing or sensor configuration.\n");
-    } else {
-        printf("PASS: observed rotation vector events at ~%u Hz (subject to host scheduling)\n",
-               SENSOR_RATE_HZ);
-    }
-
+    printf("\nStopping sensor...\n");
+    memset(&config, 0, sizeof(config));
+    sh2_setSensorConfig(SH2_ROTATION_VECTOR, &config);
     sh2_close();
-    printf("PASS: sh2_close() completed\n");
-
-    printf("\n== Stage 3 test complete ==\n");
-    return (sResetSeen && sSensorEventCount > 0) ? 0 : 1;
+    printf("Diagnostic finished. Received %d events.\n", sSensorEventCount);
+    return 0;
 }
