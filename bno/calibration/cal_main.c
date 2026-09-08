@@ -2,7 +2,7 @@
  * calibration/cal_main.c — Guided BNO085 dynamic calibration CLI.
  *
  * Runs the guided calibration flow:
- *   1. Opens an SH2 session via sensor_calibrate.c.
+ *   1. Opens an SH2 session via cal_sensor.c.
  *   2. Enables ME dynamic calibration for accelerometer, gyro, and
  *      magnetometer via sh2_setCalConfig(0x07).
  *   3. Guides the user through the motions required by the Hillcrest
@@ -40,6 +40,9 @@
  *   3  not calibrated (--check verdict)
  */
 
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -51,8 +54,10 @@
 #include <errno.h>
 
 #include "sh2.h"
+#include "sh2_err.h"
 #include "sh2_SensorValue.h"
-#include "sensor_calibrate.h"
+#include "cal_contract.h"
+#include "cal_sensor.h"
 
 #define ACC_GOAL          3        /* High accuracy */
 #define SUSTAIN_MS        2000     /* Accuracy must hold 2 s continuously */
@@ -198,7 +203,7 @@ static void printCalConfig(uint8_t mask)
 
 static void reportOpenFailure(void)
 {
-    fprintf(stderr, "error: sensor_calibrate_start failed (BNO085/SPI)\n");
+    fprintf(stderr, "error: cal_sensor_start failed (BNO085/SPI)\n");
     fprintf(stderr, "hint: is bno_app or another sh2 consumer still "
                     "running? one HAL instance per process\n");
 }
@@ -222,8 +227,8 @@ static bool serviceFor(unsigned duration_ms, CalPhase_t phase, bool live)
 
     while (hostNowUs() < tEnd) {
         if (sAbort) return false;
-        sensor_calibrate_service();
-        if (sensor_calibrate_getLatestSample(&s)) {
+        cal_sensor_service();
+        if (cal_sensor_getLatestSample(&s)) {
             csvWrite(&s, phase);
             if (live && (hostNowUs() - tLastDisplay) >= DISPLAY_PERIOD_US) {
                 printLiveLine(&s);
@@ -246,8 +251,8 @@ static int waitAccurateSustained(unsigned need, unsigned timeout_s,
 
     while (hostNowUs() < tEnd) {
         if (sAbort) return 2;
-        sensor_calibrate_service();
-        if (sensor_calibrate_getLatestSample(&s)) {
+        cal_sensor_service();
+        if (cal_sensor_getLatestSample(&s)) {
             csvWrite(&s, phase);
             if (live && (hostNowUs() - tLastDisplay) >= DISPLAY_PERIOD_US) {
                 printLiveLine(&s);
@@ -282,14 +287,14 @@ static int doCheck(uint8_t mask, bool haveMask)
     int rc = 0;
 
     printf("bno_cal --check: opening session (read-only inspection)...\n");
-    if (!sensor_calibrate_start()) {
+    if (!cal_sensor_start()) {
         reportOpenFailure();
         return EXIT_ERROR;
     }
 
     if (sh2_setCalConfig(mask) != SH2_OK) {
         fprintf(stderr, "error: sh2_setCalConfig failed\n");
-        sensor_calibrate_stop();
+        cal_sensor_stop();
         return EXIT_ERROR;
     }
 
@@ -309,17 +314,17 @@ static int doCheck(uint8_t mask, bool haveMask)
                SUSTAIN_MS / 1000);
         rc = waitAccurateSustained(NEED_VERIFY, 10, PH_VERIFY, true);
         if (rc == 2) {
-            sensor_calibrate_stop();
+            cal_sensor_stop();
             return EXIT_ABORT;
         }
 
-        if (!sensor_calibrate_getLatestSample(&s)) {
+        if (!cal_sensor_getLatestSample(&s)) {
             fprintf(stderr, "error: no sensor reports arrived\n");
-            sensor_calibrate_stop();
+            cal_sensor_stop();
             return EXIT_ERROR;
         }
         printVerdict(&s);
-        sensor_calibrate_stop();
+        cal_sensor_stop();
 
         printf("RESULT: probe complete (mask 0x%02x) - informational "
                "only (exit 0)\n", mask);
@@ -332,8 +337,8 @@ static int doCheck(uint8_t mask, bool haveMask)
     bool gotSample = false;
 
     while (!sAbort) {
-        sensor_calibrate_service();
-        if (sensor_calibrate_getLatestSample(&s)) {
+        cal_sensor_service();
+        if (cal_sensor_getLatestSample(&s)) {
             gotSample = true;
             if ((hostNowUs() - tLastDisplay) >= DISPLAY_PERIOD_US) {
                 printLiveLine(&s);
@@ -346,12 +351,12 @@ static int doCheck(uint8_t mask, bool haveMask)
 
     if (!gotSample) {
         fprintf(stderr, "error: no sensor reports arrived\n");
-        sensor_calibrate_stop();
+        cal_sensor_stop();
         return EXIT_ERROR;
     }
 
     printVerdict(&s);
-    sensor_calibrate_stop();
+    cal_sensor_stop();
 
     if (isFlightReady(&s, mask)) {
         printf("RESULT: READY - saved calibration looks good (exit 0)\n");
@@ -389,7 +394,7 @@ static int doCalibrate(void)
     printf("  BNO085 Dynamic Calibration (bno_cal)\n");
     printf("====================================================\n\n");
 
-    if (!sensor_calibrate_start()) {
+    if (!cal_sensor_start()) {
         reportOpenFailure();
         if (sCsvFp) fclose(sCsvFp);
         return EXIT_ERROR;
@@ -400,7 +405,7 @@ static int doCalibrate(void)
     if (sh2_setCalConfig(calMask) != SH2_OK ||
         sh2_getCalConfig(&calMask) != SH2_OK) {
         fprintf(stderr, "error: failed to configure dynamic calibration\n");
-        sensor_calibrate_stop();
+        cal_sensor_stop();
         if (sCsvFp) fclose(sCsvFp);
         return EXIT_ERROR;
     }
@@ -456,7 +461,7 @@ static int doCalibrate(void)
     printf("Freezing dynamic calibration (mask 0x00) before persisting to flash...\n");
     if (sh2_setCalConfig(0) != SH2_OK) {
         fprintf(stderr, "error: failed to clear dynamic cal config\n");
-        sensor_calibrate_stop();
+        cal_sensor_stop();
         if (sCsvFp) fclose(sCsvFp);
         return EXIT_ERROR;
     }
@@ -465,7 +470,7 @@ static int doCalibrate(void)
     printf("Persisting calibration to DCD flash record...\n");
     if (sh2_saveDynamicCalibration() != SH2_OK) {
         fprintf(stderr, "error: sh2_saveDynamicCalibration failed\n");
-        sensor_calibrate_stop();
+        cal_sensor_stop();
         if (sCsvFp) fclose(sCsvFp);
         return EXIT_ERROR;
     }
@@ -473,10 +478,10 @@ static int doCalibrate(void)
 
     /* Phase 8: Verify across reset */
     printf("Resetting sensor to verify saved calibration reload...\n");
-    sensor_calibrate_stop();
+    cal_sensor_stop();
     usleep(300000);
 
-    if (!sensor_calibrate_start()) {
+    if (!cal_sensor_start()) {
         fprintf(stderr, "error: re-opening session failed after reset\n");
         if (sCsvFp) fclose(sCsvFp);
         return EXIT_ERROR;
@@ -486,11 +491,11 @@ static int doCalibrate(void)
     printf("Verifying restored calibration across reset...\n");
     rc = waitAccurateSustained(NEED_VERIFY, 10, PH_VERIFY, true);
 
-    if (sensor_calibrate_getLatestSample(&s)) {
+    if (cal_sensor_getLatestSample(&s)) {
         printf("\nPost-reset verification summary:\n");
         printVerdict(&s);
     }
-    sensor_calibrate_stop();
+    cal_sensor_stop();
 
     if (sCsvFp) {
         fclose(sCsvFp);
@@ -507,7 +512,7 @@ static int doCalibrate(void)
 
 abort:
     printf("\nCalibration aborted by user.\n");
-    sensor_calibrate_stop();
+    cal_sensor_stop();
     if (sCsvFp) fclose(sCsvFp);
     return EXIT_ABORT;
 }

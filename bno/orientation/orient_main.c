@@ -19,6 +19,9 @@
  *   2  aborted by user
  */
 
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -26,9 +29,11 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <time.h>
 #include <math.h>
 
 #include "sh2.h"
+#include "sh2_err.h"
 #include "sh2_SensorValue.h"
 #include "orient_sensor.h"
 
