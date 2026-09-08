@@ -19,8 +19,12 @@
  *   2  aborted by user
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
+#ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -115,7 +119,7 @@ static void printLiveLine(const OrientSample_t *s)
 
 static void reportOpenFailure(void)
 {
-    fprintf(stderr, "error: sensor_orient_start failed (BNO085/SPI)\n");
+    fprintf(stderr, "error: orient_sensor_start failed (BNO085/SPI)\n");
     fprintf(stderr, "hint: is bno_app or another sh2 consumer still "
                     "running? one HAL instance per process\n");
 }
@@ -139,8 +143,8 @@ static bool serviceFor(unsigned duration_ms, bool live)
 
     while (hostNowUs() < tEnd) {
         if (sAbort) return false;
-        sensor_orient_service();
-        if (sensor_orient_getLatestSample(&s)) {
+        orient_sensor_service();
+        if (orient_sensor_getLatestSample(&s)) {
             if (live && (hostNowUs() - tLastDisplay) >= DISPLAY_PERIOD_US) {
                 printLiveLine(&s);
                 tLastDisplay = hostNowUs();
@@ -157,14 +161,14 @@ static int doCheck(void)
     OrientSample_t s;
 
     printf("bno_orient --check: opening session (read-only inspection)...\n");
-    if (!sensor_orient_start()) {
+    if (!orient_sensor_start()) {
         reportOpenFailure();
         return EXIT_ERROR;
     }
 
     if (sh2_setCalConfig(0) != SH2_OK) {
         fprintf(stderr, "error: sh2_setCalConfig failed\n");
-        sensor_orient_stop();
+        orient_sensor_stop();
         return EXIT_ERROR;
     }
 
@@ -173,8 +177,8 @@ static int doCheck(void)
     bool gotSample = false;
 
     while (!sAbort) {
-        sensor_orient_service();
-        if (sensor_orient_getLatestSample(&s)) {
+        orient_sensor_service();
+        if (orient_sensor_getLatestSample(&s)) {
             gotSample = true;
             if ((hostNowUs() - tLastDisplay) >= DISPLAY_PERIOD_US) {
                 printLiveLine(&s);
@@ -187,7 +191,7 @@ static int doCheck(void)
 
     if (!gotSample) {
         fprintf(stderr, "error: no sensor reports arrived\n");
-        sensor_orient_stop();
+        orient_sensor_stop();
         return EXIT_ERROR;
     }
 
@@ -196,26 +200,26 @@ static int doCheck(void)
         printf("warning: rotation vector accuracy below %d; heading is "
                "not settled - run bno_cal before taring\n", ACC_GOAL);
     }
-    sensor_orient_stop();
+    orient_sensor_stop();
     return EXIT_OK;
 }
 
 static int doClear(void)
 {
     printf("bno_orient --clear: clearing active tare...\n");
-    if (!sensor_orient_start()) {
+    if (!orient_sensor_start()) {
         reportOpenFailure();
         return EXIT_ERROR;
     }
 
     if (sh2_clearTare() != SH2_OK) {
         fprintf(stderr, "error: sh2_clearTare failed\n");
-        sensor_orient_stop();
+        orient_sensor_stop();
         return EXIT_ERROR;
     }
 
     printf("Active tare cleared. Reverting to raw frame.\n");
-    sensor_orient_stop();
+    orient_sensor_stop();
     return EXIT_OK;
 }
 
@@ -227,7 +231,7 @@ static int doTare(bool persist, bool allAxes)
     printf("  BNO085 Swing-Axis Tare (%s)\n", allAxes ? "All Axes" : "Z/Heading Only");
     printf("====================================================\n\n");
 
-    if (!sensor_orient_start()) {
+    if (!orient_sensor_start()) {
         reportOpenFailure();
         return EXIT_ERROR;
     }
@@ -237,13 +241,13 @@ static int doTare(bool persist, bool allAxes)
     printf("Align fixture to mechanical zero reference.\n");
     if (!promptEnter("Ready to tare?")) {
         printf("Aborted by user.\n");
-        sensor_orient_stop();
+        orient_sensor_stop();
         return EXIT_ABORT;
     }
 
     printf("Settling heading (2 seconds)...\n");
     if (!serviceFor(2000, true)) {
-        sensor_orient_stop();
+        orient_sensor_stop();
         return EXIT_ABORT;
     }
 
@@ -251,7 +255,7 @@ static int doTare(bool persist, bool allAxes)
     printf("Executing tare command...\n");
     if (sh2_setTareNow(axes, SH2_TARE_BASIS_ROTATION_VECTOR) != SH2_OK) {
         fprintf(stderr, "error: sh2_setTareNow failed\n");
-        sensor_orient_stop();
+        orient_sensor_stop();
         return EXIT_ERROR;
     }
 
@@ -259,7 +263,7 @@ static int doTare(bool persist, bool allAxes)
         printf("Persisting tare transformation to sensor-orientation flash record...\n");
         if (sh2_persistTare() != SH2_OK) {
             fprintf(stderr, "error: sh2_persistTare failed\n");
-            sensor_orient_stop();
+            orient_sensor_stop();
             return EXIT_ERROR;
         }
         printf("Tare persisted successfully.\n");
@@ -267,11 +271,11 @@ static int doTare(bool persist, bool allAxes)
 
     /* Verify post-tare attitude */
     serviceFor(500, false);
-    if (sensor_orient_getLatestSample(&s)) {
+    if (orient_sensor_getLatestSample(&s)) {
         printAttitude("post-tare attitude", &s);
     }
 
-    sensor_orient_stop();
+    orient_sensor_stop();
     printf("Tare operation complete.\n");
     return EXIT_OK;
 }
