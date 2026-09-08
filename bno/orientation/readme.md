@@ -22,7 +22,7 @@ All tools are compiled from the root `bno/` Makefile into `bno/bin/`:
 
 ```bash
 cd bno
-make orientation        # builds bin/bno_orient
+make orient             # builds bin/bno_orient
 ```
 
 ### Safety Rule
