@@ -244,7 +244,7 @@ static bool isFlightReady(const CalSample_t *s, uint8_t calMask)
 static void printLiveLine(const CalSample_t *s)
 {
     printf("  [acc %u  gyr %u  mag %u  rv %u]  rv_err=%5.2f rad  "
-           "mag=(%7.2f %7.2f %7.2f) uT\r",
+           "mag=(%7.2f %7.2f %7.2f) uT\n",
            s->accelAccuracy, s->gyroAccuracy, s->magAccuracy,
            s->rvAccuracy, (double)s->rvErrRad,
            (double)s->magX_uT, (double)s->magY_uT, (double)s->magZ_uT);
@@ -382,12 +382,12 @@ static int doCheck(uint8_t mask, bool haveMask)
     if (!(mask & SH2_CAL_GYRO)) {
         printf("note: the gyro accuracy bit reads 0 while gyro dynamic "
                "cal is off (observed on this unit); it is not part of "
-               "the verdict.\\n");
+               "the verdict.\n");
     }
 
     if (haveMask) {
         printf("monitoring accuracy for up to 10 s (keep the device "
-               "stationary; needs %d s of good readings)...\\n",
+               "stationary; needs %d s of good readings)...\n",
                SUSTAIN_MS / 1000);
         rc = waitAccurateSustained(NEED_VERIFY, 10, PH_VERIFY, true);
         if (rc == 2) {
@@ -396,7 +396,7 @@ static int doCheck(uint8_t mask, bool haveMask)
         }
 
         if (!cal_sensor_getLatestSample(&s)) {
-            fprintf(stderr, "error: no sensor reports arrived\\n");
+            fprintf(stderr, "error: no sensor reports arrived\n");
             cal_sensor_stop();
             return EXIT_ERROR;
         }
@@ -404,13 +404,13 @@ static int doCheck(uint8_t mask, bool haveMask)
         cal_sensor_stop();
 
         printf("RESULT: probe complete (mask 0x%02x) - informational "
-               "only (exit 0)\\n",
+               "only (exit 0)\n",
                mask);
         return EXIT_OK;
     }
 
     /* Continuous check mode: stream live telemetry until Ctrl+C */
-    printf("monitoring accuracy live (press Ctrl+C to terminate)...\\n");
+    printf("monitoring accuracy live (press Ctrl+C to terminate)...\n");
     uint64_t tLastDisplay = 0;
     bool gotSample = false;
 
@@ -425,10 +425,10 @@ static int doCheck(uint8_t mask, bool haveMask)
         }
         usleep(SERVICE_LOOP_US);
     }
-    printf("\\n");
+    printf("\n");
 
     if (!gotSample) {
-        fprintf(stderr, "error: no sensor reports arrived\\n");
+        fprintf(stderr, "error: no sensor reports arrived\n");
         cal_sensor_stop();
         return EXIT_ERROR;
     }
@@ -436,10 +436,10 @@ static int doCheck(uint8_t mask, bool haveMask)
     cal_sensor_stop();
 
     if (isFlightReady(&s, mask)) {
-        printf("RESULT: READY - saved calibration looks good (exit 0)\\n");
+        printf("RESULT: READY - saved calibration looks good (exit 0)\n");
         return EXIT_OK;
     }
-    printf("RESULT: NOT CALIBRATED - run bno_cal (exit 3)\\n");
+    printf("RESULT: NOT CALIBRATED - run bno_cal (exit 3)\n");
     return EXIT_NOT_CALIBRATED;
 }
 
@@ -451,17 +451,17 @@ static bool confirmClear(void)
 {
     char buf[32];
 
-    printf("\\nWARNING: this permanently erases the BNO085's saved\\n"
-           "dynamic calibration (DCD) from BOTH flash and RAM. The\\n"
-           "sensor will be UNCALIBRATED afterwards and must be\\n"
-           "recalibrated with bno_cal before any data collection.\\n\\n"
+    printf("\nWARNING: this permanently erases the BNO085's saved\n"
+           "dynamic calibration (DCD) from BOTH flash and RAM. The\n"
+           "sensor will be UNCALIBRATED afterwards and must be\n"
+           "recalibrated with bno_cal before any data collection.\n\n"
            "Type CLEAR (uppercase) to erase, anything else to abort: ");
     fflush(stdout);
 
     if (sAbort) return false;
     if (fgets(buf, sizeof(buf), stdin) == NULL) return false;
     if (sAbort) return false;
-    buf[strcspn(buf, "\\r\\n")] = '\\0';
+    buf[strcspn(buf, "\r\n")] = '\0';
     return strcmp(buf, "CLEAR") == 0;
 }
 
@@ -470,20 +470,20 @@ static int doClear(void)
     uint32_t dummy = 0;
     CalSample_t s;
 
-    printf("=== BNO085 DCD clear ===\\n\\n");
-    printf("bno_cal --clear: opening session...\\n");
+    printf("=== BNO085 DCD clear ===\n\n");
+    printf("bno_cal --clear: opening session...\n");
     if (!cal_sensor_start()) {
         reportOpenFailure();
         return EXIT_ERROR;
     }
 
     if (sh2_setCalConfig(0) != SH2_OK) {
-        fprintf(stderr, "error: sh2_setCalConfig failed\\n");
+        fprintf(stderr, "error: sh2_setCalConfig failed\n");
         cal_sensor_stop();
         return EXIT_ERROR;
     }
 
-    printf("current state (before clear; watching 5 s; keep device stationary)...\\n");
+    printf("current state (before clear; watching 5 s; keep device stationary)...\n");
     for (int i = 0; i < 2500; ++i) {
         if (sAbort) break;
         cal_sensor_service();
@@ -499,7 +499,7 @@ static int doClear(void)
     }
 
     if (!confirmClear()) {
-        printf("\\nbno_cal --clear: declined - nothing was erased (exit 2)\\n");
+        printf("\nbno_cal --clear: declined - nothing was erased (exit 2)\n");
         cal_sensor_stop();
         return EXIT_ABORT;
     }
@@ -508,36 +508,36 @@ static int doClear(void)
     if (sh2_setFrs(FRS_RECORD_DCD, &dummy, 0) != SH2_OK) {
         fprintf(stderr,
                 "error: sh2_setFrs(delete DCD record 0x1F1F) failed; "
-                "flash copy NOT erased - aborting before RAM clear\\n");
+                "flash copy NOT erased - aborting before RAM clear\n");
         cal_sensor_stop();
         return EXIT_ERROR;
     }
-    printf("flash DCD record (FRS 0x1F1F) deleted.\\n");
+    printf("flash DCD record (FRS 0x1F1F) deleted.\n");
 
     /* Clear RAM DCD and trigger reset */
     if (sh2_clearDcdAndReset() != SH2_OK) {
-        fprintf(stderr, "error: sh2_clearDcdAndReset failed\\n");
+        fprintf(stderr, "error: sh2_clearDcdAndReset failed\n");
         cal_sensor_stop();
         return EXIT_ERROR;
     }
-    printf("RAM DCD cleared and chip reset.\\n");
+    printf("RAM DCD cleared and chip reset.\n");
 
     cal_sensor_stop();
     usleep(300000);
 
-    printf("\\nbno_cal --clear: reopening session on cleared device...\\n");
+    printf("\nbno_cal --clear: reopening session on cleared device...\n");
     if (!cal_sensor_start()) {
-        fprintf(stderr, "error: session reopen failed after clear\\n");
+        fprintf(stderr, "error: session reopen failed after clear\n");
         return EXIT_ERROR;
     }
 
     if (sh2_setCalConfig(0) != SH2_OK) {
-        fprintf(stderr, "error: sh2_setCalConfig failed after clear\\n");
+        fprintf(stderr, "error: sh2_setCalConfig failed after clear\n");
         cal_sensor_stop();
         return EXIT_ERROR;
     }
 
-    printf("uncalibrated state (after clear; watching 5 s)...\\n");
+    printf("uncalibrated state (after clear; watching 5 s)...\n");
     for (int i = 0; i < 2500; ++i) {
         if (sAbort) break;
         cal_sensor_service();
@@ -549,9 +549,9 @@ static int doClear(void)
     }
     cal_sensor_stop();
 
-    printf("\\nRESULT: DCD ERASED (exit 0)\\n");
-    printf("The sensor is now uncalibrated. Run bno_cal to recalibrate,\\n"
-           "then bno_cal --check to confirm before data collection.\\n");
+    printf("\nRESULT: DCD ERASED (exit 0)\n");
+    printf("The sensor is now uncalibrated. Run bno_cal to recalibrate,\n"
+           "then bno_cal --check to confirm before data collection.\n");
     return EXIT_OK;
 }
 

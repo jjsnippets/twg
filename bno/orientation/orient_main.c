@@ -111,7 +111,7 @@ static void printLiveLine(const OrientSample_t *s)
 {
     float yaw, pitch, roll;
     eulerDeg(s, &yaw, &pitch, &roll);
-    printf("  q=[%6.3f,%6.3f,%6.3f,%6.3f] yaw %7.2f pitch %6.2f roll %6.2f deg [rv acc %u]  \r",
+    printf("  q=[%6.3f,%6.3f,%6.3f,%6.3f] yaw %7.2f pitch %6.2f roll %6.2f deg [rv acc %u]  \n",
            (double)s->quatW, (double)s->quatX, (double)s->quatY, (double)s->quatZ,
            (double)yaw, (double)pitch, (double)roll, s->rvAccuracy);
     fflush(stdout);
