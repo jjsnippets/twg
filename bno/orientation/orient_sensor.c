@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 /*
- * sensor_orient.c
+ * orient_sensor.c
  *
  * Owns the SH-2 session for the orientation (tare) tool and decodes
  * one BNO085 report into one latest OrientSample_t:
@@ -14,7 +14,7 @@
  * own tare policy: sh2_setTareNow / sh2_persistTare / sh2_clearTare
  * are called by orient_main.c, which owns the operator flow.
  *
- * Part of: rpi4b prod code/bno/calibration
+ * Part of: rpi4b prod code/bno/orientation
  */
 
 #include <stdbool.h>
@@ -27,7 +27,7 @@
 #include "sh2_hal.h"
 #include "sh2_SensorValue.h"
 
-#include "sensor_orient.h"
+#include "orientation/orient_sensor.h"
 
 /* Provided by app/sh2_hal_rpi.c (same HAL as the app and the
  * validation binaries; see the calibration Makefile). */
@@ -101,7 +101,7 @@ static bool configureSensor(sh2_SensorId_t sensorId, uint32_t interval_us)
     return sh2_setSensorConfig(sensorId, &cfg) == SH2_OK;
 }
 
-bool sensor_orient_start(void)
+bool orient_sensor_start(void)
 {
     memset(&sLatestSample, 0, sizeof(sLatestSample));
     sLatestSample.version = ORIENT_SAMPLE_STRUCT_VERSION;
@@ -132,18 +132,18 @@ bool sensor_orient_start(void)
     return true;
 }
 
-void sensor_orient_service(void)
+void orient_sensor_service(void)
 {
     sh2_service();
 }
 
-void sensor_orient_stop(void)
+void orient_sensor_stop(void)
 {
     sh2_close();
     sHal = NULL;
 }
 
-bool sensor_orient_getLatestSample(OrientSample_t *outSample)
+bool orient_sensor_getLatestSample(OrientSample_t *outSample)
 {
     if (!outSample || !sHasSample) {
         return false;

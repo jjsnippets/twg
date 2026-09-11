@@ -1,23 +1,28 @@
 # BNO085 IMU Acquisition — Raspberry Pi 4B (Mantatow-Thesis)
 
 Production IMU acquisition code for the thesis data-collection system. It reads
-three fused/calibrated outputs from an Adafruit BNO085 9-DOF IMU over SPI
-(CEVA SHTP/SH-2 protocol) at a sustained **100 Hz per output (~300 events/s
-combined)**, driven by a single-threaded real-time 1 kHz service loop.
+three fused/calibrated outputs from an Adafruit BNO085 9-DOF IMU over SPI (CEVA
+SHTP/SH-2 protocol) at a sustained **100 Hz per output** (300 events/s
+combined), driven by a single-threaded real-time 1 kHz service loop.
 
-The sensor-facing layers (HAL, `sh2/`, `sensor_reader`) are validated and
-intended to remain stable. `app/main.c` is the designated integration point —
-its current console printing is a placeholder until real data consumers
-(pressure sensing, video tracking, networking) are connected.
+The sensor-facing layers (`app/sh2_hal_rpi.c`, `sh2/`, `app/app_sensor.c`) are
+validated and intended to remain stable. `app/main.c` is the designated
+integration point — its current console printing is a placeholder until real
+data consumers (pressure sensing, video tracking, networking) are connected.
 
-## What this code does
+## Quick start
 
-- Enables three BNO085 reports at 100 Hz each, with batching disabled:
-  - **Rotation vector** (9-axis fused orientation) → yaw/pitch/roll + accuracy
-  - **Linear acceleration** (gravity removed) → ax/ay/az
-  - **Calibrated gyroscope** → gx/gy/gz
-- Services the BNO085 from a 1 kHz SCHED_FIFO loop so its active-low interrupt
-  (`H_INTN`) is always answered within ~1 ms.
+On the Raspberry Pi:
+
+```bash
+cd bno
+make                  # builds bin/bno_app
+sudo ./bin/bno_app    # runs the 100 Hz acquisition loop; Ctrl-C to stop
+```
+
+- Requires `sudo` (or `CAP_SYS_NICE`) for real-time priority (`SCHED_FIFO` 90)
+  and memory locking (`mlockall`). Without privileges, it logs a warning and
+  falls back to standard scheduling (`SCHED_OTHER`).
 - Runs a 300 ms service-only spin-up, then a fixed 10 s acquisition window,
   printing the latest combined sample at 100 Hz to stdout.
 
@@ -74,19 +79,41 @@ Host interface requirements:
 
 ```text
 bno/
-├── Makefile                 builds bin/bno_app and the test binaries
+├── Makefile                 unified build system for app, tools, and tests
 ├── app/                     production application + Raspberry Pi HAL
-│   ├── imu_sample.h         ImuSample_t — the shared data contract
+│   ├── app_contract.h       ImuSample_t — shared production data contract
+│   ├── app_sensor.c/.h      SH-2 session owner, decodes into latest ImuSample_t
 │   ├── main.c               application loop (integration point)
 │   ├── realtime.c/.h        SCHED_FIFO + mlockall, absolute CLOCK_MONOTONIC sleep
-│   ├── sensor_reader.c/.h   SH-2 session owner, decodes into latest ImuSample_t
 │   └── sh2_hal_rpi.c        Raspberry Pi sh2_Hal_t transport (SPI + libgpiod)
-├── calibration/             BNO085 calibration tools (see calibration/readme.md)
-├── validation/              encoder-vs-IMU validation harnesses (see validation/readme.md)
-├── sh2/                     vendored CEVA sh2 library (submodule, unmodified)
-├── tests/                   bring-up and timing test programs
+├── calibration/             BNO085 dynamic-calibration tools (see calibration/readme.md)
+│   ├── cal_contract.h       CalSample_t — calibration progress data contract
+│   ├── cal_sensor.c/.h      SH-2 session owner for calibration
+│   ├── cal_main.c           bno_cal (guided cal + --clear + --check)
+│   └── readme.md
+├── orientation/             BNO085 swing-axis tare tools (see orientation/readme.md)
+│   ├── orient_sensor.c/.h   SH-2 session owner for rotation vector
+│   ├── orient_main.c        bno_orient (swing-axis tare + --persist)
+│   └── readme.md
+├── validation/              encoder-vs-IMU validation harness (see validation/readme.md)
+│   ├── amt102.c/.h          AMT102-V incremental encoder driver (libgpiod)
+│   ├── amt102_bringup.c     standalone encoder hardware diagnostic
+│   ├── quad_decode.c/.h     pure x4 quadrature state machine
+│   ├── validate_contract.h  ImuValidateSample_t — timestamped validation contract
+│   ├── validate_logger.c/.h bounded-ring real-time CSV logger
+│   ├── validate_sensor.c/.h SH-2 session owner for validation (100 Hz 3-sensor)
+│   ├── validate_main.c      bno_validate (synchronized 100 Hz capture)
+│   └── readme.md
+├── tests/                   bring-up diagnostics and unit test suite
+│   ├── test_hal_raw.c       SPI/HAL hardware bring-up test
+│   ├── test_min_period.c    minimum sensor reporting period diagnostic
+│   ├── test_quad_decode.c   pure quadrature decoder unit test suite
+│   ├── test_report_len.c    SHTP packet length verification
+│   ├── test_sh2_open.c      session open/handshake diagnostic
+│   └── test_single_sensor.c single-sensor decode diagnostic
+├── sh2/                     vendored CEVA sh2 library (unmodified submodule)
 ├── bin/                     (generated) binaries
-└── build/                   (generated) objects
+└── build/                   (generated) intermediate objects
 ```
 
 ## Software architecture
@@ -96,7 +123,7 @@ state):
 
 ```text
 main.c (1 kHz loop, 300 ms settle, 100 Hz consumer)
-  └─ sensor_reader (opens session, enables 3 reports, decodes events)
+  └─ app_sensor (opens session, enables 3 reports, decodes events)
        └─ sh2/ — CEVA SH-2 library: SHTP framing, fragmentation, channel
          sequence numbers, report decode, FRS, sensor configuration
             └─ sh2_hal_rpi.c — sh2_Hal_t transport: spidev + libgpiod,
@@ -146,184 +173,60 @@ one-tenth of the fastest sensor period (~1 ms here); the device times out and
 retries after ~10 ms, and frequent delays cause internal processing starvation
 and erroneous outputs. The 1 kHz loop gives ~3.3× headroom over 301
 packets/s. **Any future consumer that adds work to the loop must preserve the
-~1 ms service cadence** (call `sensor_reader_service()` every iteration).
+~1 ms service cadence** (call `app_sensor_service()` every iteration).
 
-## Data contract for consumers
+## Data contract (`app/app_contract.h`)
 
-`ImuSample_t` (`app/imu_sample.h`) is the structure everything reads:
+`ImuSample_t` is the boundary between the driver and the rest of the
+system. All values are scaled to engineering units:
 
-| Field | Units | Meaning |
-|---|---|---|
-| `version` | — | struct version (`IMU_SAMPLE_STRUCT_VERSION` = 3) |
-| `seq` | — | +1 per decoded event (any of the three sensors), since start |
-| `timestamp_uS` | µs | device-side timestamp of the most recent event |
-| `yaw`, `pitch`, `roll` | rad | orientation from the rotation-vector quaternion |
-| `orientationErrRad` | rad | rotation-vector heading-error estimate (lower is better; NOT the 0–3 status scale) |
-| `ax`, `ay`, `az` | m/s² | linear acceleration (gravity removed) |
-| `gx`, `gy`, `gz` | rad/s | calibrated angular velocity |
-| `validMask` | bit flags | bit 0 orientation, bit 1 accel, bit 2 gyro |
+```c
+typedef struct {
+    uint8_t  version;        /* IMU_SAMPLE_STRUCT_VERSION (3) */
+    uint32_t seq;            /* rolling counter; increments per sensor event */
+    uint64_t tHost_uS;       /* CLOCK_MONOTONIC microsecond timestamp at decode */
+    uint64_t tDevice_uS;     /* BNO085 internal timestamp (32-bit counter, us) */
 
-Read these semantics before consuming:
+    float    yaw;            /* rad, rotation about Z (-pi to +pi) */
+    float    pitch;          /* rad, rotation about Y (-pi/2 to +pi/2) */
+    float    roll;           /* rad, rotation about X (-pi to +pi) */
 
-1. **It is a latest-value mailbox, not a queue.** `sensor_reader_getLatestSample()`
-   returns the newest combined state. Polling faster than events arrive
-   returns the same `seq` — a repeated `seq` means "no new event since the
-   last read," not a new sample.
-2. **Field groups update independently.** yaw/pitch/roll, ax/ay/az, and
-   gx/gy/gz are each refreshed by their own sensor's events, so one sample can
-   mix values from up to three events ~10 ms apart. `seq` and `timestamp_uS`
-   always reflect the single most recent event, whichever sensor produced it.
-   If you need per-sensor alignment, extend `sensor_reader` (per-field
-   timestamps or a raw callback) rather than assuming alignment.
-3. **`validMask` accumulates** (`|=`): it reports which outputs have *ever*
-   been received, not which fields changed in the last event.
-4. **`seq` counts from `sensor_reader_start()`**, including the 300 ms settle
-   phase. Expect ~3000 increments per 10 s window plus ~50–60 settle-phase
-   events (~301 events/s once reporting starts; first reports arrive
-   ~130–137 ms after the enable commands).
-5. **`timestamp_uS` is measured by the BNO085's own hub timer.** It is
-   generally monotonic but can occasionally step backwards a few microseconds
-   (known SH-2/SHTP artifact). Guard any dt math against `dt <= 0`. For
-   wall-clock timing on the host, use CLOCK_MONOTONIC only.
-6. **Rates:** configured at 100 Hz per sensor; the device actually delivers
-   ~100.3 Hz (within CEVA's configured-rate tolerance). BNO085 metadata
-   claims a 1 kHz minimum period per sensor; measured single-sensor ceilings
-   were ~331–390 Hz. Operation is validated at 100 Hz × 3.
-7. **Report identity (for debugging):** rotation vector = report ID 0x05,
-   linear acceleration = 0x04, calibrated gyroscope = 0x02, all on SHTP
-   channel 3. Wire packets are 23 B (rotation vector) and 19 B
-   (accelerometer/gyro) including the 4-byte SHTP header, one event per
-   packet.
-8. **No status bits in the sample — and the gyro bit would read 0
-   anyway.** `ImuSample_t` deliberately carries no per-report status
-   bytes. Under the flight policy (all dynamic calibration off) the
-   BNO085 reports the gyro status bit as 0 (unreliable) by design — the
-   real-time ZRO estimator is halted while the saved DCD keeps
-   bias-correcting the data — so readiness must be judged from
-   `orientationErrRad` (<= ~0.35 rad once converged), never from a
-   gyro status bit.
+    float    ax;             /* m/s^2, body-frame linear acceleration (X) */
+    float    ay;             /* m/s^2, body-frame linear acceleration (Y) */
+    float    az;             /* m/s^2, body-frame linear acceleration (Z) */
 
-## Building and running
+    float    gx;             /* rad/s, body-frame calibrated angular velocity (X) */
+    float    gy;             /* rad/s, body-frame calibrated angular velocity (Y) */
+    float    gz;             /* rad/s, body-frame calibrated angular velocity (Z) */
 
-On the Pi (Raspberry Pi OS; requires `gcc`, `make`, `libgpiod-dev` v1):
+    uint8_t  status;         /* 2-bit accuracy from the report: 0=unreliable, */
+                             /* 1=low, 2=medium, 3=high */
+    uint8_t  report_seq;     /* raw sequence from the BNO085 report byte 1 */
+    uint8_t  validMask;      /* bit 0: RV valid, bit 1: Accel, bit 2: Gyro */
+} ImuSample_t;
+```
+
+Orientation angles use the **Tait-Bryan ZYX convention** (yaw about Z, then
+pitch about Y, then roll about X). The conversion is handled by
+`sh2/euler.c`.
+
+## Build & test reference
+
+Build commands (from `bno/`):
 
 ```bash
-sudo apt install libgpiod-dev     # if not already present
-cd "rpi4b prod code/bno"
-cd bno
-make                       # builds bin/bno_app
-make tests                 # builds the five test binaries
-sudo ./bin/bno_app
-cd calibration && make     # builds bin/bno_cal and bin/bno_cal_clear
+make            # builds bin/bno_app
+make tools      # builds bin/bno_app, bin/bno_cal, bin/bno_orient, bin/bno_validate, bin/amt102_bringup
+make tests      # builds all diagnostic test binaries
+make test       # builds and executes the host-only unit test (test_quad_decode)
+make clean      # removes build/ and bin/
 ```
 
-`sudo` is required (spidev + gpiochip0 access and SCHED_FIFO rtprio limits).
-Expected output format, from an actual 10 s run:
+### Diagnostic tests (`tests/`)
 
-```text
-main: running IMU reader for 10 seconds...
-seq=3041 ts=305857144 yaw= -2.998 pitch=  0.078 roll= -0.099 ax= -0.004 ay=  0.000 az= -0.039 gx= -0.018 gy= -0.010 gz= -0.012
-...
-main: finished. Printed 1000 lines.
-```
-
-Quick post-build validation:
-
-- `sudo ./bin/test_report_len` — wire-length integrity: rotation-vector
-  packets 23 B, accelerometer/gyro 19 B, 1:1 events-to-packets, zero
-  unexpected reports.
-- Run `bno_app` and hand-rotate the IMU: gx/gy/gz must change with motion and
-  settle near zero when stationary (small residual offsets are normal — the
-  gyroscope's zero-rate offset is dynamically calibrated).
-
-## Tests
-
-| Target | Purpose |
-|---|---|
-| `test_hal_raw` | Raw HAL bring-up without sh2 (SPI, GPIO, reset, wake) |
-| `test_sh2_open` | HAL + sh2 session open smoke test (advertisement drain) |
-| `test_single_sensor` | Enable one sensor and verify report flow |
-| `test_min_period` | Query sensor metadata (FRS) for minimum report periods |
-| `test_report_len` | Wire packet-length verification — the key integrity test |
-
-There were also other debug tooling now retired and removed from the 100 Hz rate
-investigation (`test_hal_debug`, `test_timing_rv/accel/gyro`). They depended
-on a HAL timing-accessor API that was removed in the production cleanup and
-will not build as-is; the complete instrumented state they were written
-against is preserved at commit `56ba70b`.
-
-## Vendored CEVA SH-2 library
-
-`sh2/` is cloned directly from CEVA's SH-2 reference source (the library tree
-distributed with CEVA's `sh2-demo-nucleo` / `bno080-nucleo-demo` examples) and
-is intentionally **unmodified**. It owns all protocol logic: SHTP framing,
-fragmentation, channel sequence numbers, report decoding, FRS access, and
-sensor configuration. This project supplies only the transport
-(`sh2_hal_rpi.c` implementing `sh2_Hal_t`) and the consumer logic.
-
-Do not hand-patch `sh2/`. If behavior looks wrong, suspect the HAL or app
-layers first, and re-run `test_report_len` before and after any change. If
-CEVA publishes updated sources, replace the directory wholesale.
-
-## Calibration
-
-The BNO085's internal calibration is managed by the tools in
-`calibration/` (see `calibration/readme.md` for full details):
-
-- `bno_cal` — guided dynamic calibration per CEVA BNO08X Sensor Calibration
-  Procedure, plus `--check` (field go/no-go) and `--check --mask` (cal-config
-  probes).
-- `bno_cal_clear` — full DCD erase (flash + RAM) for documenting the
-  uncalibrated baseline.
-
-Field procedure: run `bno_cal --check` (expect exit 0) before every
-deployment; recalibrate with `bno_cal` in the deployment area when the
-magnetic environment changes. Both `bno_app` and `sensor_validate`
-disable all dynamic calibration at startup and fly on the saved DCD —
-the enable bits are RAM-only and revert at every reset, so the policy
-is set per program, not per calibration.
-
-Note: under the all-off flight policy the BNO085 reports the gyro
-status bit as 0 (unreliable) by design (the ZRO estimator is halted;
-the saved DCD still bias-corrects the data), and the rotation vector
-needs ~10 s of motion after a reset to converge. Neither is a fault:
-`bno_cal --check` accounts for both, and consumers gate readiness on
-`orientationErrRad`, not status bits.
-
-## Provenance
-
-- HAL rewrite (manual CS + two-phase length-driven reads): PR #3
-  (commit `1e60882`, merge `f86e26c`).
-- CS pin reassignment (GPIO 8 → 25): commit `7fcb9e1`.
-- Final instrumented debug state (rate investigation, timing CSVs): commit
-  `56ba70b` — reference point for the archived tests and the validation
-  numbers above.
-- Production cleanup: debug instrumentation stripped from the HAL, sensor
-  reader, and main; debug tests archived; 300 ms settle phase added.
-
-## Constraints and gotchas
-
-- The BNO085 CS wire must physically match `GPIO_LINE_CS` (GPIO 25, physical
-  pin 22).
-- SPI stays at 3 MHz — datasheet maximum.
-- Preserve the ~1 ms service cadence in any consumer loop.
-- One HAL instance per process (static instance); one BNO085 per SPI bus.
-- Batching is disabled (`batchInterval_us = 0`): every event is its own SHTP
-  packet.
-- The BNO085 boots with all sensors disabled — nothing streams until
-  `sensor_reader_start()` enables the three reports.
-- Failed host-initiated writes (asleep device, wake timeout) return 0 and are
-  retried by the sh2 library; they are normal.
-- With all dynamic calibration off (the flight policy), the gyro status
-  bit reads 0 by design; gate readiness on `orientationErrRad`, never on
-  gyro status.
-
-## References
-
-- CEVA BNO08X Datasheet, doc 1000-3927 (v1.17)
-- CEVA SH-2 Reference Manual, doc 1000-3625 (v1.9)
-- CEVA SH-2 SHTP Reference Manual, doc 1000-3600 (v1.6)
-- CEVA `sh2-demo-nucleo` / `bno080-nucleo-demo` reference sources (origin of
-  `sh2/`)
-- Adafruit BNO085 breakout guide (learn.adafruit.com)
-- Raspberry Pi GPIO / spidev documentation
+- `bin/test_hal_raw`: tests `sh2_hal_rpi.c` directly without the SH-2 library.
+- `bin/test_sh2_open`: tests the `sh2_open()` handshake.
+- `bin/test_single_sensor`: enables a single sensor to verify report decoding.
+- `bin/test_min_period`: queries FRS metadata for minimum supported periods.
+- `bin/test_report_len`: comprehensive validation of SHTP packet lengths.
+- `bin/test_quad_decode`: verifies the quadrature decoder state machine against synthetic test sequences.

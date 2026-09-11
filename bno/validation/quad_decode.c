@@ -13,7 +13,7 @@
  * factory preset of 2048 PPR that is 8192 counts per revolution.
  */
 
-#include "quad_decode.h"
+#include "validation/quad_decode.h"
 
 #define QDEC_INVALID 2
 

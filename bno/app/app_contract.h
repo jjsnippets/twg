@@ -1,5 +1,5 @@
-#ifndef IMU_SAMPLE_H
-#define IMU_SAMPLE_H
+#ifndef APP_CONTRACT_H
+#define APP_CONTRACT_H
 
 #include <stdint.h>
 
@@ -9,7 +9,7 @@ typedef struct {
     uint8_t  version;        /* IMU_SAMPLE_STRUCT_VERSION */
 
     /* Monotonically increasing per real sensor event, incremented in
-     * sensor_reader.c's sensorCallback(). Starts at 0 for the first
+     * app_sensor.c's sensorCallback(). Starts at 0 for the first
      * decoded event. Always increases by 1 per real event; if a
      * consumer polls faster than new events arrive, it will observe
      * the same seq value repeated (a genuine duplicate, not a new
@@ -59,4 +59,4 @@ typedef struct {
 #define IMU_SAMPLE_VALID_ACCEL       (1u << 1)
 #define IMU_SAMPLE_VALID_GYRO        (1u << 2)
 
-#endif /* IMU_SAMPLE_H */
+#endif /* APP_CONTRACT_H */

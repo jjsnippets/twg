@@ -19,9 +19,9 @@
 #include "sh2.h"
 #include "sh2_err.h"
 
-#include "imu_sample.h"
-#include "realtime.h"
-#include "sensor_reader.h"
+#include "app/app_contract.h"
+#include "app/realtime.h"
+#include "app/app_sensor.h"
 
 #define RUN_DURATION_SEC       10
 #define RT_PRIORITY            90

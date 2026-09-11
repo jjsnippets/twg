@@ -19,9 +19,11 @@
  * directory. Replaces bno_app while running: one SPI HAL instance
  * per process.
  *
- * Build: make validate   (validation/Makefile)
- * Usage: ./bin/sensor_validate [-o out.csv] [-d seconds]
+ * Build: make validate   (Makefile)
+ * Usage: ./bin/bno_validate [-o out.csv] [-d seconds]
  */
+
+#define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
 #include <inttypes.h>
@@ -35,24 +37,24 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "amt102.h"
-#include "csv_log.h"
-#include "imu_validate.h"
-#include "realtime.h"
-#include "sensor_validate.h"
+#include "validation/amt102.h"
+#include "validation/validate_logger.h"
+#include "validation/validate_contract.h"
+#include "app/realtime.h"
+#include "validation/validate_sensor.h"
 
 #define RT_PRIORITY         90      /* keep in sync with app/main.c */
-#define LOOP_DT_SEC         0.001   /* 1 ms sh2 service cadence */
-#define LOG_DECIMATION      10      /* log every 10th loop -> 100 Hz records */
 #define SETTLE_SEC          0.3     /* service-only drain after start */
-#define ENC_POLL_TIMEOUT_MS 100
+#define LOOP_DT_SEC         0.001   /* 1 kHz service cadence */
+#define LOG_DECIMATION      10      /* 1 kHz / 10 = 100 Hz records */
 #define COUNTS_PER_REV      8192.0  /* 2048 PPR x 4 */
-#define STATUS_PERIOD_NS    1000000000ull
-#define ARM_LENGTH_M        0.0     /* edit once the rig dimension is recorded */
-#define RUN_NOTES           "bench smoke test"
+#define RAD2DEG             57.29577951308232
+
+/* Placeholders: override in your copy per build */
+#define ARM_LENGTH_M        0.0     /* axis to sensor center (placeholder) */
+#define RUN_NOTES           ""
 
 static volatile sig_atomic_t g_stop = 0;
-
 static void on_signal(int sig)
 {
     (void)sig;
@@ -89,10 +91,10 @@ static int mutex_init_pi(pthread_mutex_t *m)
 
 static void *encoder_thread(void *arg)
 {
-    amt102_t *enc = arg;
+    amt102_t *enc = (amt102_t *)arg;
 
     while (!g_stop) {
-        int n = amt102_poll(enc, ENC_POLL_TIMEOUT_MS);
+        int n = amt102_poll(enc, 100);
         if (n < 0) {
             fprintf(stderr, "\nencoder: event read failed: %s\n", strerror(errno));
             g_enc_err = 1;
@@ -113,7 +115,7 @@ static void usage(const char *prog)
 {
     fprintf(stderr,
             "usage: %s [-o out.csv] [-d seconds]\n"
-            "  -o out.csv    output CSV (default: sensor_validate_YYYYMMDD_HHMMSS.csv)\n"
+            "  -o out.csv    output CSV (default: bno_validate_YYYYMMDD_HHMMSS.csv)\n"
             "  -d seconds    log duration after settle; 0 = run until Ctrl+C (default 0)\n",
             prog);
 }
@@ -126,7 +128,7 @@ static void default_path(char *buf, size_t len)
 
     localtime_r(&t, &tmv);
     strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &tmv);
-    snprintf(buf, len, "sensor_validate_%s.csv", stamp);
+    snprintf(buf, len, "bno_validate_%s.csv", stamp);
 }
 
 int main(int argc, char **argv)
@@ -188,7 +190,7 @@ int main(int argc, char **argv)
     }
     memset(&g_enc_snap, 0, sizeof(g_enc_snap));
 
-    printf("sensor_validate: csv=%s\n", out_path);
+    printf("bno_validate: csv=%s\n", out_path);
     printf("encoder AMT102 2048 PPR (8192 cpr) | imu RV+LA+GyroCal @100 Hz (dynamic cal off) | tick 100 Hz (struct v%u)\n",
            IMU_VALIDATE_STRUCT_VERSION);
     if (duration_sec > 0.0) {
@@ -261,89 +263,56 @@ int main(int argc, char **argv)
 
             (void)csv_log_push(&rec);
             ticks++;
-        }
 
-        uint64_t now = now_ns();
-        if (now - last_1hz >= STATUS_PERIOD_NS) {
-            amt102_state_t st;
-            pthread_mutex_lock(&g_enc_mtx);
-            st = g_enc_snap;
-            pthread_mutex_unlock(&g_enc_mtx);
+            /* Heartbeat once per second */
+            uint64_t t_now = now_ns();
+            if ((t_now - last_1hz) >= 1000000000ull) {
+                int64_t d_enc = st.count - st_prev.count;
+                uint32_t d_imu = rec.imu.seq - imu_seq_prev;
+                st_prev = st;
+                imu_seq_prev = rec.imu.seq;
 
-            uint64_t ev  = st.a_edges + st.b_edges + st.x_pulses;
-            uint64_t evp = st_prev.a_edges + st_prev.b_edges + st_prev.x_pulses;
-            double dt    = (double)(now - last_1hz) / 1e9;
-            double evps  = (dt > 0.0) ? (double)(ev - evp) / dt : 0.0;
-
-            ImuValidateSample_t s;
-            uint32_t seq = 0;
-            uint8_t mask = 0;
-            if (sensor_validate_getLatestSample(&s)) {
-                seq  = s.seq;
-                mask = s.validMask;
+                double sec = (double)(t_now - t_log0) / 1e9;
+                printf("[t=%5.1fs] enc=%+7.2f deg (d=%+5" PRId64 ") | "
+                       "q=(%+.3f,%+.3f,%+.3f,%+.3f) | "
+                       "ypr=(%+6.2f,%+6.2f,%+6.2f) deg | "
+                       "acc=%u err=%.2frad | drops=%" PRIu64 "\n",
+                       sec,
+                       rec.enc_angle_deg,
+                       d_enc,
+                       rec.imu.rv_qw, rec.imu.rv_qx, rec.imu.rv_qy, rec.imu.rv_qz,
+                       (double)(rec.imu.yaw * RAD2DEG),
+                       (double)(rec.imu.pitch * RAD2DEG),
+                       (double)(rec.imu.roll * RAD2DEG),
+                       rec.imu.rv.status,
+                       (double)rec.imu.rvErrRad,
+                       rec.drops);
+                fflush(stdout);
+                last_1hz = t_now;
             }
-            double imups = (dt > 0.0) ? (double)(seq - imu_seq_prev) / dt : 0.0;
-
-            printf("t=%6.1f ticks=%\" PRIu64 \" drops=%\" PRIu64
-                   \" enc=%+\" PRId64 \" (%8.2f deg) inv=%\" PRIu64 \" ev/s=%4.0f\"
-                   \" imu/s=%4.0f mask=0x%02x\n\",
-                   (double)(now - t_log0) / 1e9,
-                   ticks,
-                   csv_log_dropped(),
-                   st.count,
-                   (double)st.count * (360.0 / COUNTS_PER_REV),
-                   st.invalid,
-                   evps,
-                   imups,
-                   mask);
-
-            st_prev = st;
-            imu_seq_prev = seq;
-            last_1hz = now;
         }
 
         RT_SleepUntil(LOOP_DT_SEC);
         loop++;
     }
 
-    double run_sec = (double)(now_ns() - t_log0) / 1e9;
+    printf("\nsensor_validate: stopping...\n");
 
-    ImuValidateSample_t final_imu;
-    bool have_imu = sensor_validate_getLatestSample(&final_imu);
-    if (!have_imu) {
-        memset(&final_imu, 0, sizeof(final_imu));
-    }
+    /* Stop threads and tear down */
+    g_stop = 1;
+    pthread_join(enc_tid, NULL);
 
     CsvLogStats_t stats;
     csv_log_stop(&stats);
-    pthread_join(enc_tid, NULL);
+
     sensor_validate_stop();
     amt102_close(enc);
 
-    printf("\n--- sensor_validate summary ---\n");
-    printf("csv          : %s\n", out_path);
-    printf("log duration : %.3f s (%" PRIu64 " ticks at 100 Hz)\n", run_sec, ticks);
-    printf("records      : %\" PRIu64 \" written, %\" PRIu64 \" dropped\n",
-           stats.records_written, stats.records_dropped);
-    printf("encoder      : count=%+\" PRId64 \" x=%\" PRIu64 \" invalid=%\" PRIu64 \" %s\n",
-           g_enc_snap.count,
-           g_enc_snap.x_pulses,
-           g_enc_snap.invalid,
-           g_enc_err      ? "(READ ERROR)"
-           : g_enc_snap.invalid ? "(INVALID TRANSITIONS)"
-                                : "(clean)");
-    if (have_imu) {
-        printf("imu          : seq=%\" PRIu32 \" validMask=0x%02x\n",
-               final_imu.seq, final_imu.validMask);
-    } else {
-        printf("imu          : no events decoded\n");
-    }
+    printf("done: records=%" PRIu64 " drops=%" PRIu64 " duration=%.3f s (%.2f Hz)\n",
+           stats.records_written,
+           stats.records_dropped,
+           stats.duration_sec,
+           stats.duration_sec > 0 ? (double)stats.records_written / stats.duration_sec : 0.0);
 
-    bool clean = (stats.records_dropped == 0) && (g_enc_snap.invalid == 0) &&
-                 !g_enc_err && have_imu;
-    printf("verdict      : %s\n",
-           clean ? "OK for plumbing/timing evidence (in-situ calibration still"
-                   " pending for swing validation)"
-                 : "CHECK (see flags above)");
-    return 0;
+    return (g_enc_err != 0) ? 1 : 0;
 }

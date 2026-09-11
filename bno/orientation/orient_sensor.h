@@ -1,5 +1,5 @@
-#ifndef SENSOR_ORIENT_H
-#define SENSOR_ORIENT_H
+#ifndef ORIENT_SENSOR_H
+#define ORIENT_SENSOR_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -7,20 +7,20 @@
 #define ORIENT_SAMPLE_STRUCT_VERSION 1
 
 /*
- * sensor_orient.h — SH-2 session owner for the orientation (tare)
+ * orient_sensor.h — SH-2 session owner for the orientation (tare)
  * tool.
  *
- * Counterpart of sensor_calibrate.h for bno_orient: same Raspberry
- * Pi HAL (app/sh2_hal_rpi.c, compiled in via the Makefile), same
+ * Counterpart of cal_sensor.h for bno_orient: same Raspberry
+ * Pi HAL (bno/app/sh2_hal_rpi.c, compiled in via the Makefile), same
  * sh2_hal_rpi_init / sh2_open / sh2_setSensorCallback /
  * sh2_setSensorConfig sequence, but a different report set: only
  * SH2_ROTATION_VECTOR at 20 Hz, decoded in full (quaternion + its
  * payload accuracy), because the tare flow needs the actual fused
  * heading — CalSample_t deliberately carries accuracies only.
  *
- * The sample struct lives here instead of a separate orient_sample.h
- * (the cal_sample.h pattern): unlike CalSample_t it never crosses
- * between tools — bno_orient is the only producer and consumer.
+ * The sample struct lives here instead of a separate orient_contract.h:
+ * unlike CalSample_t it never crosses between tools — bno_orient is the
+ * only producer and consumer.
  *
  * Deliberately does NOT own tare policy: sh2_setTareNow /
  * sh2_persistTare / sh2_clearTare are flow decisions made by
@@ -33,7 +33,7 @@ typedef struct {
 
     /*
      * Monotonically increasing per decoded sensor event, incremented
-     * in sensor_orient.c's sensorCallback(). Starts at 0.
+     * in orient_sensor.c's sensorCallback(). Starts at 0.
      */
     uint32_t seq;
 
@@ -54,27 +54,27 @@ typedef struct {
 /*
  * Opens the SH-2 session and enables the rotation-vector report.
  * Does not create a thread; the caller must call
- * sensor_orient_service() periodically from its own loop.
- * May be called again after sensor_orient_stop() (the reopen
+ * orient_sensor_service() periodically from its own loop.
+ * May be called again after orient_sensor_stop() (the reopen
  * performs the HAL reset sequence, so the chip reboots — a volatile
  * tare is lost, a persisted one reloads from flash).
  */
-bool sensor_orient_start(void);
+bool orient_sensor_start(void);
 
 /*
  * Services the SH-2 session. Call at approximately 1 ms cadence so
  * pending BNO085 H_INTN traffic is handled promptly.
  */
-void sensor_orient_service(void);
+void orient_sensor_service(void);
 
 /* Closes the SH-2 session and the Raspberry Pi HAL. */
-void sensor_orient_stop(void);
+void orient_sensor_stop(void);
 
 /*
  * Copies the most recent decoded sample into outSample. Returns
  * false if no report has been decoded yet. Single-threaded: call
- * from the same loop that invokes sensor_orient_service().
+ * from the same loop that invokes orient_sensor_service().
  */
-bool sensor_orient_getLatestSample(OrientSample_t *outSample);
+bool orient_sensor_getLatestSample(OrientSample_t *outSample);
 
-#endif /* SENSOR_ORIENT_H */
+#endif /* ORIENT_SENSOR_H */

@@ -1,26 +1,26 @@
 /*
- * imu_validate.h — data contract for the validation binary.
+ * validate_contract.h — data contract for the validation binary.
  *
- * Counterpart of app/imu_sample.h with one deliberate divergence: each
+ * Counterpart of app/app_contract.h with one deliberate divergence: each
  * sensor group carries its OWN host/device timestamp pair and sequence
  * numbers. The app mailbox cannot express how stale each group is (one
  * ImuSample_t can mix values from up to three events ~10 ms apart, with
  * seq/timestamp reflecting only the newest), and phase comparison against
  * the encoder needs that per-group freshness.
  *
- * validMask bit meanings are identical to app/imu_sample.h.
+ * validMask bit meanings are identical to app/app_contract.h.
  *
- * Part of the sensor_validate binary (see validation/Makefile).
+ * Part of the sensor_validate binary (see Makefile).
  */
 
-#ifndef IMU_VALIDATE_H
-#define IMU_VALIDATE_H
+#ifndef VALIDATE_CONTRACT_H
+#define VALIDATE_CONTRACT_H
 
 #include <stdint.h>
 
 #define IMU_VALIDATE_STRUCT_VERSION 3u
 
-/* validMask bits — same meanings as app/imu_sample.h */
+/* validMask bits — same meanings as app/app_contract.h */
 #define IMU_VALIDATE_VALID_RV    (1u << 0)
 #define IMU_VALIDATE_VALID_ACCEL (1u << 1)
 #define IMU_VALIDATE_VALID_GYRO  (1u << 2)
@@ -69,4 +69,4 @@ typedef struct {
     uint8_t validMask;      /* IMU_VALIDATE_VALID_* bits, set once per group ever seen */
 } ImuValidateSample_t;
 
-#endif /* IMU_VALIDATE_H */
+#endif /* VALIDATE_CONTRACT_H */

@@ -1,5 +1,5 @@
 /*
- * csv_log.h — bounded-ring CSV logger for the validation binary.
+ * validate_logger.h — bounded-ring CSV logger for the validation binary.
  *
  * The RT thread never touches the file: it pushes CsvRecord_t values
  * into a fixed-size ring (drop-newest on overflow, never blocks); a
@@ -14,15 +14,15 @@
  *   - one row per 100 Hz tick
  *   - '#'-prefixed footer (records, drops, duration)
  *
- * Part of the sensor_validate binary (see validation/Makefile).
+ * Part of the sensor_validate binary (see Makefile).
  */
 
-#ifndef CSV_LOG_H
-#define CSV_LOG_H
+#ifndef VALIDATE_LOGGER_H
+#define VALIDATE_LOGGER_H
 
 #include <stdint.h>
 
-#include "imu_validate.h"
+#include "validation/validate_contract.h"
 
 /* One synchronized 100 Hz row: encoder snapshot + latest IMU sample. */
 typedef struct {
@@ -64,4 +64,4 @@ uint64_t csv_log_dropped(void);
  */
 void csv_log_stop(CsvLogStats_t *out);
 
-#endif /* CSV_LOG_H */
+#endif /* VALIDATE_LOGGER_H */

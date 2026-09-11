@@ -1,67 +1,44 @@
 #define _POSIX_C_SOURCE 200809L
 
 /*
- * cal_main.c — bno_cal: guided BNO085 dynamic-calibration tool.
+ * cal_main.c — guided BNO085 dynamic calibration CLI.
  *
- * Walks the operator through the CEVA "BNO08X Sensor Calibration
- * Procedure" (doc 1000-4044) using the vendored SH-2 library's dynamic
- * calibration API:
+ * Runs the guided calibration flow recommended by CEVA / Hillcrest Labs
+ * (BNO080/BNO085 Tare Function and Dynamic Calibration procedure,
+ * document 1000-4044):
  *
- *   1. enable ME calibration for accelerometer + gyro + magnetometer
- *      (bitwise OR of the SH2_CAL_* bits — a logical OR collapses the
- *      mask to 0x01, the SparkFun Example_20 bug). The gyro flag is
- *      required for hand-held calibration per 1000-4044;
- *   2. accelerometer: 4-6 unique resting orientations, ~1 s each;
- *   3. gyroscope: device stationary on a surface for ~2-3 s;
- *   4. magnetometer: ~180-degree back-and-forth rotations about each
- *      axis (roll, pitch, yaw), ~2 s per axis, repeated until the
- *      Magnetic Field status bit reads 2 or 3 — per 1000-4044 this is
- *      THE progress metric for the whole procedure;
- *   5. hold still ~10 s (the hub snapshots dynamic cal data to RAM
- *      every 5 seconds and Save DCD persists the last-stored snapshot
- *      — BNO08X datasheet section 3.4), then sh2_saveDcdNow() writes
- *      the DCD to flash (FRS record 0x1F1F). The save is REFUSED if
- *      the accel/mag accuracy degraded during the hold: the operator
- *      is sent back to swinging instead of persisting a worse fit;
- *   6. close and reopen the session — the HAL open toggles RST, so
- *      the chip reboots and reloads the DCD from flash — then verify
- *      with all dynamic calibration disabled, exactly the way bno_app
- *      runs, so the verdict describes what acquisition will see.
+ *   1. enable dynamic calibration for accel, gyro and mag (0x07);
+ *   2. guide the operator through the required motions:
+ *        - accel: six unique resting orientations, e.g. on each face
+ *                 of a cube, ~2 s per orientation (needs gravity to
+ *                 separate from sensor bias);
+ *        - gyro:  stationary rest on a surface for ~2-3 s (let the
+ *                 zero-rate estimator converge);
+ *        - mag:   full 180-degree swing patterns in yaw, pitch, and
+ *                 roll (repeat until status reaches 3 / High);
+ *   3. hold still at rest to let the hub's periodic DCD snapshot
+ *      (taken every 5 s per the BNO08X datasheet section 3.4) capture
+ *      the good state, and confirm accuracy does not degrade before
+ *      saving;
+ *   4. save to the DCD flash record via sh2_saveDcdNow();
+ *   5. reset the sensor, query the DCD status, and confirm the
+ *      calibration reloads and accuracy bits recover across reboot.
  *
- * Verification gate: accelerometer AND magnetometer accuracy >= 2,
- * sustained for >= 3 s, plus rotation vector status >= 2 with a
- * heading error estimate <= 0.35 rad.
+ * Sudo & real-time policy:
+ *   This tool requires root (or CAP_SYS_NICE and SPI device permissions)
+ *   to access spidev and configure GPIO lines.
  *
- * Note: When SH2 dynamic calibration is disabled (mask 0x00), the BNO085
- * firmware reports gyro accuracy as 0 (unreliable) by design because the
- * real-time ZRO estimator is halted. Pre-flight health checks must evaluate
- * rotation vector accuracy and error estimate rather than gyro_status.
- * Confirmed 2026-09-07 across a guided calibration, --check probes of
- * masks 0x00/0x01/0x02/0x07, and a full Pi power-down/unplug/reboot
- * cycle: the gyro bit tracks the runtime flag exactly (0 when the gyro
- * cal flag is off, 3 when it is on) while the DCD-loaded calibration
- * keeps the rotation vector converged. The earlier status-0 / ~1.45 rad
- * RV observation under the all-off policy (2026-09-04) was a warm-up
- * artifact: after the ~10 s motion window the RV reports status 2-3 at
- * ~0.1-0.2 rad even with all dynamic calibration off. Gyro calibration
- * is therefore confirmed during step 3 (flag on), informationally.
- *
- * The old DCD is never cleared: Save DCD overwrites the flash record
- * wholesale, so recalibration is safe without a clear step.
- *
- * Usage:
- *   bno_cal                       run the guided calibration; logs the
- *                                 accuracy trace to
- *                                 bno_cal_<date>_<time>.csv in the
- *                                 current directory
+ * Command line options:
+ *   bno_cal                       interactive guided calibration
  *   bno_cal --check               read-only field go/no-go: open the
- *                                 session, disable dynamic calibration
- *                                 like bno_app, print the ME cal
- *                                 config and accuracy bits, exit
- *   bno_cal --check --mask 0xNN   probe mode: like --check but with
- *                                 the given ME cal mask (e.g. 0x05
- *                                 accel+mag, 0x02 gyro-only).
- *                                 Informational only — no verdict.
+ *                                 session with all dynamic calibration
+ *                                 disabled (mirroring bno_app flight
+ *                                 mode) and check that accel+mag stay
+ *                                 at accuracy >= 2; continuous live
+ *                                 telemetry until Ctrl-C.
+ *   bno_cal --check --mask 0xNN   probe mode: applies given ME cal mask (e.g. 0x05)
+ *                                 and exits automatically after 10 s probe
+ *   bno_cal --clear               erase all DCD calibration from flash and RAM
  *
  * Exit codes:
  *   0  success (calibrated, saved, verified) / --check: ready or probe
@@ -87,17 +64,48 @@
 #include "sh2.h"
 #include "sh2_err.h"
 
-#include "cal_sample.h"
-#include "sensor_calibrate.h"
+#include "cal_contract.h"
+#include "cal_sensor.h"
 
 #define EXIT_OK              0
 #define EXIT_ERROR           1
 #define EXIT_ABORT           2
 #define EXIT_NOT_CALIBRATED  3
 
+/* DCD record ID — SH-2 Reference Manual Figure 26: 0x1F1F Dynamic Calibration */
+#define FRS_RECORD_DCD       0x1F1F
+
 /* Accuracy gate: 0 unreliable, 1 low, 2 medium, 3 high. */
 #define ACC_GOAL 2
 #define MAX_HEADING_ERR_RAD 0.35f  /* ~20 degrees */
+
+/*
+ * Minimum sustained duration in each phase once accuracy reaches
+ * ACC_GOAL. A single instantaneous report of 2 or 3 is not proof of
+ * convergence: the mag status fluctuates at rest, and saving on a
+ * transient spike persists a degraded calibration.
+ */
+#define SUSTAIN_MS 3000
+
+/*
+ * Fixed-duration motion windows during the mag phase and the verify
+ * phase. These run unconditionally before the sustained-accuracy gate
+ * is evaluated:
+ *   - Mag: the sensor needs fresh angular excursions to populate its
+ *     sphere fit; if the gate passes immediately on old data, the
+ *     snapshot will not improve the calibration.
+ *   - Verify: rotation vector needs motion to converge after a reset
+ *     (under the all-off calibration policy, heading converges from
+ *     the saved DCD + motion; sitting still leaves it stuck).
+ */
+#define MAG_MIN_SWING_MS  8000
+#define VERIFY_MOTION_MS  10000
+
+/* Save retry policy: hold still, retry up to this many times. */
+#define MAX_SAVE_ATTEMPTS 3
+
+#define SERVICE_LOOP_US   1000     /* ~1 kHz service loop */
+#define DISPLAY_PERIOD_US 500000   /* 500 ms status line refresh */
 
 /* Masks for which accuracies a phase waits on. */
 #define NEED_ACCEL (1u << 0)
@@ -107,134 +115,110 @@
 
 /*
  * Verify/--check and pre-save gate: accel + mag only. The gyro bit
- * reads 0 while the gyro cal flag is off (observed on this unit; see
- * file header), so it cannot be gated there.
+ * reads 0 whenever gyro dynamic cal is disabled (the bno_app flight
+ * policy, and the state after step 5) on this hardware unit, so
+ * gating on gyro during verify would hang forever even though the
+ * saved gyro bias is loaded. Confirmed 2026-09-07.
  */
 #define NEED_VERIFY (NEED_ACCEL | NEED_MAG)
 
-/* A gate only counts when the accuracy has held for this long. The
- * mag status bit fluctuates at rest (observed 0-3 within seconds), so
- * a single good sample is not trustworthy. */
-#define SUSTAIN_MS 3000
-
-/* One full roll/pitch/yaw swing pattern at the documented ~2 s per
- * axis takes ~12 s; require two full patterns of fresh motion per
- * round (1000-4044 requires 50 Hz Magnetic Field output for proper
- * magnetometer calibration — set in sensor_calibrate.c). */
-#define MAG_MIN_SWING_MS 25000
-#define MAX_SAVE_ATTEMPTS 3
-
-/* Verify: motion window (RV needs ~10 s of motion to converge after a
- * reset, observed with cal enabled), then the stationary watch. */
-#define VERIFY_MOTION_MS 10000
-
-#define SERVICE_LOOP_US   1000     /* ~1 kHz service, like the app loop */
-#define DISPLAY_PERIOD_US 500000   /* live status line refresh */
-
 typedef enum {
-    PH_SETUP = 0,
+    PH_STARTUP = 0,
     PH_ACCEL,
     PH_GYRO,
     PH_MAG,
     PH_HOLD,
     PH_SAVE,
+    PH_RESET,
     PH_VERIFY,
 } CalPhase_t;
 
-static const char *phaseName(CalPhase_t phase)
-{
-    switch (phase) {
-        case PH_SETUP:  return "setup";
-        case PH_ACCEL:  return "accel";
-        case PH_GYRO:   return "gyro";
-        case PH_MAG:    return "mag";
-        case PH_HOLD:   return "hold";
-        case PH_SAVE:   return "save";
-        case PH_VERIFY: return "verify";
-    }
-    return "?";
-}
-
 static volatile sig_atomic_t sAbort = 0;
+static FILE *sCsvFp = NULL;
+
 static void onSigint(int sig)
 {
     (void)sig;
     sAbort = 1;
 }
 
-/* ------------------------------------------------------------------ */
-/* CSV accuracy trace                                                  */
-/* ------------------------------------------------------------------ */
-
-static FILE *sCsv = NULL;
-static uint32_t sCsvLastSeq = 0;
-
-static void csvOpen(void)
-{
-    char name[64];
-    time_t t = time(NULL);
-    struct tm tmv;
-    localtime_r(&t, &tmv);
-    strftime(name, sizeof(name), "bno_cal_%Y%m%d_%H%M%S.csv", &tmv);
-
-    sCsv = fopen(name, "w");
-    if (sCsv == NULL) {
-        fprintf(stderr,
-                "bno_cal: WARNING: cannot open %s; continuing without CSV\n",
-                name);
-        return;
-    }
-    fprintf(sCsv,
-            "host_us,device_us,phase,seq,accel_acc,gyro_acc,mag_acc,rv_acc,"
-            "rv_err_rad,mag_ut_x,mag_ut_y,mag_ut_z\n");
-    printf("bno_cal: logging accuracy trace to %s\n", name);
-    sCsvLastSeq = 0;
-}
-
-static void csvWrite(const CalSample_t *s, CalPhase_t phase)
-{
-    if (sCsv == NULL || s == NULL || s->seq == sCsvLastSeq) {
-        return;
-    }
-    sCsvLastSeq = s->seq;
-    fprintf(sCsv,
-            "%" PRIu64 ",%" PRIu64 ",%s,%" PRIu32 ",%u,%u,%u,%u,"
-            "%.4f,%.3f,%.3f,%.3f\n",
-            s->tHost_uS, s->tDevice_uS, phaseName(phase), s->seq,
-            s->accelAccuracy, s->gyroAccuracy, s->magAccuracy,
-            s->rvAccuracy, (double)s->rvErrRad,
-            (double)s->magX_uT, (double)s->magY_uT, (double)s->magZ_uT);
-}
-
-static void csvClose(void)
-{
-    if (sCsv != NULL) {
-        fclose(sCsv);
-        sCsv = NULL;
-    }
-}
-
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
-
 static uint64_t hostNowUs(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ((uint64_t)ts.tv_sec * 1000000ULL) +
-           ((uint64_t)ts.tv_nsec / 1000ULL);
+    return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)(ts.tv_nsec / 1000);
 }
 
-static const char *accName(unsigned v)
+static const char *phaseName(CalPhase_t p)
 {
-    switch (v) {
-        case 0:  return "unreliable";
-        case 1:  return "low";
-        case 2:  return "medium";
-        case 3:  return "high";
+    switch (p) {
+        case PH_STARTUP: return "STARTUP";
+        case PH_ACCEL:   return "ACCEL";
+        case PH_GYRO:    return "GYRO";
+        case PH_MAG:     return "MAG";
+        case PH_HOLD:    return "HOLD";
+        case PH_SAVE:    return "SAVE";
+        case PH_RESET:   return "RESET";
+        case PH_VERIFY:  return "VERIFY";
+        default:         return "UNKNOWN";
     }
-    return "?";
+}
+
+static const char *accName(uint8_t acc)
+{
+    switch (acc) {
+        case 0: return "unreliable (0)";
+        case 1: return "low (1)";
+        case 2: return "medium (2)";
+        case 3: return "high (3)";
+        default: return "unknown";
+    }
+}
+
+static void csvOpen(void)
+{
+    char fname[64];
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    strftime(fname, sizeof(fname), "cal_%Y%m%d_%H%M%S.csv", &tm);
+
+    sCsvFp = fopen(fname, "w");
+    if (!sCsvFp) {
+        fprintf(stderr, "warning: cannot open %s for writing\n", fname);
+        return;
+    }
+    fprintf(sCsvFp,
+            "# bno_cal trajectory log\n"
+            "# host_us,phase,accel_acc,gyro_acc,mag_acc,rv_acc,"
+            "rv_err_rad,mag_x_uT,mag_y_uT,mag_z_uT\n");
+    fflush(sCsvFp);
+    printf("logging calibration trajectory to %s\n", fname);
+}
+
+static void csvWrite(const CalSample_t *s, CalPhase_t p)
+{
+    if (!sCsvFp) return;
+    fprintf(sCsvFp,
+            "%" PRIu64 ",%s,%u,%u,%u,%u,%.4f,%.2f,%.2f,%.2f\n",
+            s->tHost_uS,
+            phaseName(p),
+            s->accelAccuracy,
+            s->gyroAccuracy,
+            s->magAccuracy,
+            s->rvAccuracy,
+            (double)s->rvErrRad,
+            (double)s->magX_uT,
+            (double)s->magY_uT,
+            (double)s->magZ_uT);
+}
+
+static void csvClose(void)
+{
+    if (sCsvFp) {
+        fclose(sCsvFp);
+        sCsvFp = NULL;
+    }
 }
 
 static bool accurateEnough(const CalSample_t *s, unsigned need)
@@ -242,35 +226,25 @@ static bool accurateEnough(const CalSample_t *s, unsigned need)
     if ((need & NEED_ACCEL) && s->accelAccuracy < ACC_GOAL) return false;
     if ((need & NEED_GYRO)  && s->gyroAccuracy  < ACC_GOAL) return false;
     if ((need & NEED_MAG)   && s->magAccuracy   < ACC_GOAL) return false;
-    if ((need & NEED_RV)    && (s->rvAccuracy   < ACC_GOAL ||
-                                s->rvErrRad > MAX_HEADING_ERR_RAD)) return false;
+    if ((need & NEED_RV)    && (s->rvAccuracy < ACC_GOAL ||
+                                s->rvErrRad > MAX_HEADING_ERR_RAD)) {
+        return false;
+    }
     return true;
 }
 
-/*
- * Note: When SH2 dynamic calibration is disabled (mask 0x00), the BNO085
- * firmware reports gyro accuracy as 0 (unreliable) by design because the
- * real-time ZRO estimator is halted. Pre-flight health checks must evaluate
- * rotation vector accuracy and error estimate rather than gyro_status.
- */
 static bool isFlightReady(const CalSample_t *s, uint8_t calMask)
 {
     if (s->accelAccuracy < ACC_GOAL) return false;
     if (s->magAccuracy   < ACC_GOAL) return false;
-    if (s->rvAccuracy    < ACC_GOAL) return false;
-    if (s->rvErrRad      > MAX_HEADING_ERR_RAD) return false;
-
-    /* Gyro accuracy is only meaningful when the gyro cal flag is on. */
-    if ((calMask & SH2_CAL_GYRO) && s->gyroAccuracy < ACC_GOAL) {
-        return false;
-    }
+    if ((calMask & SH2_CAL_GYRO) && s->gyroAccuracy < ACC_GOAL) return false;
     return true;
 }
 
 static void printLiveLine(const CalSample_t *s)
 {
     printf("  [acc %u  gyr %u  mag %u  rv %u]  rv_err=%5.2f rad  "
-           "mag=(%7.2f %7.2f %7.2f) uT\r",
+           "mag=(%7.2f %7.2f %7.2f) uT\n",
            s->accelAccuracy, s->gyroAccuracy, s->magAccuracy,
            s->rvAccuracy, (double)s->rvErrRad,
            (double)s->magX_uT, (double)s->magY_uT, (double)s->magZ_uT);
@@ -307,15 +281,11 @@ static void printCalConfig(uint8_t mask)
 
 static void reportOpenFailure(void)
 {
-    fprintf(stderr, "error: sensor_calibrate_start failed (BNO085/SPI)\n");
+    fprintf(stderr, "error: cal_sensor_start failed (BNO085/SPI)\n");
     fprintf(stderr, "hint: is bno_app or another sh2 consumer still "
                     "running? one HAL instance per process\n");
 }
 
-/*
- * Prints the prompt and waits for Enter. Returns false to abort
- * ('q' line, EOF, or Ctrl-C).
- */
 static bool promptEnter(const char *prompt)
 {
     char buf[16];
@@ -327,11 +297,6 @@ static bool promptEnter(const char *prompt)
     return !(buf[0] == 'q' || buf[0] == 'Q');
 }
 
-/*
- * Services the session at ~1 kHz for duration_ms, logging each new
- * sample to the CSV. When live is true, refreshes a status line every
- * 500 ms. Returns false if the user aborted (Ctrl-C).
- */
 static bool serviceFor(unsigned duration_ms, CalPhase_t phase, bool live)
 {
     uint64_t tEnd = hostNowUs() + (uint64_t)duration_ms * 1000ULL;
@@ -340,8 +305,8 @@ static bool serviceFor(unsigned duration_ms, CalPhase_t phase, bool live)
 
     while (hostNowUs() < tEnd) {
         if (sAbort) return false;
-        sensor_calibrate_service();
-        if (sensor_calibrate_getLatestSample(&s)) {
+        cal_sensor_service();
+        if (cal_sensor_getLatestSample(&s)) {
             csvWrite(&s, phase);
             if (live && (hostNowUs() - tLastDisplay) >= DISPLAY_PERIOD_US) {
                 printLiveLine(&s);
@@ -354,17 +319,6 @@ static bool serviceFor(unsigned duration_ms, CalPhase_t phase, bool live)
     return !sAbort;
 }
 
-/*
- * Services the session until the requested accuracies reach ACC_GOAL
- * AND hold there continuously for SUSTAIN_MS, the timeout (seconds)
- * expires, or the user aborts. Sustained gating matters: the mag
- * status bit fluctuates at rest, and a single good sample is not
- * proof of a usable calibration (observed: mag 2 during swings
- * dropping to 1 at rest, which is exactly what a mid-hold DCD
- * snapshot then persists).
- *
- * Returns 0 = gate met and sustained, 1 = timeout, 2 = abort.
- */
 static int waitAccurateSustained(unsigned need, unsigned timeout_s,
                                  CalPhase_t phase, bool live)
 {
@@ -375,8 +329,8 @@ static int waitAccurateSustained(unsigned need, unsigned timeout_s,
 
     while (hostNowUs() < tEnd) {
         if (sAbort) return 2;
-        sensor_calibrate_service();
-        if (sensor_calibrate_getLatestSample(&s)) {
+        cal_sensor_service();
+        if (cal_sensor_getLatestSample(&s)) {
             csvWrite(&s, phase);
             if (live && (hostNowUs() - tLastDisplay) >= DISPLAY_PERIOD_US) {
                 printLiveLine(&s);
@@ -404,29 +358,21 @@ static int waitAccurateSustained(unsigned need, unsigned timeout_s,
 /* --check: read-only inspection / cal-config probe                   */
 /* ------------------------------------------------------------------ */
 
-/*
- * Opens a session, applies the given ME cal mask (0x00 mirrors the
- * bno_app flight policy; other values are probes), watches accuracy
- * for up to 10 s and prints the result.
- *
- * mask == 0: pass/fail verdict on accel+mag+rv (the go/no-go mode).
- * mask != 0: probe mode — informational output only, always EXIT_OK.
- */
-static int doCheck(uint8_t mask)
+static int doCheck(uint8_t mask, bool haveMask)
 {
     CalSample_t s;
     uint8_t calCfg = 0;
     int rc;
 
     printf("bno_cal --check: opening session (read-only inspection)...\n");
-    if (!sensor_calibrate_start()) {
+    if (!cal_sensor_start()) {
         reportOpenFailure();
         return EXIT_ERROR;
     }
 
     if (sh2_setCalConfig(mask) != SH2_OK) {
         fprintf(stderr, "error: sh2_setCalConfig failed\n");
-        sensor_calibrate_stop();
+        cal_sensor_stop();
         return EXIT_ERROR;
     }
 
@@ -438,30 +384,58 @@ static int doCheck(uint8_t mask)
                "cal is off (observed on this unit); it is not part of "
                "the verdict.\n");
     }
-    printf("monitoring accuracy for up to 10 s (keep the device "
-           "stationary; needs %d s of good readings)...\n",
-           SUSTAIN_MS / 1000);
-    rc = waitAccurateSustained(NEED_VERIFY, 10, PH_VERIFY, true);
-    if (rc == 2) {
-        sensor_calibrate_stop();
-        return EXIT_ABORT;
-    }
 
-    if (!sensor_calibrate_getLatestSample(&s)) {
-        fprintf(stderr, "error: no sensor reports arrived\n");
-        sensor_calibrate_stop();
-        return EXIT_ERROR;
-    }
-    printVerdict(&s);
-    sensor_calibrate_stop();
+    if (haveMask) {
+        printf("monitoring accuracy for up to 10 s (keep the device "
+               "stationary; needs %d s of good readings)...\n",
+               SUSTAIN_MS / 1000);
+        rc = waitAccurateSustained(NEED_VERIFY, 10, PH_VERIFY, true);
+        if (rc == 2) {
+            cal_sensor_stop();
+            return EXIT_ABORT;
+        }
 
-    if (mask != 0) {
+        if (!cal_sensor_getLatestSample(&s)) {
+            fprintf(stderr, "error: no sensor reports arrived\n");
+            cal_sensor_stop();
+            return EXIT_ERROR;
+        }
+        printVerdict(&s);
+        cal_sensor_stop();
+
         printf("RESULT: probe complete (mask 0x%02x) - informational "
                "only (exit 0)\n",
                mask);
         return EXIT_OK;
     }
-    if (rc == 0 && isFlightReady(&s, mask)) {
+
+    /* Continuous check mode: stream live telemetry until Ctrl+C */
+    printf("monitoring accuracy live (press Ctrl+C to terminate)...\n");
+    uint64_t tLastDisplay = 0;
+    bool gotSample = false;
+
+    while (!sAbort) {
+        cal_sensor_service();
+        if (cal_sensor_getLatestSample(&s)) {
+            gotSample = true;
+            if ((hostNowUs() - tLastDisplay) >= DISPLAY_PERIOD_US) {
+                printLiveLine(&s);
+                tLastDisplay = hostNowUs();
+            }
+        }
+        usleep(SERVICE_LOOP_US);
+    }
+    printf("\n");
+
+    if (!gotSample) {
+        fprintf(stderr, "error: no sensor reports arrived\n");
+        cal_sensor_stop();
+        return EXIT_ERROR;
+    }
+    printVerdict(&s);
+    cal_sensor_stop();
+
+    if (isFlightReady(&s, mask)) {
         printf("RESULT: READY - saved calibration looks good (exit 0)\n");
         return EXIT_OK;
     }
@@ -470,13 +444,121 @@ static int doCheck(uint8_t mask)
 }
 
 /* ------------------------------------------------------------------ */
+/* --clear: erase DCD calibration from flash and RAM                  */
+/* ------------------------------------------------------------------ */
+
+static bool confirmClear(void)
+{
+    char buf[32];
+
+    printf("\nWARNING: this permanently erases the BNO085's saved\n"
+           "dynamic calibration (DCD) from BOTH flash and RAM. The\n"
+           "sensor will be UNCALIBRATED afterwards and must be\n"
+           "recalibrated with bno_cal before any data collection.\n\n"
+           "Type CLEAR (uppercase) to erase, anything else to abort: ");
+    fflush(stdout);
+
+    if (sAbort) return false;
+    if (fgets(buf, sizeof(buf), stdin) == NULL) return false;
+    if (sAbort) return false;
+    buf[strcspn(buf, "\r\n")] = '\0';
+    return strcmp(buf, "CLEAR") == 0;
+}
+
+static int doClear(void)
+{
+    uint32_t dummy = 0;
+    CalSample_t s;
+
+    printf("=== BNO085 DCD clear ===\n\n");
+    printf("bno_cal --clear: opening session...\n");
+    if (!cal_sensor_start()) {
+        reportOpenFailure();
+        return EXIT_ERROR;
+    }
+
+    if (sh2_setCalConfig(0) != SH2_OK) {
+        fprintf(stderr, "error: sh2_setCalConfig failed\n");
+        cal_sensor_stop();
+        return EXIT_ERROR;
+    }
+
+    printf("current state (before clear; watching 5 s; keep device stationary)...\n");
+    for (int i = 0; i < 2500; ++i) {
+        if (sAbort) break;
+        cal_sensor_service();
+        usleep(SERVICE_LOOP_US);
+    }
+    if (sAbort) {
+        cal_sensor_stop();
+        return EXIT_ABORT;
+    }
+
+    if (cal_sensor_getLatestSample(&s)) {
+        printVerdict(&s);
+    }
+
+    if (!confirmClear()) {
+        printf("\nbno_cal --clear: declined - nothing was erased (exit 2)\n");
+        cal_sensor_stop();
+        return EXIT_ABORT;
+    }
+
+    /* Delete flash DCD (FRS 0x1F1F) */
+    if (sh2_setFrs(FRS_RECORD_DCD, &dummy, 0) != SH2_OK) {
+        fprintf(stderr,
+                "error: sh2_setFrs(delete DCD record 0x1F1F) failed; "
+                "flash copy NOT erased - aborting before RAM clear\n");
+        cal_sensor_stop();
+        return EXIT_ERROR;
+    }
+    printf("flash DCD record (FRS 0x1F1F) deleted.\n");
+
+    /* Clear RAM DCD and trigger reset */
+    if (sh2_clearDcdAndReset() != SH2_OK) {
+        fprintf(stderr, "error: sh2_clearDcdAndReset failed\n");
+        cal_sensor_stop();
+        return EXIT_ERROR;
+    }
+    printf("RAM DCD cleared and chip reset.\n");
+
+    cal_sensor_stop();
+    usleep(300000);
+
+    printf("\nbno_cal --clear: reopening session on cleared device...\n");
+    if (!cal_sensor_start()) {
+        fprintf(stderr, "error: session reopen failed after clear\n");
+        return EXIT_ERROR;
+    }
+
+    if (sh2_setCalConfig(0) != SH2_OK) {
+        fprintf(stderr, "error: sh2_setCalConfig failed after clear\n");
+        cal_sensor_stop();
+        return EXIT_ERROR;
+    }
+
+    printf("uncalibrated state (after clear; watching 5 s)...\n");
+    for (int i = 0; i < 2500; ++i) {
+        if (sAbort) break;
+        cal_sensor_service();
+        usleep(SERVICE_LOOP_US);
+    }
+
+    if (cal_sensor_getLatestSample(&s)) {
+        printVerdict(&s);
+    }
+    cal_sensor_stop();
+
+    printf("\nRESULT: DCD ERASED (exit 0)\n");
+    printf("The sensor is now uncalibrated. Run bno_cal to recalibrate,\n"
+           "then bno_cal --check to confirm before data collection.\n");
+    return EXIT_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* Guided calibration flow                                             */
 /* ------------------------------------------------------------------ */
 
-/*
- * Magnetometer swing phase. Returns 0 = sustained mag accuracy met,
- * 1 = rounds exhausted without success, 2 = user abort.
- */
 static int magPhase(void)
 {
     for (unsigned round = 1; round <= 5; ++round) {
@@ -532,7 +614,7 @@ static int doCalibrate(void)
     csvOpen();
 
     printf("opening SH-2 session...\n");
-    if (!sensor_calibrate_start()) {
+    if (!cal_sensor_start()) {
         reportOpenFailure();
         csvClose();
         return EXIT_ERROR;
@@ -571,10 +653,7 @@ static int doCalibrate(void)
         }
     }
 
-    /* Step 3: gyroscope — rest. Informational only: per 1000-4044 the
-     * gyro calibrates after ~2-3 s on a stationary surface; the gyro
-     * accuracy bit is meaningful here because the gyro cal flag is
-     * on, but a low reading does not abort the flow. */
+    /* Step 3: gyroscope — rest. */
     printf("\n--- GYROSCOPE: keep the device stationary on a surface ---\n");
     if (!promptEnter("place the device flat and do not touch it")) goto abort;
     {
@@ -587,10 +666,7 @@ static int doCalibrate(void)
         }
     }
 
-    /* Steps 4 + 5: magnetometer swings, then hold + save. Retried as
-     * a unit: if the accuracy degrades during the hold, do NOT save —
-     * the DCD snapshot (taken every 5 s per the BNO08X datasheet
-     * section 3.4) would persist the degraded fit. */
+    /* Steps 4 + 5: magnetometer swings, then hold + save. */
     for (unsigned attempt = 1; attempt <= MAX_SAVE_ATTEMPTS && !saved;
          ++attempt) {
         int rc;
@@ -618,7 +694,7 @@ static int doCalibrate(void)
         rc = waitAccurateSustained(NEED_VERIFY, 5, PH_HOLD, false);
         if (rc == 2) goto abort;
         if (rc == 1) {
-            if (sensor_calibrate_getLatestSample(&s)) {
+            if (cal_sensor_getLatestSample(&s)) {
                 printf("accuracy degraded at rest (acc=%u mag=%u); NOT "
                        "saving this state - swing again\n",
                        s.accelAccuracy, s.magAccuracy);
@@ -654,23 +730,15 @@ static int doCalibrate(void)
         goto fail;
     }
 
-    /* Courtesy: leave the session in the flight-ready state. This does
-     * not survive the reset below (or any future sh2_open) — bno_app
-     * sets its own policy at startup. */
     if (sh2_setCalConfig(0) != SH2_OK) {
         printf("note: end-of-session sh2_setCalConfig(0) failed "
                "(cosmetic only)\n");
     }
 
-    /* Step 6: verify exactly the way bno_app will run. Reopening the
-     * session performs the HAL reset sequence, so the chip reboots and
-     * reloads the DCD from flash; dynamic calibration stays disabled.
-     * The motion window comes first (RV needs ~10 s of motion to
-     * converge after a reset, observed with cal enabled), then the
-     * stationary accel/mag watch. */
+    /* Step 6: verify across reset */
     printf("\n--- VERIFY: reopening session (chip reset, DCD reload) ---\n");
-    sensor_calibrate_stop();
-    if (!sensor_calibrate_start()) {
+    cal_sensor_stop();
+    if (!cal_sensor_start()) {
         fprintf(stderr, "error: session reopen failed during verification\n");
         csvClose();
         return EXIT_ERROR;
@@ -695,17 +763,17 @@ static int doCalibrate(void)
         int rc = waitAccurateSustained(NEED_VERIFY, 20, PH_VERIFY, true);
         if (rc == 2) goto abort;
         if (rc == 1) {
-            if (sensor_calibrate_getLatestSample(&s)) printVerdict(&s);
+            if (cal_sensor_getLatestSample(&s)) printVerdict(&s);
             fprintf(stderr,
                     "error: accuracy did not recover after DCD reload; "
                     "calibration may not have persisted\n");
-            sensor_calibrate_stop();
+            cal_sensor_stop();
             csvClose();
             return EXIT_NOT_CALIBRATED;
         }
     }
 
-    if (sensor_calibrate_getLatestSample(&s)) {
+    if (cal_sensor_getLatestSample(&s)) {
         printVerdict(&s);
         if (!isFlightReady(&s, 0)) {
             printf("note: rotation vector reads %u / %.2f rad "
@@ -714,24 +782,24 @@ static int doCalibrate(void)
                    "relying on RV status in flight.\n",
                    s.rvAccuracy, (double)s.rvErrRad, ACC_GOAL,
                    (double)MAX_HEADING_ERR_RAD);
-            sensor_calibrate_stop();
+            cal_sensor_stop();
             csvClose();
             return EXIT_NOT_CALIBRATED;
         }
     }
-    sensor_calibrate_stop();
+    cal_sensor_stop();
     csvClose();
     printf("RESULT: CALIBRATED AND VERIFIED (exit 0)\n");
     return EXIT_OK;
 
 abort:
     printf("\nbno_cal: aborted by user (exit 2)\n");
-    sensor_calibrate_stop();
+    cal_sensor_stop();
     csvClose();
     return EXIT_ABORT;
 
 fail:
-    sensor_calibrate_stop();
+    cal_sensor_stop();
     csvClose();
     return EXIT_ERROR;
 }
@@ -739,6 +807,7 @@ fail:
 int main(int argc, char **argv)
 {
     bool checkOnly = false;
+    bool clearOnly = false;
     bool haveMask = false;
     uint8_t mask = 0;
     unsigned long tmp;
@@ -746,6 +815,8 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--check") == 0) {
             checkOnly = true;
+        } else if (strcmp(argv[i], "--clear") == 0) {
+            clearOnly = true;
         } else if (strcmp(argv[i], "--mask") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "error: --mask needs a value, e.g. "
@@ -762,7 +833,7 @@ int main(int argc, char **argv)
             haveMask = true;
         } else {
             fprintf(stderr,
-                    "usage: bno_cal [--check [--mask 0xNN]]\n");
+                    "usage: bno_cal [--check [--mask 0xNN]] [--clear]\n");
             return EXIT_ERROR;
         }
     }
@@ -772,8 +843,14 @@ int main(int argc, char **argv)
                         "--check\n");
         return EXIT_ERROR;
     }
+    if (clearOnly && (checkOnly || haveMask)) {
+        fprintf(stderr, "error: --clear cannot be combined with "
+                        "--check or --mask\n");
+        return EXIT_ERROR;
+    }
 
     signal(SIGINT, onSigint);
 
-    return checkOnly ? doCheck(mask) : doCalibrate();
+    if (clearOnly) return doClear();
+    return checkOnly ? doCheck(mask, haveMask) : doCalibrate();
 }

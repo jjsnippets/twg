@@ -23,8 +23,8 @@
 
 #include <gpiod.h>
 
-#include "amt102.h"
-#include "quad_decode.h"
+#include "validation/amt102.h"
+#include "validation/quad_decode.h"
 
 #define AMT102_GPIOCHIP  "gpiochip0"
 #define AMT102_LINE_A    17      /* BCM 17, header pin 11 */
@@ -34,299 +34,255 @@
 #define AMT102_MAX_BATCH 64      /* events read per line per drain pass */
 #define AMT102_EV_MAX    256     /* combined batch processed per pass */
 
-struct amt102 {
-    struct gpiod_chip *chip;
-    struct gpiod_line *la, *lb, *lx;
-    int                fd_a, fd_b, fd_x;
-    quad_decoder_t     dec;
-    int                last_a, last_b;    /* -1 until first event on that line */
-    bool               bias_fallback;
-    uint64_t           a_edges, b_edges, x_pulses;
-    int64_t            count_at_last_index;
-    uint64_t           a_edges_at_last_index;
-    uint64_t           b_edges_at_last_index;
-    uint64_t           invalid_at_last_index;
-    uint64_t           last_index_ts_ns;
-    uint64_t           last_event_ts_ns;
+struct line_slot {
+    struct gpiod_line *line;
+    int                fd;
+    unsigned           pin;
 };
 
-struct amt_event {
-    uint64_t ts_ns;
-    int      line;      /* 0 = A, 1 = B, 2 = X */
-    int      rising;
+struct amt102 {
+    struct gpiod_chip *chip;
+    struct line_slot   la;       /* channel A */
+    struct line_slot   lb;       /* channel B */
+    struct line_slot   lx;       /* index channel */
+
+    quad_decoder_t     dec;
+    amt102_state_t     state;
+
+    /* Last known level for each line, seeded at open and tracked per edge */
+    int                last_a;
+    int                last_b;
 };
+
+/* Unified event record for timestamp-sorted processing */
+typedef struct {
+    uint64_t ts_ns;
+    uint8_t  source;   /* 'A', 'B' or 'X' */
+    uint8_t  type;     /* GPIOD_LINE_EVENT_RISING_EDGE / FALLING_EDGE */
+} raw_event_t;
 
 static uint64_t ts_to_ns(const struct timespec *ts)
 {
-    return (uint64_t)ts->tv_sec * 1000000000ull + (uint64_t)ts->tv_nsec;
+    return ((uint64_t)ts->tv_sec * 1000000000ULL) + (uint64_t)ts->tv_nsec;
 }
 
-/* Order by kernel timestamp; equal timestamps fall back to line order. */
-static int ev_cmp(const void *pa, const void *pb)
+static int cmp_raw_events(const void *p1, const void *p2)
 {
-    const struct amt_event *a = pa;
-    const struct amt_event *b = pb;
-
-    if (a->ts_ns != b->ts_ns)
-        return (a->ts_ns < b->ts_ns) ? -1 : 1;
-    return a->line - b->line;
-}
-
-static int request_line(struct gpiod_line *line, int req_type,
-                        bool bias_disable)
-{
-    struct gpiod_line_request_config cfg;
-
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.consumer     = "amt102";
-    cfg.request_type = req_type;
-    if (bias_disable)
-        cfg.flags = GPIOD_LINE_REQUEST_FLAG_BIAS_DISABLE;
-
-    return gpiod_line_request(line, &cfg, 0);
-}
-
-static void process_event(struct amt102 *e, const struct amt_event *ev)
-{
-    e->last_event_ts_ns = ev->ts_ns;
-
-    switch (ev->line) {
-    case 0:                                   /* A */
-        e->a_edges++;
-        e->last_a = ev->rising ? 1 : 0;
-        break;
-    case 1:                                   /* B */
-        e->b_edges++;
-        e->last_b = ev->rising ? 1 : 0;
-        break;
-    case 2:                                   /* X (rising edge only) */
-    default:
-        e->x_pulses++;
-        e->count_at_last_index   = e->dec.count;
-        e->a_edges_at_last_index = e->a_edges;
-        e->b_edges_at_last_index = e->b_edges;
-        e->invalid_at_last_index = e->dec.invalid;
-        e->last_index_ts_ns      = ev->ts_ns;
-        return;
-    }
-
-    /* Feed the decoder once both levels are known. The first such call
-     * only syncs the decoder state (no count) - see quad_decode.h. */
-    if (e->last_a >= 0 && e->last_b >= 0)
-        quad_decode_step(&e->dec, e->last_a, e->last_b);
-}
-
-/*
- * Drain one line's pending events into the combined batch. Reads only
- * after a zero-timeout poll confirms the queue is non-empty, so the
- * read can never block. Stops at the batch cap without reading, so no
- * event is ever dropped (the caller re-polls and continues).
- */
-static int drain_line(struct amt102 *e, int line_idx,
-                      struct amt_event *ev, int *nev)
-{
-    struct gpiod_line_event glev[AMT102_MAX_BATCH];
-    struct gpiod_line *line;
-    int fd;
-
-    switch (line_idx) {
-    case 0:  line = e->la; fd = e->fd_a; break;
-    case 1:  line = e->lb; fd = e->fd_b; break;
-    default: line = e->lx; fd = e->fd_x; break;
-    }
-
-    for (;;) {
-        struct pollfd pfd;
-        int n, i;
-
-        if (*nev >= AMT102_EV_MAX)
-            break;                          /* batch full: process, re-poll */
-
-        pfd.fd      = fd;
-        pfd.events  = POLLIN;
-        pfd.revents = 0;
-        if (poll(&pfd, 1, 0) <= 0)
-            break;                          /* nothing more queued */
-        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
-            return -1;
-
-        n = gpiod_line_event_read_multiple(line, glev, AMT102_MAX_BATCH);
-        if (n < 0)
-            return (errno == EAGAIN) ? 0 : -1;
-        if (n == 0)
-            break;
-
-        for (i = 0; i < n; i++) {
-            if (*nev >= AMT102_EV_MAX)
-                break;
-            ev[*nev].ts_ns  = ts_to_ns(&glev[i].ts);
-            ev[*nev].line   = line_idx;
-            ev[*nev].rising =
-                (glev[i].event_type == GPIOD_LINE_EVENT_RISING_EDGE);
-            (*nev)++;
-        }
-    }
+    const raw_event_t *e1 = p1;
+    const raw_event_t *e2 = p2;
+    if (e1->ts_ns < e2->ts_ns) return -1;
+    if (e1->ts_ns > e2->ts_ns) return +1;
     return 0;
 }
 
 /*
- * One poll+drain+process pass.
- * Returns 1 if any events were processed (more may be pending),
- * 0 if nothing was pending (timeout, EINTR, or fully drained),
- * or -1 on error. Adds processed events to *total.
+ * Request a single line for edge events. Tries bias-disable first (the
+ * AMT102 is push-pull CMOS; no internal pull is wanted), falls back
+ * without the flag if the running kernel rejects it.
  */
-static int poll_once(struct amt102 *e, int timeout_ms, int *total)
+static int request_line(struct gpiod_chip *chip,
+                        struct line_slot *slot,
+                        unsigned pin,
+                        int event_type,
+                        const char *consumer,
+                        bool *bias_fallback)
 {
-    struct pollfd pfd[3];
-    struct amt_event ev[AMT102_EV_MAX];
-    int nev = 0;
-    int rc, i, line;
+    struct gpiod_line_request_config cfg;
 
-    pfd[0].fd      = e->fd_a;
-    pfd[1].fd      = e->fd_b;
-    pfd[2].fd      = e->fd_x;
-    pfd[0].events  = POLLIN;
-    pfd[1].events  = POLLIN;
-    pfd[2].events  = POLLIN;
+    slot->pin = pin;
+    slot->line = gpiod_chip_get_line(chip, pin);
+    if (!slot->line) return -1;
 
-    rc = poll(pfd, 3, timeout_ms);
-    if (rc < 0)
-        return (errno == EINTR) ? 0 : -1;
-    if (rc == 0)
-        return 0;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.consumer = consumer;
+    cfg.request_type = event_type;
+    cfg.flags = GPIOD_LINE_REQUEST_FLAG_BIAS_DISABLE;
 
-    for (i = 0; i < 3; i++)
-        if (pfd[i].revents & (POLLERR | POLLHUP | POLLNVAL))
+    if (gpiod_line_request(slot->line, &cfg, 0) < 0) {
+        /* Retry without the bias flag */
+        cfg.flags = 0;
+        if (gpiod_line_request(slot->line, &cfg, 0) < 0) {
+            slot->line = NULL;
             return -1;
-
-    for (line = 0; line < 3; line++) {
-        if (pfd[line].revents & POLLIN) {
-            if (drain_line(e, line, ev, &nev) < 0)
-                return -1;
         }
+        *bias_fallback = true;
     }
 
-    if (nev == 0)
-        return 0;
+    slot->fd = gpiod_line_event_get_fd(slot->line);
+    if (slot->fd < 0) {
+        gpiod_line_release(slot->line);
+        slot->line = NULL;
+        return -1;
+    }
 
-    qsort(ev, (size_t)nev, sizeof(ev[0]), ev_cmp);
-    for (i = 0; i < nev; i++)
-        process_event(e, &ev[i]);
-
-    *total += nev;
-    return 1;
+    return 0;
 }
 
-int amt102_poll(amt102_t *e, int timeout_ms)
+int amt102_open(amt102_t **out)
 {
+    amt102_t *e;
+    bool bias_fallback = false;
+
+    if (!out) { errno = EINVAL; return -1; }
+    *out = NULL;
+
+    e = calloc(1, sizeof(*e));
+    if (!e) return -1;
+
+    e->chip = gpiod_chip_open_lookup(AMT102_GPIOCHIP);
+    if (!e->chip) {
+        free(e);
+        return -1;
+    }
+
+    if (request_line(e->chip, &e->la, AMT102_LINE_A,
+                     GPIOD_LINE_REQUEST_EVENT_BOTH_EDGES,
+                     "amt102_a", &bias_fallback) < 0 ||
+        request_line(e->chip, &e->lb, AMT102_LINE_B,
+                     GPIOD_LINE_REQUEST_EVENT_BOTH_EDGES,
+                     "amt102_b", &bias_fallback) < 0 ||
+        request_line(e->chip, &e->lx, AMT102_LINE_X,
+                     GPIOD_LINE_REQUEST_EVENT_RISING_EDGE,
+                     "amt102_x", &bias_fallback) < 0) {
+        amt102_close(e);
+        return -1;
+    }
+
+    quad_decode_init(&e->dec);
+    memset(&e->state, 0, sizeof(e->state));
+    e->state.bias_fallback = bias_fallback;
+
+    /*
+     * Read initial static levels so the decoder knows the starting state.
+     * Line levels cannot be read while event-requested via gpiod_line_get_value
+     * on some kernel versions, but on libgpiod 1.6 / Pi kernel 6.x this works.
+     * If it returns -1, leave last_a/last_b as 0; the first edge event will
+     * only sync the decoder state (no count) - see quad_decode.h.
+     */
+    e->last_a = gpiod_line_get_value(e->la.line);
+    e->last_b = gpiod_line_get_value(e->lb.line);
+    if (e->last_a >= 0 && e->last_b >= 0) {
+        quad_decode_step(&e->dec, e->last_a, e->last_b);
+        e->state.synced = (e->dec.state != QUAD_STATE_UNKNOWN);
+    } else {
+        e->last_a = 0;
+        e->last_b = 0;
+    }
+
+    *out = e;
+    return 0;
+}
+
+void amt102_close(amt102_t *enc)
+{
+    if (!enc) return;
+    if (enc->la.line) gpiod_line_release(enc->la.line);
+    if (enc->lb.line) gpiod_line_release(enc->lb.line);
+    if (enc->lx.line) gpiod_line_release(enc->lx.line);
+    if (enc->chip)    gpiod_chip_close(enc->chip);
+    free(enc);
+}
+
+/*
+ * Drains one line's event queue into ev_out using the batch read API.
+ * Never blocks (caller only invokes this after poll reported POLLIN).
+ */
+static int drain_line(struct line_slot *slot, uint8_t src,
+                      raw_event_t *ev_out, int max_ev)
+{
+    struct gpiod_line_event buf[AMT102_MAX_BATCH];
     int total = 0;
 
-    for (;;) {
-        int rc = poll_once(e, total ? 0 : timeout_ms, &total);
-        if (rc < 0)
-            return -1;
-        if (rc == 0)
-            break;
+    while (total < max_ev) {
+        int to_read = max_ev - total;
+        if (to_read > AMT102_MAX_BATCH) to_read = AMT102_MAX_BATCH;
+
+        int n = gpiod_line_event_read_multiple(slot->line, buf, to_read);
+        if (n <= 0) break;
+
+        for (int i = 0; i < n; i++) {
+            ev_out[total + i].ts_ns  = ts_to_ns(&buf[i].ts);
+            ev_out[total + i].source = src;
+            ev_out[total + i].type   = buf[i].event_type;
+        }
+        total += n;
+        if (n < to_read) break;   /* drained */
     }
     return total;
 }
 
-int amt102_open(amt102_t **enc_out)
+int amt102_poll(amt102_t *enc, int timeout_ms)
 {
-    struct amt102 *e;
-    int rc;
+    struct pollfd pfd[3];
+    raw_event_t events[AMT102_EV_MAX];
+    int n_ev = 0;
+    int ret;
 
-    *enc_out = NULL;
+    if (!enc) { errno = EINVAL; return -1; }
 
-    e = calloc(1, sizeof(*e));
-    if (!e) {
-        errno = ENOMEM;
-        return -1;
+    pfd[0].fd = enc->la.fd;  pfd[0].events = POLLIN; pfd[0].revents = 0;
+    pfd[1].fd = enc->lb.fd;  pfd[1].events = POLLIN; pfd[1].revents = 0;
+    pfd[2].fd = enc->lx.fd;  pfd[2].events = POLLIN; pfd[2].revents = 0;
+
+    ret = poll(pfd, 3, timeout_ms);
+    if (ret <= 0) return ret;   /* 0 = timeout, <0 = error/EINTR */
+
+    /* Drain all lines that have data waiting */
+    if (pfd[0].revents & POLLIN) {
+        n_ev += drain_line(&enc->la, 'A', events + n_ev, AMT102_EV_MAX - n_ev);
     }
-    e->last_a = -1;
-    e->last_b = -1;
-    quad_decode_init(&e->dec);
-
-    e->chip = gpiod_chip_open_by_name(AMT102_GPIOCHIP);
-    if (!e->chip)
-        goto fail;
-
-    e->la = gpiod_chip_get_line(e->chip, AMT102_LINE_A);
-    e->lb = gpiod_chip_get_line(e->chip, AMT102_LINE_B);
-    e->lx = gpiod_chip_get_line(e->chip, AMT102_LINE_X);
-    if (!e->la || !e->lb || !e->lx)
-        goto fail;
-
-    if (gpiod_line_is_used(e->la) || gpiod_line_is_used(e->lb) ||
-        gpiod_line_is_used(e->lx)) {
-        errno = EBUSY;
-        goto fail;
+    if (pfd[1].revents & POLLIN) {
+        n_ev += drain_line(&enc->lb, 'B', events + n_ev, AMT102_EV_MAX - n_ev);
+    }
+    if (pfd[2].revents & POLLIN) {
+        n_ev += drain_line(&enc->lx, 'X', events + n_ev, AMT102_EV_MAX - n_ev);
     }
 
-    /* Bias-disable first (push-pull encoder outputs, no pull wanted).
-     * Kernels older than 5.5 reject the flag - fall back without it. */
-    rc = request_line(e->la, GPIOD_LINE_REQUEST_EVENT_BOTH_EDGES, true);
-    if (rc < 0) {
-        e->bias_fallback = true;
-        rc = request_line(e->la, GPIOD_LINE_REQUEST_EVENT_BOTH_EDGES, false);
-        if (rc < 0)
-            goto fail;
+    if (n_ev == 0) return 0;
+
+    /* Sort combined batch by kernel timestamp to preserve transition order */
+    if (n_ev > 1) {
+        qsort(events, n_ev, sizeof(raw_event_t), cmp_raw_events);
     }
-    rc = request_line(e->lb, GPIOD_LINE_REQUEST_EVENT_BOTH_EDGES,
-                      !e->bias_fallback);
-    if (rc < 0)
-        goto fail;
-    rc = request_line(e->lx, GPIOD_LINE_REQUEST_EVENT_RISING_EDGE,
-                      !e->bias_fallback);
-    if (rc < 0)
-        goto fail;
 
-    e->fd_a = gpiod_line_event_get_fd(e->la);
-    e->fd_b = gpiod_line_event_get_fd(e->lb);
-    e->fd_x = gpiod_line_event_get_fd(e->lx);
-    if (e->fd_a < 0 || e->fd_b < 0 || e->fd_x < 0)
-        goto fail;
+    /* Process in timestamp order */
+    for (int i = 0; i < n_ev; i++) {
+        const raw_event_t *e = &events[i];
+        enc->state.last_event_ts_ns = e->ts_ns;
 
-    *enc_out = e;
-    return 0;
+        if (e->source == 'X') {
+            /* Rising edge on X: update pulse counter and snapshot */
+            enc->state.x_pulses++;
+            enc->state.count_at_last_index   = enc->dec.count;
+            enc->state.a_edges_at_last_index = enc->state.a_edges;
+            enc->state.b_edges_at_last_index = enc->state.b_edges;
+            enc->state.invalid_at_last_index = enc->dec.invalid;
+            enc->state.last_index_ts_ns      = e->ts_ns;
+            continue;
+        }
 
-fail:
-    {
-        int saved = errno;
-        amt102_close(e);
-        errno = saved ? saved : EIO;
+        /* Channel A or B edge */
+        int level = (e->type == GPIOD_LINE_EVENT_RISING_EDGE) ? 1 : 0;
+        if (e->source == 'A') {
+            enc->last_a = level;
+            enc->state.a_edges++;
+        } else {
+            enc->last_b = level;
+            enc->state.b_edges++;
+        }
+
+        quad_decode_step(&enc->dec, enc->last_a, enc->last_b);
     }
-    return -1;
+
+    /* Publish current counters to public snapshot */
+    enc->state.count   = enc->dec.count;
+    enc->state.invalid = enc->dec.invalid;
+    enc->state.synced  = (enc->dec.state != QUAD_STATE_UNKNOWN);
+
+    return n_ev;
 }
 
-void amt102_close(struct amt102 *e)
+void amt102_get_state(const amt102_t *enc, amt102_state_t *out)
 {
-    if (!e)
-        return;
-    if (e->la)
-        gpiod_line_release(e->la);
-    if (e->lb)
-        gpiod_line_release(e->lb);
-    if (e->lx)
-        gpiod_line_release(e->lx);
-    if (e->chip)
-        gpiod_chip_close(e->chip);
-    free(e);
-}
-
-void amt102_get_state(const amt102_t *e, amt102_state_t *out)
-{
-    out->count                   = e->dec.count;
-    out->a_edges                 = e->a_edges;
-    out->b_edges                 = e->b_edges;
-    out->x_pulses                = e->x_pulses;
-    out->invalid                 = e->dec.invalid;
-    out->synced                  = (e->last_a >= 0 && e->last_b >= 0);
-    out->bias_fallback           = e->bias_fallback;
-    out->count_at_last_index     = e->count_at_last_index;
-    out->a_edges_at_last_index   = e->a_edges_at_last_index;
-    out->b_edges_at_last_index   = e->b_edges_at_last_index;
-    out->invalid_at_last_index   = e->invalid_at_last_index;
-    out->last_index_ts_ns        = e->last_index_ts_ns;
-    out->last_event_ts_ns        = e->last_event_ts_ns;
+    if (enc && out) *out = enc->state;
 }

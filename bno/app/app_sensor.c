@@ -31,8 +31,8 @@
 #include "sh2_SensorValue.h"
 #include "euler.h"
 
-#include "imu_sample.h"
-#include "sensor_reader.h"
+#include "app/app_contract.h"
+#include "app/app_sensor.h"
 
 extern sh2_Hal_t *sh2_hal_rpi_init(void);
 
@@ -159,7 +159,7 @@ bool sensor_reader_getLatestSample(ImuSample_t *outSample)
     return true;
 }
 
-void sensor_reader_resetSeq()
+void sensor_reader_resetSeq(void)
 {
     sSeqCounter = 0;
 }
