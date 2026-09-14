@@ -73,38 +73,67 @@ $$\Delta P = \rho \cdot g \cdot \Delta h \implies \Delta h = \frac{\Delta P}{\rh
 
 ## 4. Real-Time Timing & Benchmark Results
 
-All benchmarks were run for **10.0 seconds (10,000 service ticks)** under PREEMPT_RT (`SCHED_FIFO` priority 80) driven by `realtime.c` (`CLOCK_MONOTONIC`) at a **1 kHz tick cadence** ($1.0\text{ ms}$).
+### 4.1 Bus Frequency Comparison: 100 kHz vs 400 kHz Fast Mode
 
-### What "Average I2C Tx Time" Measures
-On Linux, calling `write()` or `read()` on `/dev/i2c-1` enters the kernel `i2c-bcm2835` driver. At standard $100\text{ kHz}$ I²C bus clocking, serializing address bytes, command bytes, ACKs, and repeated-starts requires **$650\text{--}700\ \mu\text{s}$ per system call**. 
+The Raspberry Pi hardware I2C controller (`/dev/i2c-1`) was initially benchmarked at the default standard speed (100 kHz) and subsequently configured to **Fast Mode (400 kHz)** by adding `dtparam=i2c_arm_baudrate=400000` to `/boot/firmware/config.txt`.
 
-A complete paired reading executes 4 distinct bus operations (6 system calls):
-1. Write start $D_1$ command (1 byte)
-2. Write ADC read command `0x00` (1 byte) + Read $D_1$ ADC (3 bytes)
-3. Write start $D_2$ command (1 byte)
-4. Write ADC read command `0x00` (1 byte) + Read $D_2$ ADC (3 bytes)
+Switching to Fast Mode resulted in an approximate **3.5x reduction** in I2C transaction latency across all system calls:
+* **Standard 100 kHz Mode:** Average I2C transaction duration was **~650–700 µs** per syscall.
+* **Fast Mode (400 kHz):** Average I2C transaction duration dropped to **~180–200 µs** per syscall.
 
-### Empirical Benchmark Summary
+While the sensor internal ADC conversion wait times remain constant (dictated by internal RC oscillator timings), the faster bus drastically reduces thread blocking during command dispatch and data readout, leaving substantial CPU and scheduling headroom for concurrent sensor loops.
 
-| Benchmark Configuration | Measured Sustained Rate | 100 Hz Publish Frames | Stale Frames Count | Stale Frame % | Average I2C Tx Time |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **OSR 2048 Paired (1:1)** | $73.50\text{ Hz}$ | 1000 | 266 | **$26.60\%$** | $692\ \mu\text{s}$ |
-| **OSR 2048 Decoupled (1:2)** | $98.90\text{ Hz}$ | 1000 | 179 | **$17.90\%$** | $695\ \mu\text{s}$ |
-| **OSR 2048 Decoupled (1:5)** | $122.70\text{ Hz}$ | 1000 | 91 | **$9.10\%$** | $695\ \mu\text{s}$ |
-| **OSR 2048 P / OSR 1024 T (1:1)**| $93.10\text{ Hz}$ | 1000 | 70 | **$7.00\%$** | $694\ \mu\text{s}$ |
-| **OSR 2048 P / OSR 1024 T (1:5)**| $133.50\text{ Hz}$ | 1000 | 28 | **$2.80\%$** | $694\ \mu\text{s}$ |
-| **OSR 1024 Paired (1:1)** | $124.99\text{ Hz}$ | 1000 | 1 | **$0.10\%$** | $666\ \mu\text{s}$ |
-| **OSR 512 Paired (1:1)** | **$166.70\text{ Hz}$** | **1000** | **0** | **$0.00\%$** | **$652\ \mu\text{s}$** |
-| **OSR 256 Paired (1:1)** | **$175.20\text{ Hz}$** | **1000** | **0** | **$0.00\%$** | **$652\ \mu\text{s}$** |
+---
 
-### Key Benchmark Observations
-1. **Why OSR 2048 fails at 100 Hz:** Each conversion takes $4.32\text{ ms}$ plus $\approx 1.5\text{ ms}$ I²C overhead ($5.8\text{ ms}$ per channel). Converting both channels sequentially requires $\approx 11.6\text{ ms} > 10.0\text{ ms}$, resulting in missed deadlines and stale frame repeating.
-2. **Why Decoupled Ratios still exhibit stale frames:** Even when the *average* pressure rate is $133.5\text{ Hz}$, the single tick where $D_2$ is scheduled introduces an $11\text{ ms}$ pipeline stall, producing a stale frame during that specific 10 ms window.
-3. **Why OSR 512 is Optimal:** 
-   - $1.15\text{ ms}$ conversion delay $\times 2 = 2.30\text{ ms}$ total ADC wait.
-   - Entire paired sequence finishes in **$< 5.0\text{ ms}$** (spanning 6 ticks in a 1 kHz loop).
-   - Generates **$166.7\text{ Hz}$ maximum throughput** with **$0.00\%$ stale frames** and leaves **$\ge 5.0\text{ ms}$ of idle CPU headroom** in every 10 ms publication window for other tasks (IMU servicing, encoder handling, Kalman filtering).
+### 4.2 Comprehensive Benchmark Matrix
 
+Benchmarks were evaluated over 10.0-second runs using `tests/test_rate_bench.c` in a 1 kHz PREEMPT-RT `SCHED_FIFO` service loop (`TIMER_ABSTIME`, monotonic clock), evaluating actual pressure acquisition throughput against a 100 Hz publication schedule (1,000 frames total).
+
+| Configuration Set | Ratio (Temp:Press) | D1 Delay (ms) | D2 Delay (ms) | 100 kHz Tx Avg (µs) | 100 kHz Rate (Hz) | 100 kHz Stale (%) | 400 kHz Tx Avg (µs) | 400 kHz Rate (Hz) | 400 kHz Stale (%) |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **SET A: OSR 2048 / 2048** | 1 : 1 | 4.40 | 4.40 | 480.39 | 79.00 | 21.10% | 199.88 | 83.30 | 16.80% |
+| | 1 : 2 | 4.40 | 4.40 | 692.85 | 101.60 | 14.10% | 199.99 | 111.10 | 11.30% |
+| | 1 : 3 | 4.40 | 4.40 | 697.32 | 110.29 | 13.60% | 200.41 | 125.00 | 8.50% |
+| | 1 : 4 | 4.40 | 4.40 | 691.36 | 120.00 | 11.70% | 200.84 | 133.30 | 0.30% |
+| | 1 : 5 | 4.40 | 4.40 | 695.04 | 122.40 | 9.40% | 200.62 | 138.90 | 5.90% |
+| **SET B: OSR 2048 / 1024** | 1 : 1 | 4.40 | 2.25 | 694.63 | 92.89 | 7.20% | 197.16 | 100.00 | 0.10% |
+| | 1 : 2 | 4.40 | 2.25 | 684.87 | 115.59 | 5.20% | 196.39 | 125.00 | 0.20% |
+| | 1 : 3 | 4.40 | 2.25 | 695.05 | 122.59 | 0.60% | 198.91 | 136.40 | 0.20% |
+| | 1 : 4 | 4.40 | 2.25 | 688.01 | 129.40 | 2.90% | 199.72 | 142.80 | 0.30% |
+| | 1 : 5 | 4.40 | 2.25 | 692.67 | 132.00 | 2.10% | 199.01 | 147.00 | 0.30% |
+| **BASELINES: Paired (1:1)** | | | | | | | | | |
+| *OSR 1024 / 1024* | 1 : 1 | 2.25 | 2.25 | 666.25 | 124.99 | 0.10% | 193.12 | 125.00 | 0.10% |
+| *OSR 512 / 512* | 1 : 1 | 1.15 | 1.15 | 652.19 | 166.70 | **0.00%** | 180.73 | 166.70 | **0.00%** |
+| *OSR 256 / 256* | 1 : 1 | 0.60 | 0.60 | 652.05 | 175.20 | **0.00%** | 179.69 | 250.00 | **0.00%** |
+
+---
+
+### 4.3 Analysis & Key Observations
+
+1. **Physical Limit of Symmetrical OSR 2048 (1:1):**
+   * Even with bus latency reduced to ~200 µs at 400 kHz, 1:1 paired OSR 2048 only achieved **83.30 Hz** with **16.8% stale frames**.
+   * Hardware conversion delays ($4.32\text{ ms} + 4.32\text{ ms} = 8.64\text{ ms}$) quantized across a 1 kHz discrete service loop consume 10–12 ms per pair, making true 100 Hz 1:1 operation physically impossible at OSR 2048.
+2. **Phase Jitter in Asymmetric OSR Ratios:**
+   * In SET A, asymmetric ratios (e.g., 1:2 to 1:5) achieved average throughputs above 100 Hz (111–138 Hz), yet still suffered up to 11.3% stale frames. 
+   * This is caused by conversion phase misalignment: cycles executing a temperature conversion take longer than pure pressure cycles, periodically straddling 100 Hz publication boundaries and causing stale samples.
+3. **SET B Viability at 400 kHz:**
+   * Shortening temperature conversion to OSR 1024 ($2.25\text{ ms}$) allowed 1:1 operation to reach **100.00 Hz** with only 1 stale frame (0.10%), proving viable if maximum pressure oversampling is required in the future.
+
+---
+
+### 4.4 Final Operating Decision: Symmetrical OSR 512 (1:1)
+
+For the Step 4 production driver implementation and subsequent IMU integration, **Symmetrical OSR 512 (1:1)** on **400 kHz Fast Mode I2C** is selected as the primary operating configuration:
+
+* **Zero Stale Publications:** Achieved **0.00% stale frames** across 1,000 consecutive 100 Hz publication windows.
+* **Low Bus Occupancy:** Average transaction time of **180.73 µs** minimizes total I2C bus holding time.
+* **Guaranteed Frame Headroom:**
+  * D1 Conversion: ~1.15 ms
+  * D2 Conversion: ~1.15 ms
+  * Combined I2C Transactions: ~0.72 ms
+  * **Total Frame Execution Time:** **~3.02 ms**
+  * **Idle Headroom:** **~6.98 ms per 10 ms frame**
+* **Noise vs Timing Trade-off:** RMS noise at OSR 512 is **0.062 mbar** (equivalent to approximately **0.63 mm of hydrostatic water depth**), which provides sufficient resolution for underwater towbody and glider depth estimation while leaving ample idle headroom to service BNO085 SPI transactions and encoder interrupts on the shared real-time thread.
 ---
 
 ## 5. Architectural Decision for Production (`app/`)
