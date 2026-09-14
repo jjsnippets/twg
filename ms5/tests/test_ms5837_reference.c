@@ -77,6 +77,25 @@ static int test_rejections_and_minimum(void)
     return 0;
 }
 
+static int test_350_sample_boundary(void)
+{
+    Ms5837Reference_t reference;
+    size_t index;
+
+    CHECK(MS5837_ZERO_MIN_VALID_SAMPLES == 350U);
+    ms5837_reference_begin(&reference);
+    for (index = 0U; index < MS5837_ZERO_MIN_VALID_SAMPLES; ++index) {
+        BaroSample_t sample = make_sample(
+            (uint64_t)index + 1U, 1000.0, BARO_STATUS_NONE);
+        CHECK(ms5837_reference_add_sample(&reference, &sample));
+    }
+    CHECK(ms5837_reference_finalize(&reference));
+    CHECK(reference.valid_sample_count == 350U);
+    CHECK(fabs(ms5837_reference_surface_pressure(&reference) - 1000.0) <
+          1e-12);
+    return 0;
+}
+
 static int test_duplicate_sequence(void)
 {
     Ms5837Reference_t reference;
@@ -94,6 +113,7 @@ int main(void)
 {
     CHECK(test_trimmed_mean() == 0);
     CHECK(test_rejections_and_minimum() == 0);
+    CHECK(test_350_sample_boundary() == 0);
     CHECK(test_duplicate_sequence() == 0);
     puts("PASS: Step 4A surface-reference contract");
     return 0;

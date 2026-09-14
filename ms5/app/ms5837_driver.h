@@ -30,7 +30,8 @@ typedef enum {
     MS5837_DRIVER_ERR_HAL_CONTRACT = -1001,
     MS5837_DRIVER_ERR_PROM_CRC = -1002,
     MS5837_DRIVER_ERR_PROM_INVALID = -1003,
-    MS5837_DRIVER_ERR_NOT_INITIALIZED = -1004
+    MS5837_DRIVER_ERR_NOT_INITIALIZED = -1004,
+    MS5837_DRIVER_ERR_BUSY = -1005
 } Ms5837DriverResult_t;
 
 typedef enum {
@@ -41,7 +42,7 @@ typedef enum {
 
 typedef enum {
     MS5837_STATE_STOPPED = 0,
-    MS5837_STATE_START_D1,
+    MS5837_STATE_IDLE,
     MS5837_STATE_WAIT_D1,
     MS5837_STATE_START_D2,
     MS5837_STATE_WAIT_D2,
@@ -71,6 +72,8 @@ typedef struct {
 
 int ms5837_driver_init(Ms5837Driver_t *driver, const Ms5837Hal_t *hal);
 int ms5837_driver_shutdown(Ms5837Driver_t *driver);
+int ms5837_driver_trigger(Ms5837Driver_t *driver,
+                           BaroRuntimeStats_t *stats);
 int ms5837_driver_service(Ms5837Driver_t *driver,
                            uint64_t now_ns,
                            const BaroRunConfig_t *config,

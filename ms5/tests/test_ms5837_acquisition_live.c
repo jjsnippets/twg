@@ -12,7 +12,8 @@
 #include "ms5837_hal_rpi.h"
 
 #define DIAGNOSTIC_DURATION_NS UINT64_C(10000000000)
-#define SERVICE_PERIOD_NS UINT64_C(1000000)
+#define FRAME_PERIOD_NS UINT64_C(10000000)
+#define POLL_PERIOD_NS UINT64_C(100000)
 
 static uint64_t monotonic_ns(void)
 {
@@ -81,30 +82,54 @@ int main(void)
     now_ns = start_ns;
 
     while ((now_ns - start_ns) < DIAGNOSTIC_DURATION_NS) {
-        status = ms5837_driver_service(&driver, now_ns, &config, &stats,
-                                        &sample);
-        if (status == MS5837_SERVICE_SAMPLE_READY) {
-            if ((sample.measurement_sequence == 1U) ||
-                ((sample.measurement_sequence - last_printed_sequence) >=
-                 100U)) {
-                printf("seq=%" PRIu64 " t_ns=%" PRIu64
-                       " D1=%" PRIu32 " D2=%" PRIu32
-                       " P=%.2f mbar T=%.2f C flags=0x%08" PRIX32 "\n",
-                       sample.measurement_sequence,
-                       sample.measurement_complete_time_ns,
-                       sample.raw_pressure_d1, sample.raw_temperature_d2,
-                       sample.pressure_mbar, sample.temperature_c,
-                       sample.status_flags);
-                last_printed_sequence = sample.measurement_sequence;
+        uint64_t frame_deadline_ns = now_ns + FRAME_PERIOD_NS;
+
+        status = ms5837_driver_trigger(&driver, &stats);
+        if (status == MS5837_DRIVER_ERR_BUSY) {
+            fprintf(stderr, "Previous frame did not complete before trigger\n");
+        }
+        if ((status < 0) &&
+            (ms5837_driver_state(&driver) >= MS5837_STATE_RECOVERY_OPEN)) {
+            status = MS5837_SERVICE_RECOVERING;
+        }
+        while ((ms5837_driver_state(&driver) != MS5837_STATE_IDLE) &&
+               (monotonic_ns() < frame_deadline_ns)) {
+            now_ns = monotonic_ns();
+            status = ms5837_driver_service(&driver, now_ns, &config, &stats,
+                                            &sample);
+            if (status == MS5837_SERVICE_SAMPLE_READY) {
+                if ((sample.measurement_sequence == 1U) ||
+                    ((sample.measurement_sequence - last_printed_sequence) >=
+                     100U)) {
+                    printf("seq=%" PRIu64 " t_ns=%" PRIu64
+                           " D1=%" PRIu32 " D2=%" PRIu32
+                           " P=%.2f mbar T=%.2f C flags=0x%08" PRIX32 "\n",
+                           sample.measurement_sequence,
+                           sample.measurement_complete_time_ns,
+                           sample.raw_pressure_d1, sample.raw_temperature_d2,
+                           sample.pressure_mbar, sample.temperature_c,
+                           sample.status_flags);
+                    last_printed_sequence = sample.measurement_sequence;
+                }
             }
-        } else if ((status < 0) &&
-                   (ms5837_driver_state(&driver) <
-                    MS5837_STATE_RECOVERY_OPEN)) {
+            if ((status < 0) &&
+                (ms5837_driver_state(&driver) >=
+                 MS5837_STATE_RECOVERY_OPEN)) {
+                status = MS5837_SERVICE_RECOVERING;
+            }
+            if (ms5837_driver_state(&driver) != MS5837_STATE_IDLE) {
+                struct timespec pause = { 0, (long)POLL_PERIOD_NS };
+                while ((nanosleep(&pause, &pause) < 0) && (errno == EINTR)) {
+                }
+            }
+        }
+        if ((status < 0) &&
+            (ms5837_driver_state(&driver) < MS5837_STATE_RECOVERY_OPEN)) {
             fprintf(stderr, "Unrecoverable service error: %d\n", status);
             break;
         }
 
-        add_ns(&next_tick, SERVICE_PERIOD_NS);
+        add_ns(&next_tick, FRAME_PERIOD_NS);
         while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
                                &next_tick, NULL) == EINTR) {
         }

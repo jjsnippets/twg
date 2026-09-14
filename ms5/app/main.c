@@ -12,11 +12,12 @@
  *         without --zero, no taring is performed and depth remains NaN.
  * --density selects fluid density (default: 1000 kg/m^3, freshwater).
  *
- * The bus (/dev/i2c-1), address (0x76), SCHED_FIFO priority (90), 1 kHz
- * service cadence, 100 Hz publication cadence, and symmetric OSR 512 are
- * fixed production settings. A concise telemetry line is printed every
- * 500 service ticks (500 ms). Every scheduled 100 Hz record is queued to a
- * timestamped CSV file in the current working directory.
+ * The bus (/dev/i2c-1), address (0x76), SCHED_FIFO priority (90), 100 Hz
+ * frame/publication cadence, and symmetric OSR 512 are fixed settings.
+ * The dedicated I2C bus permits one symmetric D1/D2 conversion pair per
+ * frame: D1 is triggered at the beginning of each 10 ms frame. A concise
+ * telemetry line is printed every 50 frames (500 ms). Every frame record is
+ * queued to a timestamped CSV file in the current working directory.
  */
 
 #include <errno.h>
@@ -38,10 +39,10 @@
 #include "realtime.h"
 
 #define RT_PRIORITY 90
-#define SERVICE_PERIOD_SEC 0.001
-#define SERVICE_PERIOD_NS UINT64_C(1000000)
-#define PUBLICATION_TICKS UINT64_C(10)
-#define TELEMETRY_TICKS UINT64_C(500)
+#define FRAME_PERIOD_SEC 0.010
+#define FRAME_PERIOD_NS UINT64_C(10000000)
+#define CONVERSION_POLL_NS UINT64_C(100000)
+#define TELEMETRY_FRAMES UINT64_C(50)
 
 static volatile sig_atomic_t stop_requested;
 
@@ -119,7 +120,7 @@ static void print_telemetry(uint64_t tick, BaroCapturePhase_t phase,
     BaroSample_t sample;
 
     if (ms5837_driver_latest_sample(driver, &sample)) {
-        printf("tick=%" PRIu64 " phase=%s seq=%" PRIu64
+        printf("frame=%" PRIu64 " phase=%s seq=%" PRIu64
                " P=%.2f_mbar T=%.2f_C depth=%.4f_m flags=0x%08" PRIX32
                " i2c=%" PRIu64 " drops=%" PRIu64 "\n",
                tick, phase == BARO_CAPTURE_PHASE_ZERO ? "zero" : "run",
@@ -127,7 +128,7 @@ static void print_telemetry(uint64_t tick, BaroCapturePhase_t phase,
                sample.temperature_c, sample.depth_m, sample.status_flags,
                stats->i2c_errors, stats->logger_drops);
     } else {
-        printf("tick=%" PRIu64 " phase=%s sample=not_ready i2c=%" PRIu64
+        printf("frame=%" PRIu64 " phase=%s sample=not_ready i2c=%" PRIu64
                " drops=%" PRIu64 " density=%.3f\n",
                tick, phase == BARO_CAPTURE_PHASE_ZERO ? "zero" : "run",
                stats->i2c_errors, stats->logger_drops,
@@ -135,35 +136,91 @@ static void print_telemetry(uint64_t tick, BaroCapturePhase_t phase,
     }
 }
 
+static int service_until_idle(Ms5837Driver_t *driver,
+                              BaroRunConfig_t *config,
+                              BaroRuntimeStats_t *stats,
+                              Ms5837Reference_t *reference,
+                              BaroCapturePhase_t phase,
+                              uint64_t frame_deadline_ns)
+{
+    BaroSample_t completed;
+
+    while (!stop_requested) {
+        uint64_t now_ns = monotonic_ns();
+        int service_status;
+
+        if (now_ns >= frame_deadline_ns) {
+            return -ETIMEDOUT;
+        }
+        service_status = ms5837_driver_service(
+            driver, now_ns, config, stats, &completed);
+        if (service_status == MS5837_SERVICE_SAMPLE_READY) {
+            if ((phase == BARO_CAPTURE_PHASE_ZERO) &&
+                (reference != NULL)) {
+                (void)ms5837_reference_add_sample(reference, &completed);
+            }
+            return 0;
+        }
+        if ((service_status < 0) &&
+            (ms5837_driver_state(driver) < MS5837_STATE_RECOVERY_OPEN)) {
+            return service_status;
+        }
+        if (ms5837_driver_state(driver) == MS5837_STATE_IDLE) {
+            return 0;
+        }
+        {
+            struct timespec pause;
+            pause.tv_sec = 0;
+            pause.tv_nsec = (long)CONVERSION_POLL_NS;
+            while ((nanosleep(&pause, &pause) < 0) && (errno == EINTR) &&
+                   !stop_requested) {
+            }
+        }
+    }
+    return -EINTR;
+}
+
 static int run_phase(Ms5837Driver_t *driver, Ms5837Logger_t *logger,
                      BaroRunConfig_t *config, BaroRuntimeStats_t *stats,
                      Ms5837Reference_t *reference,
                      BaroCapturePhase_t phase, uint64_t duration_ns,
-                     uint64_t *global_tick, uint64_t *publication_sequence,
+                     uint64_t *global_frame, uint64_t *publication_sequence,
                      uint64_t *last_published_measurement)
 {
-    BaroSample_t completed;
     uint64_t start_ns = monotonic_ns();
-    uint64_t now_ns = start_ns;
+    uint64_t frame_start_ns = start_ns;
 
-    while (!stop_requested && ((now_ns - start_ns) < duration_ns)) {
+    while (!stop_requested && ((frame_start_ns - start_ns) < duration_ns)) {
         uint64_t body_start_ns = monotonic_ns();
-        int service_status = ms5837_driver_service(
-            driver, now_ns, config, stats, &completed);
+        uint64_t frame_deadline_ns = frame_start_ns + FRAME_PERIOD_NS;
+        int frame_status;
 
-        ++*global_tick;
-        if ((service_status == MS5837_SERVICE_SAMPLE_READY) &&
-            (phase == BARO_CAPTURE_PHASE_ZERO) && (reference != NULL)) {
-            (void)ms5837_reference_add_sample(reference, &completed);
+        /* Trigger D1 first: this is the defined beginning of every frame. */
+        frame_status = ms5837_driver_trigger(driver, stats);
+        if (frame_status == MS5837_DRIVER_ERR_BUSY) {
+            /* Finish a late prior pair so one overrun cannot stall capture. */
+            frame_status = service_until_idle(
+                driver, config, stats, reference, phase, frame_deadline_ns);
+            if (frame_status == 0) {
+                frame_status = -ETIMEDOUT;
+            }
+        } else if (frame_status < 0) {
+            if (ms5837_driver_state(driver) >= MS5837_STATE_RECOVERY_OPEN) {
+                frame_status = service_until_idle(
+                    driver, config, stats, NULL, phase, frame_deadline_ns);
+            }
+        } else {
+            frame_status = service_until_idle(
+                driver, config, stats, reference, phase, frame_deadline_ns);
         }
-        if ((*global_tick % PUBLICATION_TICKS) == 0U) {
-            ++*publication_sequence;
-            publish_record(logger, driver, config, phase,
-                           *publication_sequence, now_ns,
-                           last_published_measurement, stats);
-        }
-        if ((*global_tick % TELEMETRY_TICKS) == 0U) {
-            print_telemetry(*global_tick, phase, driver, config, stats);
+
+        ++*global_frame;
+        ++*publication_sequence;
+        publish_record(logger, driver, config, phase,
+                       *publication_sequence, frame_start_ns,
+                       last_published_measurement, stats);
+        if ((*global_frame % TELEMETRY_FRAMES) == 0U) {
+            print_telemetry(*global_frame, phase, driver, config, stats);
         }
 
         {
@@ -172,12 +229,18 @@ static int run_phase(Ms5837Driver_t *driver, Ms5837Logger_t *logger,
             if (body_ns > stats->maximum_loop_body_ns) {
                 stats->maximum_loop_body_ns = body_ns;
             }
-            if (body_ns > SERVICE_PERIOD_NS) {
+            if ((body_ns > FRAME_PERIOD_NS) ||
+                (frame_status == -ETIMEDOUT)) {
                 ++stats->service_overruns;
             }
         }
-        RT_SleepUntil(SERVICE_PERIOD_SEC);
-        now_ns = monotonic_ns();
+        if ((frame_status < 0) &&
+            (frame_status != -ETIMEDOUT) &&
+            (frame_status != -EINTR)) {
+            return frame_status;
+        }
+        RT_SleepUntil(FRAME_PERIOD_SEC);
+        frame_start_ns = monotonic_ns();
     }
     return stop_requested ? -EINTR : 0;
 }
@@ -192,7 +255,7 @@ int main(int argc, char *argv[])
     Ms5837Reference_t reference;
     BaroRunConfig_t config;
     BaroRuntimeStats_t stats;
-    uint64_t global_tick = 0U;
+    uint64_t global_frame = 0U;
     uint64_t publication_sequence = 0U;
     uint64_t last_published_measurement = 0U;
     int result = 1;
@@ -227,7 +290,7 @@ int main(int argc, char *argv[])
         (void)ms5837_driver_shutdown(&driver);
         return 1;
     }
-    if (StartRT(RT_PRIORITY, SERVICE_PERIOD_SEC) != 0) {
+    if (StartRT(RT_PRIORITY, FRAME_PERIOD_SEC) != 0) {
         fprintf(stderr,
                 "WARNING: real-time setup failed; continuing without SCHED_FIFO.\n");
     }
@@ -240,7 +303,7 @@ int main(int argc, char *argv[])
         ms5837_reference_begin(&reference);
         status = run_phase(&driver, &logger, &config, &stats, &reference,
                            BARO_CAPTURE_PHASE_ZERO, MS5837_ZERO_DURATION_NS,
-                           &global_tick, &publication_sequence,
+                           &global_frame, &publication_sequence,
                            &last_published_measurement);
         if ((status == 0) && ms5837_reference_finalize(&reference)) {
             config.surface_pressure_mbar =
@@ -265,7 +328,7 @@ int main(int argc, char *argv[])
         status = run_phase(&driver, &logger, &config, &stats, NULL,
                            BARO_CAPTURE_PHASE_RUN,
                            options.duration_sec * UINT64_C(1000000000),
-                           &global_tick, &publication_sequence,
+                           &global_frame, &publication_sequence,
                            &last_published_measurement);
     }
     result = ((status == 0) && (stats.logger_drops == 0U)) ? 0 : 1;

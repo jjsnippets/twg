@@ -254,7 +254,7 @@ static int service_recovery(Ms5837Driver_t *driver, uint64_t now_ns,
         driver->prom = driver->recovery_prom;
         driver->initialized = true;
         driver->last_error = MS5837_DRIVER_OK;
-        driver->state = MS5837_STATE_START_D1;
+        driver->state = MS5837_STATE_IDLE;
         ++stats->recovery_successes;
         return MS5837_SERVICE_RECOVERING;
 
@@ -327,7 +327,7 @@ int ms5837_driver_init(Ms5837Driver_t *driver, const Ms5837Hal_t *hal)
     }
 
     driver->initialized = true;
-    driver->state = MS5837_STATE_START_D1;
+    driver->state = MS5837_STATE_IDLE;
     driver->last_error = MS5837_DRIVER_OK;
     return MS5837_DRIVER_OK;
 }
@@ -348,6 +348,33 @@ int ms5837_driver_shutdown(Ms5837Driver_t *driver)
     driver->state = MS5837_STATE_STOPPED;
     if (status < 0) {
         driver->last_error = status;
+    }
+    return status;
+}
+
+int ms5837_driver_trigger(Ms5837Driver_t *driver,
+                           BaroRuntimeStats_t *stats)
+{
+    int status;
+
+    if ((driver == NULL) || (stats == NULL)) {
+        return MS5837_DRIVER_ERR_ARGUMENT;
+    }
+    if (!driver->initialized || !driver->hal_open) {
+        driver->last_error = MS5837_DRIVER_ERR_NOT_INITIALIZED;
+        return driver->last_error;
+    }
+    if (driver->state != MS5837_STATE_IDLE) {
+        return MS5837_DRIVER_ERR_BUSY;
+    }
+
+    status = start_conversion(
+        driver,
+        (uint8_t)(MS5837_COMMAND_CONVERT_D1_BASE |
+                  MS5837_ACQUISITION_OSR),
+        MS5837_STATE_WAIT_D1, stats);
+    if (status >= 0) {
+        driver->pair_in_progress = true;
     }
     return status;
 }
@@ -378,16 +405,8 @@ int ms5837_driver_service(Ms5837Driver_t *driver,
     }
 
     switch (driver->state) {
-    case MS5837_STATE_START_D1:
-        status = start_conversion(
-            driver,
-            (uint8_t)(MS5837_COMMAND_CONVERT_D1_BASE |
-                      MS5837_ACQUISITION_OSR),
-            MS5837_STATE_WAIT_D1, stats);
-        if (status >= 0) {
-            driver->pair_in_progress = true;
-        }
-        return status;
+    case MS5837_STATE_IDLE:
+        return MS5837_SERVICE_PROGRESS;
 
     case MS5837_STATE_WAIT_D1:
         if (now_ns < driver->deadline_ns) {
@@ -423,7 +442,7 @@ int ms5837_driver_service(Ms5837Driver_t *driver,
         build_sample(driver, raw_d2, complete_time_ns, config, stats,
                      completed_sample);
         driver->pair_in_progress = false;
-        driver->state = MS5837_STATE_START_D1;
+        driver->state = MS5837_STATE_IDLE;
         driver->last_error = MS5837_DRIVER_OK;
         return MS5837_SERVICE_SAMPLE_READY;
 

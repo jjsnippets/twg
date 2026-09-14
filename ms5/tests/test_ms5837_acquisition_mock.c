@@ -168,8 +168,7 @@ static int complete_pair(MockHal_t *mock, Ms5837Driver_t *driver,
     int status;
     unsigned int adc_read_count = mock->adc_read_count;
 
-    status = ms5837_driver_service(driver, mock->time_ns, config, stats,
-                                    sample);
+    status = ms5837_driver_trigger(driver, stats);
     CHECK(status == MS5837_SERVICE_PROGRESS);
     CHECK(ms5837_driver_state(driver) == MS5837_STATE_WAIT_D1);
     CHECK(mock->selected_command ==
@@ -216,11 +215,17 @@ static int test_symmetric_osr512_pair(void)
     mock.conversion_write_count = 0U;
     mock.adc_read_count = 0U;
 
-    CHECK(ms5837_driver_service(&driver, mock.time_ns, &config, &stats,
-                                 &sample) == MS5837_SERVICE_PROGRESS);
+    CHECK(ms5837_driver_trigger(NULL, &stats) ==
+          MS5837_DRIVER_ERR_ARGUMENT);
+    CHECK(ms5837_driver_trigger(&driver, NULL) ==
+          MS5837_DRIVER_ERR_ARGUMENT);
+    CHECK(ms5837_driver_state(&driver) == MS5837_STATE_IDLE);
+    CHECK(ms5837_driver_trigger(&driver, &stats) == MS5837_SERVICE_PROGRESS);
     deadline = mock.time_ns + MS5837_OSR_512_CONVERSION_NS;
     CHECK(driver.deadline_ns == deadline);
     CHECK(mock.selected_command == 0x42U);
+    CHECK(ms5837_driver_trigger(&driver, &stats) == MS5837_DRIVER_ERR_BUSY);
+    CHECK(mock.conversion_write_count == 1U);
 
     CHECK(ms5837_driver_service(&driver, deadline - 1U, &config, &stats,
                                  &sample) == MS5837_SERVICE_PROGRESS);
@@ -270,7 +275,7 @@ static int drive_recovery(MockHal_t *mock, Ms5837Driver_t *driver,
         status = ms5837_driver_service(driver, mock->time_ns, config, stats,
                                         sample);
         CHECK(status == MS5837_SERVICE_RECOVERING);
-        if (ms5837_driver_state(driver) == MS5837_STATE_START_D1) {
+        if (ms5837_driver_state(driver) == MS5837_STATE_IDLE) {
             return 0;
         }
     }
@@ -291,8 +296,8 @@ static int test_error_aborts_pair_and_recovers(void)
     mock.conversion_write_count = 0U;
     mock.adc_read_count = 0U;
 
-    CHECK(ms5837_driver_service(&driver, mock.time_ns, &config, &stats,
-                                 &sample) == MS5837_SERVICE_PROGRESS);
+    CHECK(ms5837_driver_trigger(&driver, &stats) ==
+          MS5837_SERVICE_PROGRESS);
     mock.fail_next_read = 1U;
     mock.time_ns = driver.deadline_ns;
     CHECK(ms5837_driver_service(&driver, mock.time_ns, &config, &stats,
