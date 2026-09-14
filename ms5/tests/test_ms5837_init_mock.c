@@ -103,6 +103,16 @@ static int mock_sleep_ns(void *opaque, uint64_t duration_ns)
     return should_fail(mock) ? -EINTR : 0;
 }
 
+static int mock_time_ns(void *opaque, uint64_t *time_ns)
+{
+    (void)opaque;
+    if (time_ns == NULL) {
+        return -EINVAL;
+    }
+    *time_ns = 0U;
+    return 0;
+}
+
 static Ms5837Hal_t make_hal(MockHal_t *mock)
 {
     Ms5837Hal_t hal;
@@ -112,6 +122,7 @@ static Ms5837Hal_t make_hal(MockHal_t *mock)
     hal.write = mock_write;
     hal.read = mock_read;
     hal.sleep_ns = mock_sleep_ns;
+    hal.time_ns = mock_time_ns;
     return hal;
 }
 

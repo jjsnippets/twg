@@ -114,6 +114,22 @@ static int rpi_read(void *opaque, uint8_t *data, size_t length)
     return 0;
 }
 
+static int rpi_time_ns(void *opaque, uint64_t *time_ns)
+{
+    struct timespec now;
+
+    (void)opaque;
+    if (time_ns == NULL) {
+        return -EINVAL;
+    }
+    if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
+        return negative_errno_or_io();
+    }
+    *time_ns = ((uint64_t)now.tv_sec * UINT64_C(1000000000)) +
+               (uint64_t)now.tv_nsec;
+    return 0;
+}
+
 static int rpi_sleep_ns(void *opaque, uint64_t duration_ns)
 {
     struct timespec requested;
@@ -155,5 +171,6 @@ Ms5837Hal_t ms5837_hal_rpi_make(Ms5837HalRpi_t *context)
     hal.write = rpi_write;
     hal.read = rpi_read;
     hal.sleep_ns = rpi_sleep_ns;
+    hal.time_ns = rpi_time_ns;
     return hal;
 }

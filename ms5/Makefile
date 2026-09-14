@@ -15,6 +15,8 @@ TEST_PROD_MATH = $(BINDIR)/test_ms5837_math
 TEST_REFERENCE = $(BINDIR)/test_ms5837_reference
 TEST_INIT_MOCK = $(BINDIR)/test_ms5837_init_mock
 TEST_INIT_LIVE = $(BINDIR)/test_ms5837_init_live
+TEST_ACQUISITION_MOCK = $(BINDIR)/test_ms5837_acquisition_mock
+TEST_ACQUISITION_LIVE = $(BINDIR)/test_ms5837_acquisition_live
 
 RT_OBJ = $(BUILDDIR)/realtime.o
 
@@ -25,11 +27,11 @@ all: dirs tests
 dirs:
 	@mkdir -p $(BUILDDIR) $(BINDIR)
 
-tests: dirs $(TEST_RAW) $(TEST_MATH) $(TEST_BENCH) $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_INIT_LIVE)
+tests: dirs $(TEST_RAW) $(TEST_MATH) $(TEST_BENCH) $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_INIT_LIVE) $(TEST_ACQUISITION_MOCK) $(TEST_ACQUISITION_LIVE)
 
-host-tests: dirs $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK)
+host-tests: dirs $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_ACQUISITION_MOCK)
 
-live-tests: dirs $(TEST_INIT_LIVE)
+live-tests: dirs $(TEST_INIT_LIVE) $(TEST_ACQUISITION_LIVE)
 
 # Compile realtime.o directly from the single source of truth in bno/app
 $(RT_OBJ): $(BNO_DIR)/realtime.c $(BNO_DIR)/realtime.h
@@ -101,6 +103,21 @@ $(BUILDDIR)/test_ms5837_init_live.o: $(TESTDIR)/test_ms5837_init_live.c $(APPDIR
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(TEST_INIT_LIVE): $(BUILDDIR)/test_ms5837_init_live.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+# Step 4C fixed symmetric OSR-512 acquisition and recovery tests
+$(BUILDDIR)/test_ms5837_acquisition_mock.o: | dirs
+$(BUILDDIR)/test_ms5837_acquisition_mock.o: $(TESTDIR)/test_ms5837_acquisition_mock.c $(APPDIR)/ms5837_driver.h $(APPDIR)/app_contract.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(TEST_ACQUISITION_MOCK): $(BUILDDIR)/test_ms5837_acquisition_mock.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_math.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+$(BUILDDIR)/test_ms5837_acquisition_live.o: | dirs
+$(BUILDDIR)/test_ms5837_acquisition_live.o: $(TESTDIR)/test_ms5837_acquisition_live.c $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal_rpi.h $(APPDIR)/app_contract.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(TEST_ACQUISITION_LIVE): $(BUILDDIR)/test_ms5837_acquisition_live.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 clean:

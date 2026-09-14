@@ -7,6 +7,7 @@
 /*
  * All operations return 0 on success or a negative errno-style value.
  * A successful read/write means the exact requested byte count transferred.
+ * time_ns returns a CLOCK_MONOTONIC-domain timestamp through its output.
  */
 typedef struct {
     void *context;
@@ -15,6 +16,7 @@ typedef struct {
     int (*write)(void *context, const uint8_t *data, size_t length);
     int (*read)(void *context, uint8_t *data, size_t length);
     int (*sleep_ns)(void *context, uint64_t duration_ns);
+    int (*time_ns)(void *context, uint64_t *time_ns);
 } Ms5837Hal_t;
 
 #endif
