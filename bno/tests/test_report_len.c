@@ -64,7 +64,7 @@
 #include "sh2.h"          /* sh2_open, sh2_setSensorConfig, sh2_SensorEvent_t */
 #include "sh2_hal.h"      /* sh2_Hal_t, SH2_HAL_MAX_TRANSFER_IN */
 #include "sh2_err.h"      /* SH2_OK */
-#include "realtime.h"     /* StartRT, RT_SleepUntil */
+#include "rt/realtime.h"  /* StartRT, RT_SleepUntil */
 
 extern sh2_Hal_t *sh2_hal_rpi_init(void);
 

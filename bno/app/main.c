@@ -20,7 +20,7 @@
 #include "sh2_err.h"
 
 #include "app/app_contract.h"
-#include "app/realtime.h"
+#include "rt/realtime.h"
 #include "app/app_sensor.h"
 
 #define RUN_DURATION_SEC       10

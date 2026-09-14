@@ -33,12 +33,14 @@ CALDIR    := calibration
 ORIENTDIR := orientation
 VALDIR    := validation
 TESTDIR   := tests
+REPODIR   := ..
+RTDIR     := $(REPODIR)/rt
 BUILDDIR  := build
 BINDIR    := bin
 
 CC       := gcc
 CFLAGS   := -Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE
-CPPFLAGS := -I. -I$(SH2DIR) -I$(APPDIR) -I$(CALDIR) -I$(ORIENTDIR) -I$(VALDIR)
+CPPFLAGS := -I$(REPODIR) -I. -I$(SH2DIR) -I$(APPDIR) -I$(CALDIR) -I$(ORIENTDIR) -I$(VALDIR)
 LDLIBS   := -lgpiod -lm -lpthread
 
 # Vendored CEVA SH-2 objects
@@ -50,9 +52,9 @@ SH2SRCS := \
 	$(SH2DIR)/euler.c
 SH2OBJS := $(patsubst $(SH2DIR)/%.c,$(BUILDDIR)/sh2_%.o,$(SH2SRCS))
 
-# Shared Raspberry Pi HAL and Realtime support objects
+# Shared Raspberry Pi HAL and repository-level realtime support objects
 APPHALOBJ := $(BUILDDIR)/app_sh2_hal_rpi.o
-APPRTOBJ  := $(BUILDDIR)/app_realtime.o
+RTOBJ     := $(BUILDDIR)/rt_realtime.o
 
 # App objects
 APPOBJS := $(BUILDDIR)/app_app_sensor.o $(BUILDDIR)/app_main.o
@@ -106,7 +108,7 @@ all: tools tests
 # Binaries
 # ------------------------------------------------------------------
 
-$(BINDIR)/bno_app: $(SH2OBJS) $(APPHALOBJ) $(APPRTOBJ) $(APPOBJS) | $(BINDIR)
+$(BINDIR)/bno_app: $(SH2OBJS) $(APPHALOBJ) $(RTOBJ) $(APPOBJS) | $(BINDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BINDIR)/bno_cal: $(CALOBJS) $(APPHALOBJ) $(SH2OBJS) | $(BINDIR)
@@ -115,7 +117,7 @@ $(BINDIR)/bno_cal: $(CALOBJS) $(APPHALOBJ) $(SH2OBJS) | $(BINDIR)
 $(BINDIR)/bno_orient: $(ORIENTOBJS) $(APPHALOBJ) $(SH2OBJS) | $(BINDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
-$(BINDIR)/bno_validate: $(VALOBJS) $(APPHALOBJ) $(APPRTOBJ) $(SH2OBJS) | $(BINDIR)
+$(BINDIR)/bno_validate: $(VALOBJS) $(APPHALOBJ) $(RTOBJ) $(SH2OBJS) | $(BINDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BINDIR)/amt102_bringup: $(BRINGUPOBJS) | $(BINDIR)
@@ -151,7 +153,7 @@ $(BINDIR)/test_single_sensor: $(TESTSINGLESENSORSRC) $(APPHALOBJ) $(SH2OBJS) | $
 $(BINDIR)/test_min_period: $(TESTMINPERIODSRC) $(APPHALOBJ) $(SH2OBJS) | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
-$(BINDIR)/test_report_len: $(TESTREPORTLENSRC) $(APPHALOBJ) $(SH2OBJS) $(APPRTOBJ) | $(BINDIR)
+$(BINDIR)/test_report_len: $(TESTREPORTLENSRC) $(APPHALOBJ) $(SH2OBJS) $(RTOBJ) | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 # ------------------------------------------------------------------
@@ -162,6 +164,9 @@ $(BUILDDIR)/sh2_%.o: $(SH2DIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 $(BUILDDIR)/app_%.o: $(APPDIR)/%.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+
+$(RTOBJ): $(RTDIR)/realtime.c $(RTDIR)/realtime.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 $(BUILDDIR)/cal_%.o: $(CALDIR)/%.c | $(BUILDDIR)

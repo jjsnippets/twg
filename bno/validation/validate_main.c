@@ -4,7 +4,7 @@
  * Three-thread model:
  *   - encoder thread (SCHED_OTHER): amt102_poll loop, publishes an
  *     amt102_state_t snapshot under a mutex
- *   - RT thread (this thread, SCHED_FIFO via app/realtime.c): 1 kHz
+ *   - RT thread (this thread, SCHED_FIFO via rt/realtime.c): 1 kHz
  *     sh2 service; every 10th iteration builds one 100 Hz CsvRecord
  *     (encoder snapshot + latest ImuValidateSample_t + host stamp) and
  *     pushes it to the csv_log ring
@@ -15,7 +15,7 @@
  * scheduling; only this thread becomes SCHED_FIFO.
  *
  * Reuses the production decode chain (sh2/, app/sh2_hal_rpi.c,
- * app/realtime.c) plus the validated encoder modules in this
+ * rt/realtime.c) plus the validated encoder modules in this
  * directory. Replaces bno_app while running: one SPI HAL instance
  * per process.
  *
@@ -40,7 +40,7 @@
 #include "validation/amt102.h"
 #include "validation/validate_logger.h"
 #include "validation/validate_contract.h"
-#include "app/realtime.h"
+#include "rt/realtime.h"
 #include "validation/validate_sensor.h"
 
 #define RT_PRIORITY         90      /* keep in sync with app/main.c */

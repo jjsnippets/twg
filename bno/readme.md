@@ -98,7 +98,6 @@ bno/
 │   ├── app_contract.h       current ImuSample_t version 3 contract
 │   ├── app_sensor.c/.h      SH-2 session owner and latest-value mailbox
 │   ├── main.c               standalone bno_app loop/example
-│   ├── realtime.c/.h        SCHED_FIFO, mlockall, absolute monotonic sleep
 │   └── sh2_hal_rpi.c        Raspberry Pi transport (SPI + libgpiod)
 ├── calibration/             exclusive-session dynamic-calibration tool
 ├── orientation/             exclusive-session tare/orientation tool
@@ -107,6 +106,10 @@ bno/
 ├── sh2/                     vendored CEVA sh2 library submodule
 ├── bin/                     generated binaries
 └── build/                   generated objects
+
+../rt/                       repository-level lab real-time helper
+├── realtime.c               scheduling, locking, monotonic sleep
+└── realtime.h               status and timing API
 ```
 
 ## Software architecture
@@ -166,12 +169,16 @@ not the decoded CEVA report-length table.
 
 ### Real-time support
 
-`StartRT(priority, dt)` attempts `mlockall` and `SCHED_FIFO` (priority 90 in
-`bno_app`). Failure returns to the caller and is non-fatal in the standalone
-application, which warns and continues under normal scheduling.
-`RT_SleepUntil(dt)` maintains an absolute, advancing `CLOCK_MONOTONIC`
-deadline. Monotonic time avoids wall-clock steps or NTP adjustments during a
-run.
+`rt/` contains the repository-level lab real-time helper.
+`StartRT(priority, dt)` independently attempts `mlockall` and `SCHED_FIFO`
+(priority 90 in `bno_app`), arms a monotonic deadline, and returns a bitmask of
+all failures. It never prints or exits; the process-level caller owns policy.
+`RT_SleepUntil(dt)` returns zero on schedule, a positive count of skipped
+expired deadlines after an overrun, or a negative errno value on a clock/sleep
+error. Overruns resume at one period after the detection time, so missed
+frames are reported and skipped rather than replayed in a catch-up burst.
+`RT_Reset()` re-arms the deadline at the current monotonic time. Monotonic time
+avoids wall-clock steps or NTP adjustments during a run.
 
 The BNO085 needs prompt servicing after data-ready. Any integrated owner must
 preserve the approximately 1 ms SH-2 service cadence and avoid blocking work in

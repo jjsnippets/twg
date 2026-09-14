@@ -1,134 +1,143 @@
-# bno/validation/ — AMT102 Encoder vs BNO085 IMU Validation
+# Validation and Diagnostics
 
-Tools that check the BNO085's orientation data against an AMT102 rotary
-encoder mounted on the same pivot, with the encoder as ground truth. The
-main artifact is `bno_validate`: a synchronized capture binary that
-logs encoder angle and IMU data into one timestamped CSV.
+This directory contains the BNO085 + AMT102 validation harness used to measure
+sensor timing, freshness, and dynamic agreement against an independent rotary
+encoder. It also contains the reusable AMT102 quadrature decoder and its
+host-only unit test support.
 
-The comparison is angle-vs-angle (graphical comparison of the two
-waveforms), so rig geometry does not enter the data path — arm length,
-mass, and pivot details are recorded only as run metadata. Analysis and
-formal acceptance criteria are applied post-hoc by a separate program;
-this directory covers **acquisition only**.
+## Hardware
 
-Related documentation:
-- `../readme.md` — app architecture, data contract, sudo/RT policy
-- `../calibration/readme.md` — `bno_cal` guided calibration, the
-  flight-time calibration policy (both acquisition programs fly on the
-  saved DCD with all dynamic calibration disabled)
-- `../orientation/readme.md` — `bno_orient` swing-axis tare
+### BNO085
 
----
+The validation harness uses the same SPI wiring and HAL as the production IMU
+application in `../app/sh2_hal_rpi.c`.
 
-## Hardware Setup
+### AMT102-V
 
-### Encoder (AMT102-V)
+| AMT102 signal | Raspberry Pi BCM | Physical pin |
+|---|---:|---:|
+| Channel A | 17 | 11 |
+| Channel B | 27 | 13 |
+| Index X | 22 | 15 |
+| +5 V | 5 V rail | 2 or 4 |
+| GND | GND | any ground pin |
 
-- Resolution: 2048 PPR (DIP switches 1–4 all **Off**, factory preset),
-  x4 quadrature decode → **8192 counts/rev**, 0.044° per count.
-- Series 1 kΩ resistors on each signal line into the Pi header:
+The AMT102 is configured for 2048 PPR. With quadrature x4 decoding this yields
+8192 counts per revolution.
 
-| Encoder signal | Through | Pi header pin | BCM line |
-|---|---|---|---|
-| A (quadrature) | 1 kΩ | pin 11 | GPIO 17 |
-| B (quadrature) | 1 kΩ | pin 13 | GPIO 27 |
-| X (index, 1/rev) | 1 kΩ | pin 15 | GPIO 22 |
-| 5 V | — | pin 2 / 4 (5 V rail) | — |
-| G | — | pin 6 (GND) | — |
+## Programs
 
-- The encoder connector pin order is **B, 5V, A, X, G** (T unused) — 5 V
-  sits between B and A. Double-check wiring before powering.
+### `amt102_bringup`
 
-### IMU (BNO085)
-
-- Same SPI wiring and HAL as the application (`../app/sh2_hal_rpi.c`);
-  see `../readme.md`.
-
----
-
-## Tool Binaries
-
-All tools are built from the root `bno/` Makefile into `bno/bin/`:
+A standalone terminal diagnostic for the encoder. It reports count, angle,
+A/B/X line state, invalid transitions, edge count, and index pulses every
+500 ms.
 
 ```bash
 cd bno
-make validate       # builds bin/bno_validate
-make bringup        # builds bin/amt102_bringup
+make bringup
+sudo ./bin/amt102_bringup
+```
+
+### `bno_validate`
+
+The synchronized capture tool. It records one 100 Hz row containing:
+
+- host monotonic publication timestamp;
+- AMT102 count, angle, event timestamp, index pulses, and decoder diagnostics;
+- the latest rotation-vector, linear-acceleration, and calibrated-gyro values;
+- per-report host/device timestamps, sequence bytes, SH-2 status, and lengths;
+- aggregate IMU sequence/valid mask and logger drop count.
+
+```bash
+cd bno
+make validate
+sudo ./bin/bno_validate                    # until Ctrl+C
+sudo ./bin/bno_validate -d 20              # 20 seconds
+sudo ./bin/bno_validate -o run.csv -d 20   # explicit output path
+```
+
+The logger runs on a non-real-time worker thread and receives fixed-size
+records through a bounded ring. The main thread services SH-2 at 1 kHz and
+publishes every tenth iteration. The encoder has its own polling thread.
+
+## Build targets
+
+```bash
+cd bno
+make validate       # bin/bno_validate
+make bringup        # bin/amt102_bringup
 make test           # builds and executes decoder unit tests (bin/test_quad_decode)
 ```
 
 | Binary | Source | Purpose |
 |---|---|---|
 | `bin/amt102_bringup` | `amt102_bringup.c`, `amt102.c`, `quad_decode.c` | Live terminal diagnostic streaming encoder telemetry every 500 ms |
-| `bin/bno_validate` | `validate_main.c`, `validate_sensor.c`, `validate_logger.c`, `amt102.c`, `quad_decode.c`, `../app/realtime.c`, `../app/sh2_hal_rpi.c` | Synchronized 100 Hz capture to timestamped CSV |
+| `bin/bno_validate` | `validate_main.c`, `validate_sensor.c`, `validate_logger.c`, `amt102.c`, `quad_decode.c`, `../../rt/realtime.c`, `../app/sh2_hal_rpi.c` | Synchronized 100 Hz capture to timestamped CSV |
 | `bin/test_quad_decode` | `../tests/test_quad_decode.c`, `quad_decode.c` | Decoder state machine unit test (no hardware required) |
 
 ---
 
-## Tool Details & Telemetry
+## Validation data contract
 
-### 1. Encoder Bring-Up Diagnostic (`amt102_bringup`)
+`validate_contract.h` defines `ImuValidateSample_t`. It is intentionally richer
+than the production `ImuSample_t` so timing and freshness can be investigated
+without first changing the production ABI.
 
-Live diagnostic to verify encoder wiring, line states, count direction, and index pulses. It does **not** require rotating a full 360° to observe counts:
+Each report group contains:
 
-```bash
-sudo ./bin/amt102_bringup
+```c
+typedef struct {
+    uint8_t  status;
+    uint8_t  report_seq;
+    uint16_t event_len;
+    uint64_t host_ts_ns;
+    uint64_t device_ts_us;
+} ImuValidateReportMeta_t;
 ```
 
-Streams a persistent live telemetry line every 500 ms:
-```text
-[t=  0.5s] count=    +120 (  +5.27 deg) | edges: A=120     B=120     | x_pulses=0   | inv=0
-[t=  1.0s] count=    +422 ( +18.54 deg) | edges: A=5796    B=5791    | x_pulses=0   | inv=0
-[t=  1.5s] count=    +850 ( +37.35 deg) | edges: A=6210    B=6215    | x_pulses=0   | inv=0
-```
-Upon pressing `Ctrl-C`, it prints the total session summary (net counts, total degrees, revolutions, and validity diagnosis).
+The top-level validation sample also contains the decoded values, quaternion,
+rotation-vector error, aggregate sequence, aggregate timestamp, and sticky
+`valid_mask`.
 
-### 2. Synchronized Capture (`bno_validate`)
+## CSV columns
 
-Executes 100 Hz synchronized IMU and encoder data capture:
+The CSV logger writes the following groups of fields:
 
-```bash
-# Default capture (logs to bno_validate_YYYYMMDD_HHMMSS.csv)
-sudo ./bin/bno_validate
+| Group | Columns |
+|---|---|
+| Host | `host_ts_ns` |
+| Encoder | `enc_count`, `enc_angle_deg`, `enc_event_ts_ns`, `enc_x_pulses`, `enc_invalid`, `enc_edges_ab` |
+| IMU aggregate | `imu_seq`, `imu_timestamp_us`, `valid_mask` |
+| Rotation vector | `rv_status`, `rv_report_seq`, `rv_event_len`, `rv_host_ts_ns`, `rv_device_ts_us`, quaternion, yaw/pitch/roll, `rv_err_rad` |
+| Linear acceleration | `la_status`, `la_report_seq`, `la_event_len`, `la_host_ts_ns`, `la_device_ts_us`, `ax`, `ay`, `az` |
+| Calibrated gyro | `gyro_status`, `gyro_report_seq`, `gyro_event_len`, `gyro_host_ts_ns`, `gyro_device_ts_us`, `gx`, `gy`, `gz` |
+| Logger | `drops` |
 
-# Custom capture with duration, arm length, and run notes
-sudo ./bin/bno_validate -o run1.csv -d 30 -a 0.25 -n "swing release test 1"
-```
+## Interpreting timestamps
 
-Features:
-- **0.3s Settle Phase:** Rapidly clears startup traffic and synchronizes clock domains before logging begins.
-- **Timestamped CSV Output:** Default filename automatically appends the current timestamp (`bno_validate_YYYYMMDD_HHMMSS.csv`).
-- **Live 1 Hz Console Telemetry:** Displays elapsed time, encoder position, the full Rotation Vector unit quaternion, and Tait-Bryan Euler angles ($y, p, r$):
-```text
-[t=  1.0s] enc= +45.20 deg (d= +1028) | q=(+0.924,+0.002,-0.001,+0.382) | ypr=( +45.01,  -0.14,  +0.22) deg | acc=2 err=0.15rad | drops=0
-```
+`host_ts_ns` uses `CLOCK_MONOTONIC` and is suitable for elapsed-time and age
+calculations inside one boot. The BNO085 device timestamps are microseconds from
+the SH-2 transport and can occasionally regress by a few microseconds. Guard
+all device-time differences against `dt <= 0`.
 
----
+## Freshness analysis
 
-## Capture Procedure
+A report group is fresh at a 100 Hz publication row if its `report_seq` differs
+from the previous row. Sequence arithmetic is modulo 256. A sequence jump
+greater than one means multiple events arrived between publication rows; an
+unchanged sequence means the copied value is stale relative to that boundary.
 
-1. **Pre-flight:**
-   - Run `bno_cal --check`: verify exit `0` (calibrated).
-   - Run `bno_orient --check`: verify yaw reads ~0 deg at the swing zero; if not, run `bno_orient --persist`.
-   - Confirm no other SPI/SH-2 consumer is running.
-2. **Execute capture:**
-   ```bash
-   sudo ./bin/bno_validate -d 30 -a 0.25 -n "pendulum release trial"
-   ```
-3. **Release & log:** Move or release the swing during the acquisition window. Stop early with `Ctrl-C` if desired.
+`valid_mask` is not a freshness mask. It is sticky session-seen state and only
+states whether at least one report from each group has been decoded during the
+current run.
 
----
+## Practical cautions
 
-## Source Structure
-
-```text
-validation/
-├── amt102.c/.h          # AMT102-V incremental encoder driver (libgpiod v1)
-├── amt102_bringup.c     # Standalone live encoder diagnostic
-├── quad_decode.c/.h     # Pure x4 quadrature state machine
-├── validate_contract.h  # ImuValidateSample_t data contract
-├── validate_logger.c/.h # Bounded ring buffer CSV logger thread
-├── validate_sensor.c/.h # 100 Hz 3-sensor SH-2 session owner
-├── validate_main.c      # bno_validate main capture harness
-└── readme.md            # Validation documentation
-```
+- Run only one SH-2/BNO085 owner at a time. Do not run `bno_app`, `bno_cal`,
+  `bno_orient`, or another validation process concurrently.
+- Keep validation output on local storage. Network filesystems and terminal
+  flooding can introduce avoidable scheduling noise.
+- Check the logger's `drops` field before trusting a capture.
+- Populate `ARM_LENGTH_M` and `RUN_NOTES` in `validate_main.c` if those fields
+  are needed for the run metadata.
