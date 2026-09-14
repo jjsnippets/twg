@@ -4,12 +4,15 @@ LDFLAGS ?= -lrt -lpthread
 
 BNO_DIR = ../bno/app
 TESTDIR = tests
+APPDIR = app
 BUILDDIR = build
 BINDIR = bin
 
 TEST_RAW = $(BINDIR)/test_i2c_raw
 TEST_MATH = $(BINDIR)/test_crc_math
 TEST_BENCH = $(BINDIR)/test_rate_bench
+TEST_PROD_MATH = $(BINDIR)/test_ms5837_math
+TEST_REFERENCE = $(BINDIR)/test_ms5837_reference
 
 RT_OBJ = $(BUILDDIR)/realtime.o
 
@@ -20,7 +23,7 @@ all: dirs tests
 dirs:
 	@mkdir -p $(BUILDDIR) $(BINDIR)
 
-tests: dirs $(TEST_RAW) $(TEST_MATH) $(TEST_BENCH)
+tests: dirs $(TEST_RAW) $(TEST_MATH) $(TEST_BENCH) $(TEST_PROD_MATH) $(TEST_REFERENCE)
 
 # Compile realtime.o directly from the single source of truth in bno/app
 $(RT_OBJ): $(BNO_DIR)/realtime.c $(BNO_DIR)/realtime.h
@@ -44,6 +47,29 @@ $(BUILDDIR)/test_rate_bench.o: $(TESTDIR)/test_rate_bench.c
 
 $(BINDIR)/test_rate_bench: $(BUILDDIR)/test_rate_bench.o $(RT_OBJ)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+# Step 4A production calculation and surface-reference tests
+$(BUILDDIR)/ms5837_math.o: | dirs
+$(BUILDDIR)/ms5837_math.o: $(APPDIR)/ms5837_math.c $(APPDIR)/ms5837_math.h $(APPDIR)/app_contract.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(BUILDDIR)/ms5837_reference.o: | dirs
+$(BUILDDIR)/ms5837_reference.o: $(APPDIR)/ms5837_reference.c $(APPDIR)/ms5837_reference.h $(APPDIR)/app_contract.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(BUILDDIR)/test_ms5837_math.o: | dirs
+$(BUILDDIR)/test_ms5837_math.o: $(TESTDIR)/test_ms5837_math.c $(APPDIR)/ms5837_math.h $(APPDIR)/app_contract.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(BINDIR)/test_ms5837_math: $(BUILDDIR)/test_ms5837_math.o $(BUILDDIR)/ms5837_math.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+$(BUILDDIR)/test_ms5837_reference.o: | dirs
+$(BUILDDIR)/test_ms5837_reference.o: $(TESTDIR)/test_ms5837_reference.c $(APPDIR)/ms5837_reference.h $(APPDIR)/app_contract.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(BINDIR)/test_ms5837_reference: $(BUILDDIR)/test_ms5837_reference.o $(BUILDDIR)/ms5837_reference.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 clean:
 	rm -rf $(BUILDDIR) $(BINDIR)
