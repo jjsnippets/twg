@@ -2,7 +2,8 @@ CC ?= gcc
 CFLAGS ?= -O2 -Wall -Wextra -Werror -pedantic -std=c99 -D_GNU_SOURCE
 LDFLAGS ?= -lrt -lpthread
 
-BNO_DIR = ../bno/app
+REPODIR = ..
+RT_DIR = $(REPODIR)/rt
 TESTDIR = tests
 APPDIR = app
 BUILDDIR = build
@@ -37,9 +38,9 @@ live-tests: dirs $(TEST_INIT_LIVE) $(TEST_ACQUISITION_LIVE)
 
 app: dirs $(CAPTURE_APP)
 
-# Compile realtime.o directly from the single source of truth in bno/app
-$(RT_OBJ): $(BNO_DIR)/realtime.c $(BNO_DIR)/realtime.h
-	$(CC) $(CFLAGS) -c $< -o $@
+# Compile realtime.o from the repository-level lab timing helper.
+$(RT_OBJ): $(RT_DIR)/realtime.c $(RT_DIR)/realtime.h
+	$(CC) $(CFLAGS) -I$(REPODIR) -c $< -o $@
 
 # Test binaries
 $(BUILDDIR)/test_i2c_raw.o: $(TESTDIR)/test_i2c_raw.c
@@ -58,7 +59,7 @@ $(BINDIR)/test_crc_math: $(BUILDDIR)/test_crc_math.o
 
 # Archived Step 3 benchmark intentionally remains unchanged.
 $(BUILDDIR)/test_rate_bench.o: $(TESTDIR)/test_rate_bench.c
-	$(CC) $(CFLAGS) -Wno-unused-result -c $< -o $@
+	$(CC) $(CFLAGS) -I$(REPODIR) -Wno-unused-result -c $< -o $@
 
 $(BINDIR)/test_rate_bench: $(BUILDDIR)/test_rate_bench.o $(RT_OBJ)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
@@ -134,8 +135,8 @@ $(BUILDDIR)/ms5837_logger.o: $(APPDIR)/ms5837_logger.c $(APPDIR)/ms5837_logger.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BUILDDIR)/ms5837_main.o: | dirs
-$(BUILDDIR)/ms5837_main.o: $(APPDIR)/main.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal_rpi.h $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_reference.h $(BNO_DIR)/realtime.h
-	$(CC) $(CFLAGS) -I$(APPDIR) -I$(BNO_DIR) -c $< -o $@
+$(BUILDDIR)/ms5837_main.o: $(APPDIR)/main.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal_rpi.h $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_reference.h $(RT_DIR)/realtime.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -I$(REPODIR) -c $< -o $@
 
 $(CAPTURE_APP): $(BUILDDIR)/ms5837_main.o $(BUILDDIR)/ms5837_cli.o $(BUILDDIR)/ms5837_logger.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o $(BUILDDIR)/ms5837_reference.o $(RT_OBJ)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm

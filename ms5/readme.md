@@ -149,7 +149,9 @@ Console telemetry is printed every 50 frames, approximately every 500 ms. CSV wr
 
 ### Real-time behavior
 
-The application requests `SCHED_FIFO` priority 90 through the timing implementation shared with `bno/app/realtime.c`. If real-time setup fails, it emits a warning and continues without `SCHED_FIFO`; run with the required privileges and limits when deterministic scheduling is needed.
+The application uses the repository-level timing helper in `../rt/realtime.c` and `../rt/realtime.h`. `StartRT()` independently attempts memory locking and `SCHED_FIFO` priority 90, then returns a bitmask describing any failures; it never terminates the process. The capture application logs that bitmask and continues with whatever scheduling and locking were available. Run with the required privileges and limits when deterministic scheduling is needed.
+
+`RT_SleepUntil()` uses `CLOCK_MONOTONIC`. It returns zero for an on-time wake, a positive count of skipped expired deadlines after an overrun, or a negative errno value on a timing error. Its recovery policy resumes at `now + period`, so missed frames are skipped instead of being replayed in a catch-up burst.
 
 `SIGINT` and `SIGTERM` request a controlled stop. Shutdown stops and joins the logger, drains queued records, flushes and closes the CSV stream, and then closes the driver HAL.
 
@@ -420,10 +422,9 @@ Check disk space, filesystem health, storage latency, and competing I/O. The log
 
 ```text
 twg/
-├── bno/
-│   └── app/
-│       ├── realtime.c
-│       └── realtime.h
+├── rt/
+│   ├── realtime.c
+│   └── realtime.h
 └── ms5/
     ├── Makefile
     ├── readme.md

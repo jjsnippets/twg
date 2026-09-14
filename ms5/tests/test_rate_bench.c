@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <linux/i2c-dev.h>
 
-#include "../../bno/app/realtime.h"
+#include "rt/realtime.h"
 
 #define MS5837_DEFAULT_I2C_BUS      "/dev/i2c-1"
 #define MS5837_I2C_ADDR             0x76

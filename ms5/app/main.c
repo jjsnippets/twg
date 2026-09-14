@@ -36,7 +36,7 @@
 #include "ms5837_hal_rpi.h"
 #include "ms5837_logger.h"
 #include "ms5837_reference.h"
-#include "realtime.h"
+#include "rt/realtime.h"
 
 #define RT_PRIORITY 90
 #define FRAME_PERIOD_SEC 0.010
@@ -239,7 +239,17 @@ static int run_phase(Ms5837Driver_t *driver, Ms5837Logger_t *logger,
             (frame_status != -EINTR)) {
             return frame_status;
         }
-        RT_SleepUntil(FRAME_PERIOD_SEC);
+
+        int rt_status = RT_SleepUntil(FRAME_PERIOD_SEC);
+        if (rt_status > 0) {
+            stats->service_overruns += (uint64_t)rt_status;
+        } else if (rt_status < 0) {
+            if ((rt_status == -EINTR) && stop_requested) {
+                break;
+            }
+            return rt_status;
+        }
+
         frame_start_ns = monotonic_ns();
     }
     return stop_requested ? -EINTR : 0;
@@ -290,9 +300,13 @@ int main(int argc, char *argv[])
         (void)ms5837_driver_shutdown(&driver);
         return 1;
     }
-    if (StartRT(RT_PRIORITY, FRAME_PERIOD_SEC) != 0) {
+    
+    RT_StartStatus_t rt_status = StartRT(RT_PRIORITY, FRAME_PERIOD_SEC);
+    if (rt_status != RT_START_OK) {
         fprintf(stderr,
-                "WARNING: real-time setup failed; continuing without SCHED_FIFO.\n");
+                "WARNING: StartRT status=0x%08" PRIX32
+                "; continuing with available scheduling/locking.\n",
+                rt_status);
     }
 
     printf("capture=%s duration=%" PRIu64 "s zero=%s density=%.3f\n",
