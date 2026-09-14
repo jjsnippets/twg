@@ -1,187 +1,455 @@
-# MS5837-02BA Pressure & Temperature Subsystem (`ms5`)
+# MS5837-02BA Pressure and Temperature Subsystem (`ms5`)
 
-Standalone Linux userspace driver, real-time acquisition tests, and benchmarking harness for the TE Connectivity **MS5837-02BA** gel-filled pressure and temperature sensor on a Raspberry Pi 4B running **Raspberry Pi OS with PREEMPT_RT**.
+Linux userspace driver, real-time capture application, diagnostics, and archived benchmarks for the TE Connectivity MS5837-02BA on a Raspberry Pi 4B running Raspberry Pi OS with PREEMPT_RT.
 
-This subsystem operates as an independent module alongside the existing SPI0-based `bno/` (BNO085 IMU) subsystem within `twg/`.
+The production path is implemented through Step 4D. It uses a dedicated I2C1 bus, fixed symmetric OSR 512 pressure/temperature pairs, explicit acquisition triggering at the start of each 10 ms frame, 100 Hz publication, optional five-second surface taring, and asynchronous CSV logging.
 
----
+## Final configuration
 
-## 1. Hardware Interface & Pin Allocation
+| Item | Production setting |
+|---|---|
+| Sensor | MS5837-02BA |
+| Linux device | `/dev/i2c-1` |
+| 7-bit address | `0x76` |
+| Bus ownership | Dedicated to the pressure sensor |
+| Bus speed used for final benchmark | 400 kHz Fast Mode |
+| Conversion strategy | Symmetric D1/D2 pair |
+| Oversampling | `MS5837_OSR_512` for both D1 and D2 |
+| Frame rate | 100 Hz, one 10 ms frame |
+| Trigger point | Beginning of every frame through `ms5837_driver_trigger()` |
+| Zeroing rate | 100 Hz |
+| Zeroing duration | 5 seconds |
+| Minimum valid zeroing samples | 350 |
+| Surface estimator | 10% trimmed mean |
+| Default fluid density | 1000 kg/m3 |
+| Console telemetry | Every 50 frames, approximately 500 ms |
+| CSV publication | Every frame, 100 Hz |
+| CSV location | Current working directory |
+| CSV name | `ms5_capture_YYYYMMDD_HHMMSS.csv` |
+| Real-time policy requested | `SCHED_FIFO`, priority 90 |
 
-The MS5837-02BA communicates via the Raspberry Pi 4B's primary hardware I²C bus (`/dev/i2c-1`) at 7-bit slave address **`0x76`**. It requires no external chip-select, interrupt, or reset GPIO pins.
+There is no production interleaved mode and no runtime OSR option. The compile-time definition `MS5837_ACQUISITION_OSR` is fixed to `MS5837_OSR_512`; changing it currently causes a compile-time error.
 
-### Wiring Table
-| MS5837 Breakout Pin | Raspberry Pi 4B Connection | Header Physical Pin | BCM GPIO | Notes |
+## Hardware
+
+### Wiring
+
+| Breakout pin | Raspberry Pi 4B | Physical pin | BCM | Notes |
 |---|---|---:|---:|---|
-| **VCC / VIN** | 3.3V Power Rail | **Pin 1 or 17** | — | Shared 3.3V rail (common with BNO085 VIN) |
-| **GND** | Ground Rail | **Pin 6, 9, 14, 20, 25, 30, 34, 39** | — | Common system ground |
-| **SDA** | I2C1_SDA | **Pin 3** | **GPIO2** | 3.3V logic level (onboard pull-ups) |
-| **SCL** | I2C1_SCL | **Pin 5** | **GPIO3** | 3.3V logic level (onboard pull-ups) |
+| VCC/VIN | 3.3 V | 1 or 17 | - | Confirm the breakout board accepts 3.3 V |
+| GND | Ground | 6, 9, 14, 20, 25, 30, 34, or 39 | - | Common ground is required |
+| SDA | I2C1 SDA | 3 | GPIO2 | 3.3 V logic only |
+| SCL | I2C1 SCL | 5 | GPIO3 | 3.3 V logic only |
 
-> **Electrical Warnings:**
-> 1. Raspberry Pi 4B GPIO lines are **3.3V logic only** and are **not 5V tolerant**. Do not connect SDA or SCL pull-ups to 5V.
-> 2. The MS5837 bare sensor requires a $100\text{ nF}$ to $470\text{ nF}$ ceramic decoupling capacitor between VDD and GND placed close to the device.
-> 3. Bus separation: The BNO085 IMU uses SPI0 (Pins 19, 21, 22, 23, 29, 31, 33), while the MS5837 uses I²C1 (Pins 3 and 5). There are zero hardware bus conflicts.
+The sensor does not require a chip-select, interrupt, or reset GPIO. The production driver therefore adds only physical pins 3 and 5 plus one 3.3 V pin and one ground pin.
 
----
+The previously listed occupied physical pins are 11, 13, 15, 19, 21, 22, 23, 29, 31, and 33. None conflicts with physical pins 3 and 5. The BNO085 uses SPI0 and GPIO lines, while the pressure sensor uses the dedicated I2C1 bus.
 
-## 2. Sensor Identification & Calibration Verification
+### Electrical notes
 
-During Step 1 and Step 2 bring-up, the sensor was probed and validated using `test_i2c_raw` and `test_crc_math`.
+Raspberry Pi GPIO is 3.3 V logic and is not 5 V tolerant. Do not allow SDA or SCL to be pulled up to 5 V. Verify the actual breakout-board regulator and pull-up arrangement rather than assuming that every MS5837 breakout is wired identically.
 
-### PROM Mapping (112-bit Factory Calibration)
-On soft-reset (`0x1E`), the internal factory calibration coefficients are latched into PROM words $C_0$ through $C_6$:
+The bare sensor requires local supply decoupling; if the breakout already includes the specified capacitor and pull-ups, do not add duplicates blindly. With power removed, check continuity and resistance from SDA/SCL to 3.3 V before connecting the Pi. Keep the I2C wiring short during bring-up and establish a common ground before applying power.
 
-| Word | Name | Stored Hex | Raw Dec | Description |
-|:---:|:---:|:---:|:---:|---|
-| **0** | `CRC / Version` | `0x4BA1` | — | Bits [15:12] = CRC nibble (`0x4`); Bits [11:5] = `0b0010101` (**MS5837-02BA21 Shielded**) |
-| **1** | `C1` | `0xBA4A` | 47690 | Pressure sensitivity ($SENS_{T1}$) |
-| **2** | `C2` | `0xB779` | 46969 | Pressure offset ($OFF_{T1}$) |
-| **3** | `C3` | `0x7395` | 29589 | Temperature coefficient of pressure sensitivity ($TCS$) |
-| **4** | `C4` | `0x78A1` | 30881 | Temperature coefficient of pressure offset ($TCO$) |
-| **5** | `C5` | `0x793D` | 31037 | Reference temperature ($T_{REF}$) |
-| **6** | `C6` | `0x6ACF` | 27343 | Temperature coefficient of temperature ($TEMPSENS$) |
+### Fast Mode
 
-### Mathematical Validation
-1. **CRC-4 Remainder:** The factory CRC-4 algorithm (Datasheet page 13) executed on the live PROM returned an exact remainder of **`0x4`**, confirming zero read corruption.
-2. **Worked Example Test:** Using the datasheet test vectors ($C_1\dots C_6$, $D_1=6465444$, $D_2=8077636$), the first-order compensation evaluates to exactly **$1100.02\text{ mbar}$** and **$20.00\ ^\circ\text{C}$**.
-3. **Ambient Baseline:** Laboratory ambient tests produced stable readings of **$\approx 23.2\ ^\circ\text{C}$** and **$\approx 1000.5\text{ mbar}$ ($0.9875\text{ atm}$)** with $< 0.08\text{ mbar}$ peak-to-peak jitter.
+The final benchmark used I2C Fast Mode. On current Raspberry Pi OS releases, the bus rate can be configured in `/boot/firmware/config.txt`:
 
----
-
-## 3. Glider Depth Resolution Analysis
-
-The glider system requirement is **$\sim 10\text{ gradations per cm}$** of water column ($1\text{ mm}$ vertical depth resolution).
-
-Hydrostatic relationship:
-$$\Delta P = \rho \cdot g \cdot \Delta h \implies \Delta h = \frac{\Delta P}{\rho \cdot g}$$
-*(Using $\rho_{\text{fresh}} = 1000\text{ kg/m}^3$, $\rho_{\text{sea}} = 1025\text{ kg/m}^3$, $g = 9.80665\text{ m/s}^2$)*
-
-### OSR Comparison Table
-| OSR | Max Conversion Time | Datasheet RMS Noise | Freshwater Depth Resolution | Seawater Depth Resolution | Resolvable Gradations | Glider Target (~10 grad/cm) |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **256** | **$0.56\text{ ms}$** | $0.110\text{ mbar}$ | $1.12\text{ mm}$ | $1.09\text{ mm}$ | **$8.9\text{ grad/cm}$** | Marginal ($1.1\text{ mm}$) |
-| **512** | **$1.10\text{ ms}$** | $0.062\text{ mbar}$ | **$0.63\text{ mm}$** | **$0.62\text{ mm}$** | **$15.8\text{ grad/cm}$** | **Exceeds target ($1.6\times$)** |
-| **1024** | **$2.17\text{ ms}$** | $0.039\text{ mbar}$ | **$0.40\text{ mm}$** | **$0.39\text{ mm}$** | **$25.1\text{ grad/cm}$** | Over-specified ($2.5\times$) |
-| **2048** | **$4.32\text{ ms}$** | $0.028\text{ mbar}$ | $0.29\text{ mm}$ | $0.28\text{ mm}$ | $35.0\text{ grad/cm}$ | Over-specified ($3.5\times$) |
-| **4096** | **$8.61\text{ ms}$** | $0.021\text{ mbar}$ | $0.21\text{ mm}$ | $0.21\text{ mm}$ | $46.7\text{ grad/cm}$ | Unusable at 100 Hz paired |
-| **8192** | **$17.20\text{ ms}$** | $0.016\text{ mbar}$ | $0.16\text{ mm}$ | $0.16\text{ mm}$ | $61.3\text{ grad/cm}$ | Unusable at 100 Hz paired |
-
-**Conclusion:** OSR 512 delivers **$0.63\text{ mm}$ depth resolution** ($15.8\text{ gradations/cm}$), meeting and exceeding the glider's operational requirements without wasting CPU cycles or bus time.
-
----
-
-## 4. Real-Time Timing & Benchmark Results
-
-### 4.1 Bus Frequency Comparison: 100 kHz vs 400 kHz Fast Mode
-
-The Raspberry Pi hardware I2C controller (`/dev/i2c-1`) was initially benchmarked at the default standard speed (100 kHz) and subsequently configured to **Fast Mode (400 kHz)** by adding `dtparam=i2c_arm_baudrate=400000` to `/boot/firmware/config.txt`.
-
-Switching to Fast Mode resulted in an approximate **3.5x reduction** in I2C transaction latency across all system calls:
-* **Standard 100 kHz Mode:** Average I2C transaction duration was **~650–700 µs** per syscall.
-* **Fast Mode (400 kHz):** Average I2C transaction duration dropped to **~180–200 µs** per syscall.
-
-While the sensor internal ADC conversion wait times remain constant (dictated by internal RC oscillator timings), the faster bus drastically reduces thread blocking during command dispatch and data readout, leaving substantial CPU and scheduling headroom for concurrent sensor loops.
-
----
-
-### 4.2 Comprehensive Benchmark Matrix
-
-Benchmarks were evaluated over 10.0-second runs using `tests/test_rate_bench.c` in a 1 kHz PREEMPT-RT `SCHED_FIFO` service loop (`TIMER_ABSTIME`, monotonic clock), evaluating actual pressure acquisition throughput against a 100 Hz publication schedule (1,000 frames total).
-
-| Configuration Set | Ratio (Temp:Press) | D1 Delay (ms) | D2 Delay (ms) | 100 kHz Tx Avg (µs) | 100 kHz Rate (Hz) | 100 kHz Stale (%) | 400 kHz Tx Avg (µs) | 400 kHz Rate (Hz) | 400 kHz Stale (%) |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **SET A: OSR 2048 / 2048** | 1 : 1 | 4.40 | 4.40 | 480.39 | 79.00 | 21.10% | 199.88 | 83.30 | 16.80% |
-| | 1 : 2 | 4.40 | 4.40 | 692.85 | 101.60 | 14.10% | 199.99 | 111.10 | 11.30% |
-| | 1 : 3 | 4.40 | 4.40 | 697.32 | 110.29 | 13.60% | 200.41 | 125.00 | 8.50% |
-| | 1 : 4 | 4.40 | 4.40 | 691.36 | 120.00 | 11.70% | 200.84 | 133.30 | 0.30% |
-| | 1 : 5 | 4.40 | 4.40 | 695.04 | 122.40 | 9.40% | 200.62 | 138.90 | 5.90% |
-| **SET B: OSR 2048 / 1024** | 1 : 1 | 4.40 | 2.25 | 694.63 | 92.89 | 7.20% | 197.16 | 100.00 | 0.10% |
-| | 1 : 2 | 4.40 | 2.25 | 684.87 | 115.59 | 5.20% | 196.39 | 125.00 | 0.20% |
-| | 1 : 3 | 4.40 | 2.25 | 695.05 | 122.59 | 0.60% | 198.91 | 136.40 | 0.20% |
-| | 1 : 4 | 4.40 | 2.25 | 688.01 | 129.40 | 2.90% | 199.72 | 142.80 | 0.30% |
-| | 1 : 5 | 4.40 | 2.25 | 692.67 | 132.00 | 2.10% | 199.01 | 147.00 | 0.30% |
-| **BASELINES: Paired (1:1)** | | | | | | | | | |
-| *OSR 1024 / 1024* | 1 : 1 | 2.25 | 2.25 | 666.25 | 124.99 | 0.10% | 193.12 | 125.00 | 0.10% |
-| *OSR 512 / 512* | 1 : 1 | 1.15 | 1.15 | 652.19 | 166.70 | **0.00%** | 180.73 | 166.70 | **0.00%** |
-| *OSR 256 / 256* | 1 : 1 | 0.60 | 0.60 | 652.05 | 175.20 | **0.00%** | 179.69 | 250.00 | **0.00%** |
-
----
-
-### 4.3 Analysis & Key Observations
-
-1. **Physical Limit of Symmetrical OSR 2048 (1:1):**
-   * Even with bus latency reduced to ~200 µs at 400 kHz, 1:1 paired OSR 2048 only achieved **83.30 Hz** with **16.8% stale frames**.
-   * Hardware conversion delays ($4.32\text{ ms} + 4.32\text{ ms} = 8.64\text{ ms}$) quantized across a 1 kHz discrete service loop consume 10–12 ms per pair, making true 100 Hz 1:1 operation physically impossible at OSR 2048.
-2. **Phase Jitter in Asymmetric OSR Ratios:**
-   * In SET A, asymmetric ratios (e.g., 1:2 to 1:5) achieved average throughputs above 100 Hz (111–138 Hz), yet still suffered up to 11.3% stale frames. 
-   * This is caused by conversion phase misalignment: cycles executing a temperature conversion take longer than pure pressure cycles, periodically straddling 100 Hz publication boundaries and causing stale samples.
-3. **SET B Viability at 400 kHz:**
-   * Shortening temperature conversion to OSR 1024 ($2.25\text{ ms}$) allowed 1:1 operation to reach **100.00 Hz** with only 1 stale frame (0.10%), proving viable if maximum pressure oversampling is required in the future.
-
----
-
-### 4.4 Final Operating Decision: Symmetrical OSR 512 (1:1)
-
-For the Step 4 production driver implementation and subsequent IMU integration, **Symmetrical OSR 512 (1:1)** on **400 kHz Fast Mode I2C** is selected as the primary operating configuration:
-
-* **Zero Stale Publications:** Achieved **0.00% stale frames** across 1,000 consecutive 100 Hz publication windows.
-* **Low Bus Occupancy:** Average transaction time of **180.73 µs** minimizes total I2C bus holding time.
-* **Guaranteed Frame Headroom:**
-  * D1 Conversion: ~1.15 ms
-  * D2 Conversion: ~1.15 ms
-  * Combined I2C Transactions: ~0.72 ms
-  * **Total Frame Execution Time:** **~3.02 ms**
-  * **Idle Headroom:** **~6.98 ms per 10 ms frame**
-* **Noise vs Timing Trade-off:** RMS noise at OSR 512 is **0.062 mbar** (equivalent to approximately **0.63 mm of hydrostatic water depth**), which provides sufficient resolution for underwater towbody and glider depth estimation while leaving ample idle headroom to service BNO085 SPI transactions and encoder interrupts on the shared real-time thread.
----
-
-## 5. Architectural Decision for Production (`app/`)
-
-Based on empirical testing and glider control requirements, the production system (`ms5/app/`) will implement:
-
-- **Operating Mode:** **Paired 1:1 Conversion** (Symmetric $D_1$ Pressure and $D_2$ Temperature).
-- **ADC Configuration:** **OSR 512** for both channels (`0x42` and `0x52`).
-- **Timing Architecture:**
-  - Fast periodic service tick driven by `realtime.c` (`StartRT` + `RT_SleepUntil`) at **1 kHz** ($1.0\text{ ms}$).
-  - Non-blocking 4-state machine: `STATE_START_D1` $\rightarrow$ `STATE_WAIT_D1` $\rightarrow$ `STATE_START_D2` $\rightarrow$ `STATE_WAIT_D2`.
-  - Independent 100 Hz publication timer consuming completed records every 10 ticks.
-- **Output Contract:** `BaroSample_t` containing monotonic timestamps, compensated pressure (mbar), temperature (°C), water depth (m), and diagnostic status flags.
-
----
-
-## 6. Directory Layout & Build System
-
-```text
-twg/
-├── bno/                         # BNO085 IMU subsystem (SPI0 + GPIO)
-│   └── app/
-│       ├── realtime.c           # Shared PREEMPT_RT timing implementation
-│       └── realtime.h           # (Single source of truth)
-└── ms5/                         # MS5837-02BA Barometer subsystem (I2C1)
-    ├── Makefile                 # Builds tests and app (links bno/app/realtime.c)
-    ├── readme.md                # System documentation and test findings
-    ├── app/                     # (To be generated in Step 4)
-    │   ├── app_contract.h       # BaroSample_t data contract
-    │   ├── ms5837_driver.c/.h   # OSR 512 protocol & compensation math
-    │   ├── ms5837_hal_rpi.c/.h  # Linux I2C HAL (/dev/i2c-1)
-    │   └── main.c               # 100 Hz RT acquisition & publishing loop
-    ├── tests/
-    │   ├── test_i2c_raw.c       # Step 1: Bus probe, soft reset, PROM dump
-    │   ├── test_crc_math.c      # Step 2: PROM CRC-4 & datasheet math proof
-    │   └── test_rate_bench.c    # Step 3: OSR and cadence benchmark harness
-    ├── bin/                     # Generated executables
-    └── build/                   # Compiled intermediate objects (.o)
+```ini
+dtparam=i2c_arm=on
+dtparam=i2c_arm_baudrate=400000
 ```
 
-### Build Instructions
-```bash
-# From twg/ms5:
-make clean
-make tests
+Reboot after changing the configuration. Confirm that the breakout pull-ups, cable length, and bus waveform are suitable for 400 kHz; do not treat a successful `i2cdetect` scan as proof of signal integrity.
 
-# Run diagnostics and benchmarks (requires sudo for PREEMPT_RT SCHED_FIFO):
+## Software prerequisites
+
+Install the build and I2C packages:
+
+```bash
+sudo apt update
+sudo apt install build-essential i2c-tools libi2c-dev
+```
+
+Verify that I2C is enabled and that the sensor responds:
+
+```bash
+ls -l /dev/i2c-1
+sudo i2cdetect -y 1
+```
+
+The expected address is `0x76`. Stop other programs that may access the same sensor during diagnostics or capture. The production design assumes the bus is dedicated to this pressure sensor.
+
+## Build
+
+From `twg/ms5`:
+
+```bash
+make clean
+make all
+```
+
+Important targets:
+
+| Target | Result |
+|---|---|
+| `make app` | Builds `bin/ms5837_capture` |
+| `make host-tests` | Builds production math, reference, initialization mock, acquisition mock, and application/logger tests |
+| `make live-tests` | Builds the initialization and acquisition hardware diagnostics |
+| `make tests` | Builds archived diagnostics, benchmarks, production host tests, and live diagnostics |
+| `make all` | Builds all tests and the capture application |
+| `make clean` | Removes `build/` and `bin/` |
+
+The normal build uses C99 with `-O2 -Wall -Wextra -Werror -pedantic`. The archived Step 2 and Step 3 files remain unchanged; only their ignored-I/O-result warnings are suppressed in their dedicated Makefile rules.
+
+## Capture application
+
+### Command line
+
+The production executable accepts only:
+
+```text
+sudo ./bin/ms5837_capture [--duration SECONDS] [--zero]
+                           [--density KG_PER_M3]
+```
+
+| Option | Meaning |
+|---|---|
+| `--duration SECONDS` | Positive integer duration of the post-zero capture phase; default is 10 seconds |
+| `--zero` | Perform a separate five-second surface-pressure tare before capture |
+| `--density KG_PER_M3` | Positive finite fluid density; default is 1000 kg/m3 |
+
+Without `--zero`, no surface reference is created and depth stays `NaN`. The options `--bus`, `--priority`, and `--help` are intentionally not implemented; concise CLI instructions are also kept in the comment at the beginning of `app/main.c`.
+
+Examples:
+
+```bash
+# Ten seconds, freshwater default, no tare
+sudo ./bin/ms5837_capture
+
+# Thirty seconds, no tare
+sudo ./bin/ms5837_capture --duration 30
+
+# Five-second tare followed by thirty seconds of freshwater capture
+sudo ./bin/ms5837_capture --duration 30 --zero
+
+# Five-second tare followed by thirty seconds at a specified density
+sudo ./bin/ms5837_capture --duration 30 --zero --density 1025
+```
+
+`--duration` covers only the run phase. A command that includes `--zero` therefore spends an additional five seconds collecting the surface reference.
+
+### Frame behavior
+
+Each phase runs as a sequence of 10 ms frames. At the defined beginning of each frame, the application calls `ms5837_driver_trigger()` to start D1. The driver services the D1 deadline, reads pressure ADC data, starts D2 at the same OSR, reads temperature ADC data, compensates the completed pair, and returns to `IDLE`.
+
+The application publishes exactly one record per scheduled frame. If a new pair is unavailable, the record is marked not ready; if the latest completed measurement has already been published, it is marked stale. A late prior pair is serviced so that one overrun does not permanently stall acquisition.
+
+Console telemetry is printed every 50 frames, approximately every 500 ms. CSV writing runs in a separate thread so routine file I/O is not performed directly in the time-sensitive acquisition path.
+
+### Real-time behavior
+
+The application requests `SCHED_FIFO` priority 90 through the timing implementation shared with `bno/app/realtime.c`. If real-time setup fails, it emits a warning and continues without `SCHED_FIFO`; run with the required privileges and limits when deterministic scheduling is needed.
+
+`SIGINT` and `SIGTERM` request a controlled stop. Shutdown stops and joins the logger, drains queued records, flushes and closes the CSV stream, and then closes the driver HAL.
+
+## Surface zeroing
+
+When `--zero` is supplied, the application first collects completed pressure samples for five seconds at the same 100 Hz frame rate used during capture. Duplicate measurement sequences and invalid measurements are rejected.
+
+Finalization requires at least 350 valid measurements. Up to 512 pressure values can be retained. The values are sorted, 10% is trimmed from each end, and the mean of the remaining values becomes `surface_pressure_mbar`.
+
+If zeroing fails, `surface_pressure_valid` remains false and depth remains `NaN`; pressure and temperature capture can still be inspected. Zeroing should be performed with the sensing face stationary at the intended zero-depth pressure and with no transient squeezing, airflow, or water motion.
+
+## Measurement contract
+
+`BaroSample_t` contains:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `contract_version` | `uint32_t` | Sample contract version |
+| `status_flags` | `uint32_t` | Per-measurement validity and range flags |
+| `measurement_sequence` | `uint64_t` | Completed-pair sequence number |
+| `measurement_complete_time_ns` | `uint64_t` | Monotonic completion timestamp |
+| `raw_pressure_d1` | `uint32_t` | Raw pressure ADC result |
+| `raw_temperature_d2` | `uint32_t` | Raw temperature ADC result |
+| `pressure_mbar` | `double` | Compensated pressure |
+| `temperature_c` | `double` | Compensated temperature |
+| `depth_m` | `double` | Signed depth relative to the surface reference |
+
+Depth is computed from the pressure difference:
+
+```text
+depth_m = (pressure_mbar - surface_pressure_mbar) * 100
+          / (fluid_density_kg_m3 * 9.80665)
+```
+
+Depth is intentionally signed. Pressure above the reference produces positive depth, while pressure below the reference produces negative depth. Missing or invalid inputs produce `NaN` rather than a misleading zero.
+
+### Status flags
+
+| Flag | Bit | Meaning |
+|---|---:|---|
+| `BARO_STATUS_NOT_READY` | 0 | No completed measurement is available |
+| `BARO_STATUS_RAW_INVALID` | 1 | A raw ADC value failed validation |
+| `BARO_STATUS_PRESSURE_EXTENDED` | 2 | Pressure is in the extended linear range but outside the nominal range |
+| `BARO_STATUS_PRESSURE_INVALID` | 3 | Pressure is outside the accepted linear range |
+| `BARO_STATUS_TEMPERATURE_EXTENDED` | 4 | Temperature is outside the nominal range |
+| `BARO_STATUS_DEPTH_REFERENCE_PENDING` | 5 | No surface tare was requested or completed yet |
+| `BARO_STATUS_DEPTH_REFERENCE_INVALID` | 6 | The surface reference or density is invalid |
+
+The production classification boundaries are 300 to 1200 mbar nominal pressure, 10 to below 300 mbar and above 1200 to 2000 mbar extended pressure, and below 10 or above 2000 mbar invalid pressure. The nominal temperature range is -20 to 85 degrees C.
+
+## CSV output
+
+The logger creates this file directly in the current working directory:
+
+```text
+ms5_capture_YYYYMMDD_HHMMSS.csv
+```
+
+It uses exclusive creation, so an existing file is not overwritten. The exact header is:
+
+```text
+publication_sequence,publication_time_ns,phase,sample_ready,sample_stale,fluid_density_kg_m3,surface_pressure_mbar,surface_pressure_valid,contract_version,status_flags,measurement_sequence,measurement_complete_time_ns,raw_pressure_d1,raw_temperature_d2,pressure_mbar,temperature_c,depth_m
+```
+
+| Column | Meaning |
+|---|---|
+| `publication_sequence` | Sequence of the scheduled 100 Hz publication |
+| `publication_time_ns` | Monotonic timestamp assigned to the frame |
+| `phase` | `zero` or `run` |
+| `sample_ready` | 1 when a completed sample was available |
+| `sample_stale` | 1 when the measurement sequence matches the previous publication |
+| `fluid_density_kg_m3` | Density used for depth calculation |
+| `surface_pressure_mbar` | Current tare reference or `NaN` |
+| `surface_pressure_valid` | 1 when the surface reference is usable |
+| `contract_version` | `BaroSample_t` contract version |
+| `status_flags` | Decimal bit mask from the status table |
+| `measurement_sequence` | Sequence of the completed D1/D2 pair |
+| `measurement_complete_time_ns` | Monotonic completion time of that pair |
+| `raw_pressure_d1` | Raw D1 ADC value |
+| `raw_temperature_d2` | Raw D2 ADC value |
+| `pressure_mbar` | Compensated pressure |
+| `temperature_c` | Compensated temperature |
+| `depth_m` | Signed depth or `NaN` |
+
+The logger queue capacity is 2048 records. Enqueue uses a non-blocking mutex attempt; contention, a full queue, shutdown, or an earlier write failure can reject a record. Rejections increment `logger_drops`, and the application returns failure if drops occurred.
+
+## Driver architecture
+
+### Modules
+
+| File | Responsibility |
+|---|---|
+| `app/app_contract.h` | Versioned sample, run configuration, status flags, and runtime statistics |
+| `app/ms5837_math.c/.h` | CRC-4, factory compensation, range classification, and signed depth |
+| `app/ms5837_reference.c/.h` | Five-second 100 Hz tare collection and trimmed-mean finalization |
+| `app/ms5837_hal.h` | Injectable platform-independent I/O contract |
+| `app/ms5837_hal_rpi.c/.h` | Linux `/dev/i2c-*` implementation and `I2C_SLAVE` setup |
+| `app/ms5837_driver.c/.h` | Reset, PROM validation, triggered D1/D2 state machine, and recovery |
+| `app/ms5837_cli.c/.h` | Restricted argument parsing and defaults |
+| `app/ms5837_logger.c/.h` | Asynchronous timestamped CSV writer |
+| `app/main.c` | 100 Hz orchestration, zeroing, telemetry, signals, and shutdown |
+
+### Initialization
+
+`ms5837_driver_init()` validates the HAL, opens the bus, issues reset `0x1E`, waits 3 ms for PROM reload, reads seven PROM words, checks coefficient sanity, validates CRC-4, and leaves the driver initialized in `IDLE`. Any partial initialization failure closes resources before returning an error.
+
+### Acquisition
+
+`ms5837_driver_trigger()` is accepted only when the driver is initialized and idle. It starts a D1 OSR-512 conversion and establishes the conversion deadline. Calling it while an acquisition is active returns `MS5837_DRIVER_ERR_BUSY`.
+
+`ms5837_driver_service()` advances the nonblocking state machine according to the supplied monotonic time. It reads D1 after its deadline, starts D2 OSR 512, reads D2 after its deadline, performs compensation, assigns the completion timestamp and sequence number, updates the latest sample, and returns `MS5837_SERVICE_SAMPLE_READY`.
+
+### Recovery
+
+An I2C failure aborts the partial pair and moves the state machine into recovery. Service calls then close/reopen the HAL, reset the sensor, wait for PROM reload, reread all PROM words, revalidate coefficients and CRC, and return the driver to `IDLE`. Runtime statistics retain I2C errors, aborted pairs, recovery attempts, and successful recoveries.
+
+## Tests
+
+### Production host tests
+
+Build and run the host-only suite:
+
+```bash
+make clean
+make host-tests
+
+./bin/test_ms5837_math
+./bin/test_ms5837_reference
+./bin/test_ms5837_init_mock
+./bin/test_ms5837_acquisition_mock
+./bin/test_ms5837_app
+```
+
+Coverage includes CRC corruption, datasheet compensation, second-order low-temperature compensation, raw rejection, pressure and temperature boundaries, signed depth, `NaN` behavior, trimmed-mean taring, the exact 350-sample threshold, initialization command order, every injected initialization failure point, cleanup, explicit triggering, busy retrigger rejection, D1/D2 acquisition, recovery, CLI restrictions, and asynchronous logger behavior.
+
+Expected success lines are:
+
+```text
+PASS: Step 4A production math contract
+PASS: Step 4A surface-reference contract
+PASS: Step 4B mock initialization and cleanup
+PASS: Step 4C symmetric OSR-512 acquisition and recovery
+PASS: Step 4D CLI and asynchronous CSV logger
+```
+
+### Live diagnostics
+
+Build the hardware diagnostics:
+
+```bash
+make live-tests
+```
+
+Run initialization diagnostics:
+
+```bash
+sudo ./bin/test_ms5837_init_live
+```
+
+This resets the physical sensor, reads the seven PROM words, checks coefficient sanity, and compares stored and computed CRC values using the fixed `/dev/i2c-1` and `0x76` configuration.
+
+Run the acquisition diagnostic:
+
+```bash
+sudo ./bin/test_ms5837_acquisition_live
+```
+
+This exercises the explicit-trigger, symmetric OSR-512 acquisition path against the physical device. Stop any other process using the sensor before running either live test.
+
+### Archived bring-up tools
+
+The following Step 1 to Step 3 programs are retained for investigation and historical comparison:
+
+```bash
 ./bin/test_i2c_raw
 ./bin/test_crc_math
 sudo ./bin/test_rate_bench
 ```
+
+`tests/test_crc_math.c` remains archived and independent; it is not converted to call `ms5837_math.c`.
+
+## Verified sensor data
+
+The original live PROM capture was:
+
+| Word | Hex | Decimal | Meaning |
+|---|---:|---:|---|
+| C0 | `0x4BA1` | - | CRC/version word; stored CRC nibble `0x4` |
+| C1 | `0xBA4A` | 47690 | Pressure sensitivity |
+| C2 | `0xB779` | 46969 | Pressure offset |
+| C3 | `0x7395` | 29589 | Temperature coefficient of sensitivity |
+| C4 | `0x78A1` | 30881 | Temperature coefficient of offset |
+| C5 | `0x793D` | 31037 | Reference temperature |
+| C6 | `0x6ACF` | 27343 | Temperature coefficient |
+
+The archived CRC calculation returned `0x4`, matching the stored nibble. The datasheet vector with D1 `6465444` and D2 `8077636` produced 1100.02 mbar and 20.00 degrees C in the archived math proof.
+
+## OSR decision
+
+The archived Step 3 benchmark compared OSR and pressure/temperature cadence choices using a 1 kHz service loop and 100 Hz publication windows. The final production choice is symmetric OSR 512 rather than an interleaved or asymmetric mode.
+
+| Paired mode | 100 kHz measured rate | 100 kHz stale | 400 kHz measured rate | 400 kHz stale |
+|---|---:|---:|---:|---:|
+| OSR 2048 / 2048 | 79.00 Hz | 21.10% | 83.30 Hz | 16.80% |
+| OSR 1024 / 1024 | 124.99 Hz | 0.10% | 125.00 Hz | 0.10% |
+| OSR 512 / 512 | 166.70 Hz | 0.00% | 166.70 Hz | 0.00% |
+| OSR 256 / 256 | 175.20 Hz | 0.00% | 250.00 Hz | 0.00% |
+
+At 400 kHz, the archived OSR-512 test measured approximately 180.73 microseconds average I2C transaction time and no stale frames in 1000 publication windows. The selected setting preserves 100 Hz headroom while providing a better noise/resolution trade-off than OSR 256. Production still enforces one explicitly triggered D1/D2 pair per 10 ms frame instead of running continuously at the maximum benchmark throughput.
+
+## Runtime checks
+
+During a normal capture, inspect the final summary:
+
+```text
+completed=... publications=... not_ready=... stale=... i2c_errors=...
+aborted_pairs=... recoveries=.../... overruns=... logger_drops=...
+max_body_ns=...
+```
+
+For a healthy stationary run, investigate any nonzero `i2c_errors`, repeated `aborted_pairs`, failed recoveries, sustained overruns, or logger drops. A few not-ready or stale rows should be interpreted together with timing and recovery counters rather than discarded silently.
+
+Useful checks:
+
+```bash
+# Device and address
+ls -l /dev/i2c-1
+sudo i2cdetect -y 1
+
+# Kernel messages related to I2C
+dmesg | grep -i i2c
+
+# Confirm real-time scheduling while capture is running
+ps -eLo pid,tid,cls,rtprio,pri,comm | grep ms5837
+
+# Inspect the newest output
+ls -lt ms5_capture_*.csv | head
+head -n 5 ms5_capture_YYYYMMDD_HHMMSS.csv
+```
+
+## Troubleshooting
+
+### No `/dev/i2c-1`
+
+Enable I2C in Raspberry Pi configuration, verify `dtparam=i2c_arm=on`, and reboot. Check that the relevant kernel modules are loaded.
+
+### Address `0x76` absent
+
+Power down before rewiring. Recheck 3.3 V, common ground, SDA/SCL orientation, connector continuity, and pull-up voltage. Then retry with only the pressure sensor connected.
+
+### Initialization CRC failure
+
+Repeat the live initialization diagnostic. Persistent CRC mismatch suggests communication integrity, wiring, power, timing, or device problems; do not bypass CRC validation in production.
+
+### Depth remains `NaN`
+
+This is expected without `--zero`. With `--zero`, inspect the printed valid/rejected counts and confirm at least 350 valid unique samples were collected. Also verify that density is positive and finite.
+
+### Capture warns about real-time setup
+
+Run with suitable privileges and confirm the PREEMPT_RT scheduling configuration. The application continues without `SCHED_FIFO`, but timing should then be evaluated from the CSV and runtime counters.
+
+### Logger drops
+
+Check disk space, filesystem health, storage latency, and competing I/O. The logger intentionally rejects rather than blocking the acquisition thread when it cannot immediately lock or accept another queued record.
+
+## Directory layout
+
+```text
+twg/
+├── bno/
+│   └── app/
+│       ├── realtime.c
+│       └── realtime.h
+└── ms5/
+    ├── Makefile
+    ├── readme.md
+    ├── app/
+    │   ├── app_contract.h
+    │   ├── main.c
+    │   ├── ms5837_cli.c/.h
+    │   ├── ms5837_driver.c/.h
+    │   ├── ms5837_hal.c/.h        # Generic contract is ms5837_hal.h
+    │   ├── ms5837_hal_rpi.c/.h
+    │   ├── ms5837_logger.c/.h
+    │   ├── ms5837_math.c/.h
+    │   └── ms5837_reference.c/.h
+    ├── tests/
+    │   ├── test_i2c_raw.c
+    │   ├── test_crc_math.c
+    │   ├── test_rate_bench.c
+    │   ├── test_ms5837_math.c
+    │   ├── test_ms5837_reference.c
+    │   ├── test_ms5837_init_mock.c
+    │   ├── test_ms5837_init_live.c
+    │   ├── test_ms5837_acquisition_mock.c
+    │   ├── test_ms5837_acquisition_live.c
+    │   └── test_ms5837_app.c
+    ├── build/
+    └── bin/
+```
+
+`build/` and `bin/` are generated and removed by `make clean`. CSV captures are deliberately written to the working directory rather than a `logs/` subdirectory.
