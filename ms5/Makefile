@@ -17,21 +17,25 @@ TEST_INIT_MOCK = $(BINDIR)/test_ms5837_init_mock
 TEST_INIT_LIVE = $(BINDIR)/test_ms5837_init_live
 TEST_ACQUISITION_MOCK = $(BINDIR)/test_ms5837_acquisition_mock
 TEST_ACQUISITION_LIVE = $(BINDIR)/test_ms5837_acquisition_live
+TEST_APP = $(BINDIR)/test_ms5837_app
+CAPTURE_APP = $(BINDIR)/ms5837_capture
 
 RT_OBJ = $(BUILDDIR)/realtime.o
 
-.PHONY: all clean dirs tests host-tests live-tests
+.PHONY: all clean dirs tests host-tests live-tests app
 
-all: dirs tests
+all: dirs tests app
 
 dirs:
 	@mkdir -p $(BUILDDIR) $(BINDIR)
 
-tests: dirs $(TEST_RAW) $(TEST_MATH) $(TEST_BENCH) $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_INIT_LIVE) $(TEST_ACQUISITION_MOCK) $(TEST_ACQUISITION_LIVE)
+tests: dirs $(TEST_RAW) $(TEST_MATH) $(TEST_BENCH) $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_INIT_LIVE) $(TEST_ACQUISITION_MOCK) $(TEST_ACQUISITION_LIVE) $(TEST_APP)
 
-host-tests: dirs $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_ACQUISITION_MOCK)
+host-tests: dirs $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_ACQUISITION_MOCK) $(TEST_APP)
 
 live-tests: dirs $(TEST_INIT_LIVE) $(TEST_ACQUISITION_LIVE)
+
+app: dirs $(CAPTURE_APP)
 
 # Compile realtime.o directly from the single source of truth in bno/app
 $(RT_OBJ): $(BNO_DIR)/realtime.c $(BNO_DIR)/realtime.h
@@ -118,6 +122,29 @@ $(BUILDDIR)/test_ms5837_acquisition_live.o: $(TESTDIR)/test_ms5837_acquisition_l
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(TEST_ACQUISITION_LIVE): $(BUILDDIR)/test_ms5837_acquisition_live.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+# Step 4D production orchestration, restricted CLI, and asynchronous CSV logger
+$(BUILDDIR)/ms5837_cli.o: | dirs
+$(BUILDDIR)/ms5837_cli.o: $(APPDIR)/ms5837_cli.c $(APPDIR)/ms5837_cli.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(BUILDDIR)/ms5837_logger.o: | dirs
+$(BUILDDIR)/ms5837_logger.o: $(APPDIR)/ms5837_logger.c $(APPDIR)/ms5837_logger.h $(APPDIR)/app_contract.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(BUILDDIR)/ms5837_main.o: | dirs
+$(BUILDDIR)/ms5837_main.o: $(APPDIR)/main.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal_rpi.h $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_reference.h $(BNO_DIR)/realtime.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -I$(BNO_DIR) -c $< -o $@
+
+$(CAPTURE_APP): $(BUILDDIR)/ms5837_main.o $(BUILDDIR)/ms5837_cli.o $(BUILDDIR)/ms5837_logger.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o $(BUILDDIR)/ms5837_reference.o $(RT_OBJ)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+$(BUILDDIR)/test_ms5837_app.o: | dirs
+$(BUILDDIR)/test_ms5837_app.o: $(TESTDIR)/test_ms5837_app.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_logger.h $(APPDIR)/app_contract.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(TEST_APP): $(BUILDDIR)/test_ms5837_app.o $(BUILDDIR)/ms5837_cli.o $(BUILDDIR)/ms5837_logger.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 clean:
