@@ -3,12 +3,13 @@
 /*
  * main.c
  *
- * Opens the IMU sensor reader, then runs a single real-time loop:
+ * Opens the one IMU session, applies production reports and flight-cal
+ * mask 0 through the session owner, then runs a single real-time loop:
  *   - services the BNO085 / SH-2 session at 1 kHz; and
- *   - prints the latest combined sample at 100 Hz.
+ *   - prints the latest snapshot at 100 Hz.
  *
  * The 300 ms settle phase services startup traffic without treating it as
- * application data. The timed acquisition window begins only afterward.
+ * acquisition output. The timed window begins only after OPERATIONAL.
  */
 
 #include <stdbool.h>
@@ -16,12 +17,8 @@
 #include <stdio.h>
 #include <time.h>
 
-#include "sh2.h"
-#include "sh2_err.h"
-
-#include "app/app_contract.h"
 #include "rt/realtime.h"
-#include "app/app_sensor.h"
+#include "app/imu_session.h"
 
 #define RUN_DURATION_SEC       10
 #define RT_PRIORITY            90
@@ -30,6 +27,7 @@
 #define SETTLE_DURATION_MS     300
 #define SETTLE_LOOPS           ((SETTLE_DURATION_MS * 1000) / \
                                 (unsigned)(LOOP_DT_SEC * 1000000.0 + 0.5))
+#define FLIGHT_CAL_MASK        0u
 
 static double elapsedSeconds(const struct timespec *start,
                              const struct timespec *now)
@@ -38,37 +36,27 @@ static double elapsedSeconds(const struct timespec *start,
            (double)(now->tv_nsec - start->tv_nsec) / 1e9;
 }
 
+static void fail_and_close(const char *msg)
+{
+    fprintf(stderr, "main: %s\n", msg);
+    imu_session_close();
+}
+
 int main(void)
 {
-    if (!sensor_reader_start()) {
-        fprintf(stderr, "main: sensor_reader_start failed\n");
+    if (!imu_session_open()) {
+        fprintf(stderr, "main: imu_session_open failed\n");
+        imu_session_close();
         return 1;
     }
 
-    /*
-     * Flight-time calibration policy: fly on the saved DCD only.
-     *
-     * sh2_open() just reset the BNO085 and loaded the dynamic
-     * calibration data (DCD) that bno_cal previously saved to flash.
-     * The dynamic-calibration enable bits themselves are RAM-only
-     * state that revert to chip defaults on every reset, so bno_cal
-     * cannot set them on our behalf — every program must choose its
-     * own policy at session start. Disable all dynamic calibration
-     * here so the saved DCD is the only calibration input during
-     * acquisition. (The gyro is still bias-corrected automatically
-     * whenever the device is stationary, regardless of this setting.)
-     *
-     * Note: with all dynamic calibration disabled the BNO085 reports
-     * the gyro status bit as 0 (unreliable) by design — the real-time
-     * ZRO estimator is halted — while the saved DCD keeps
-     * bias-correcting the gyro data itself. Health/readiness checks
-     * must never gate on the gyro status bit under this policy; use
-     * the rotation vector status and ImuSample_t.orientationErrRad
-     * (expected <= ~0.35 rad once converged) instead.
-     */
-    if (sh2_setCalConfig(0) != SH2_OK) {
-        fprintf(stderr, "main: sh2_setCalConfig(disable all) failed\n");
-        sensor_reader_stop();
+    if (!imu_session_configure_production(FLIGHT_CAL_MASK)) {
+        fail_and_close("imu_session_configure_production failed");
+        return 1;
+    }
+
+    if (!imu_session_begin_settle()) {
+        fail_and_close("imu_session_begin_settle failed");
         return 1;
     }
 
@@ -77,18 +65,19 @@ int main(void)
                 "main: WARNING: StartRT failed; continuing at default scheduling\n");
     }
 
-    /*
-     * Service the BNO085 while its feature reports and fusion outputs
-     * settle. Do not print or count samples during this phase.
-     */
     for (unsigned i = 0; i < SETTLE_LOOPS; ++i) {
-        sensor_reader_service();
+        imu_session_service();
         RT_SleepUntil(LOOP_DT_SEC);
+    }
+
+    if (!imu_session_mark_operational()) {
+        fail_and_close("imu_session_mark_operational failed");
+        return 1;
     }
 
     printf("main: running IMU reader for %d seconds...\n", RUN_DURATION_SEC);
 
-    ImuSample_t sample;
+    ImuSampleSnapshot_t sample;
     int printCount = 0;
     long loopCount = 0;
 
@@ -97,35 +86,43 @@ int main(void)
     clock_gettime(CLOCK_MONOTONIC, &t0);
 
     double elapsed = 0.0;
-    sensor_reader_resetSeq();
 
     while (elapsed < (double)RUN_DURATION_SEC) {
-        sensor_reader_service();
+        imu_session_service();
         loopCount++;
 
         if ((loopCount % PRINT_EVERY_N_LOOPS) == 0) {
-            if (sensor_reader_getLatestSample(&sample) &&
-                sample.version == IMU_SAMPLE_STRUCT_VERSION) {
-                printf("seq=%" PRIu32 " ts=%" PRIu64,
-                       sample.seq,
-                       sample.timestamp_uS);
+            if (imu_session_get_snapshot(&sample) &&
+                sample.version == IMU_SAMPLE_CONTRACT_VERSION) {
+                printf("epoch=%" PRIu32 " valid=%" PRIu8
+                       " proc=%" PRIu64,
+                       sample.configurationEpoch,
+                       sample.validMask,
+                       sample.processDecodeCount);
 
-                if (sample.validMask & IMU_SAMPLE_VALID_ORIENTATION) {
-                    printf(" yaw=%7.3f pitch=%7.3f roll=%7.3f",
+                if (sample.validMask & IMU_GROUP_BIT_ROTATION) {
+                    printf(" rvseq=%" PRIu64 " rvts=%" PRIu64
+                           " yaw=%7.3f pitch=%7.3f roll=%7.3f",
+                           sample.rotationMeta.groupEventSeq,
+                           sample.rotationMeta.sensorTimeUs,
                            sample.yaw,
                            sample.pitch,
                            sample.roll);
                 }
 
-                if (sample.validMask & IMU_SAMPLE_VALID_ACCEL) {
-                    printf(" ax=%7.3f ay=%7.3f az=%7.3f",
+                if (sample.validMask & IMU_GROUP_BIT_ACCEL) {
+                    printf(" accseq=%" PRIu64
+                           " ax=%7.3f ay=%7.3f az=%7.3f",
+                           sample.accelMeta.groupEventSeq,
                            sample.ax,
                            sample.ay,
                            sample.az);
                 }
 
-                if (sample.validMask & IMU_SAMPLE_VALID_GYRO) {
-                    printf(" gx=%7.3f gy=%7.3f gz=%7.3f",
+                if (sample.validMask & IMU_GROUP_BIT_GYRO) {
+                    printf(" gyrseq=%" PRIu64
+                           " gx=%7.3f gy=%7.3f gz=%7.3f",
+                           sample.gyroMeta.groupEventSeq,
                            sample.gx,
                            sample.gy,
                            sample.gz);
@@ -144,6 +141,6 @@ int main(void)
 
     printf("main: finished. Printed %d lines.\n", printCount);
 
-    sensor_reader_stop();
+    imu_session_close();
     return 0;
 }

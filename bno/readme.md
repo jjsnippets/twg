@@ -5,17 +5,21 @@ three fused/calibrated outputs from an Adafruit BNO085 9-DOF IMU over SPI (CEVA
 SHTP/SH-2 protocol). Each output is configured as an independent periodic
 100 Hz stream and the session is serviced by a single-threaded 1 kHz loop.
 
-The reusable sensor-facing component is `app/app_sensor.c` together with
+The reusable sensor-facing component is `app/imu_session.c` together with
 `app/sh2_hal_rpi.c` and the vendored `sh2/` library. `app/main.c` is the
 standalone `bno_app` example/diagnostic consumer; it is not the process-level
 integration owner. The planned `twg` integration executable will own the one
 master loop and cooperatively service the BNO085 and the other subsystems.
 
-> **Integration readiness:** the current production contract is version 3 and
-> remains unchanged. It is adequate for the standalone latest-value example,
-> but it does not expose per-report freshness or reader health. Do not treat a
-> combined `ImuSample_t` snapshot as proof that all three report groups advanced
-> in the current 10 ms publication frame. See [Current snapshot semantics](#current-snapshot-semantics),
+`app/app_sensor.c` and `app/app_contract.h` remain in the tree as an unused
+version-3 leftover. `bno_app` does not link them.
+
+> **Integration readiness:** `bno_app` now uses contract generation 1
+> (`IMU_SAMPLE_CONTRACT_VERSION`). The snapshot carries per-group identities
+> and a configuration epoch. It still does not carry publisher-relative
+> freshness. Do not treat a combined `ImuSampleSnapshot_t` as proof that all
+> three report groups advanced in the current 10 ms print boundary. See
+> [Current snapshot semantics](#current-snapshot-semantics),
 > [Latest validation evidence](#latest-validation-evidence), and
 > [Integration work remaining](#integration-work-remaining).
 
@@ -33,8 +37,9 @@ sudo ./bin/bno_app    # runs the 100 Hz snapshot loop; Ctrl-C to stop
   (`SCHED_FIFO` 90) and memory locking (`mlockall`). `StartRT()` failure is
   non-fatal: the application logs a warning and continues under default
   scheduling.
-- Runs a 300 ms service-only settle phase, then a fixed 10 s acquisition
-  window, printing the latest combined snapshot at 100 Hz.
+- Runs a 300 ms service-only settle phase, marks the session OPERATIONAL,
+  then a fixed 10 s acquisition window, printing the latest snapshot at
+  100 Hz. Group event sequences are not reset after settle.
 - The 100 Hz print boundary is consumer decimation, not a trigger-and-complete
   acquisition transaction. SH-2 remains continuously serviced at 1 kHz.
 
@@ -95,9 +100,11 @@ Host interface requirements:
 bno/
 ├── Makefile                 unified build for app, tools, and tests
 ├── app/                     reusable production reader + standalone consumer
-│   ├── app_contract.h       current ImuSample_t version 3 contract
-│   ├── app_sensor.c/.h      SH-2 session owner and latest-value mailbox
+│   ├── imu_contract.h       generation-1 R1/R2/R3 contract used by bno_app
+│   ├── imu_session.c/.h     sole HAL/SH-2 owner for bno_app
 │   ├── main.c               standalone bno_app loop/example
+│   ├── app_contract.h       leftover ImuSample_t version 3 (unused by bno_app)
+│   ├── app_sensor.c/.h      leftover v3 reader (unused by bno_app)
 │   └── sh2_hal_rpi.c        Raspberry Pi transport (SPI + libgpiod)
 ├── calibration/             exclusive-session dynamic-calibration tool
 ├── orientation/             exclusive-session tare/orientation tool
@@ -119,13 +126,13 @@ all state and no mutex is required:
 
 ```text
 app/main.c (standalone owner: 1 kHz service, 100 Hz snapshot/print)
-  └─ app_sensor (SH-2 session owner; enables and decodes 3 reports)
+  └─ imu_session (sole SH-2 owner; production config, epoch, R1/R2 mailbox)
        └─ sh2/ (SHTP framing, fragmentation, channels, report decode)
             └─ sh2_hal_rpi.c (spidev + libgpiod transport)
                  └─ /dev/spidev0.0 + gpiochip0 -> BNO085
 ```
 
-`app_sensor` is intentionally non-scheduling: `sensor_reader_service()` only
+`imu_session` is intentionally non-scheduling: `imu_session_service()` only
 calls `sh2_service()` on the caller's thread. `StartRT()` and
 `RT_SleepUntil()` belong to the executable that owns the loop. The standalone
 application and selected standalone diagnostics are separate process-level
@@ -134,16 +141,21 @@ future integrated executable.
 
 ### Continuous acquisition
 
-`sensor_reader_start()` enables rotation vector, linear acceleration, and
-calibrated gyroscope independently with `reportInterval_us = 10000` and
-`batchInterval_us = 0`. The BNO085 then generates the three periodic streams
-asynchronously and asserts data-ready when traffic is available.
+`imu_session_open()` establishes the SH-2 session and configuration epoch 1.
+`imu_session_configure_production(0)` then enables rotation vector, linear
+acceleration, and calibrated gyroscope independently with
+`reportInterval_us = 10000` and `batchInterval_us = 0`, and applies flight
+dynamic-calibration mask 0. The first production configure after open does not
+extra-increment the epoch.
 
-The owner calls `sensor_reader_service()` every 1 ms. SH-2 callbacks execute
+The owner calls `imu_session_service()` every 1 ms. SH-2 callbacks execute
 inside that call and update only the report group represented by each event.
-Every tenth application iteration, `bno_app` copies and prints the latest
-composite mailbox. Equal requested periods do not guarantee equal report phase
-or exactly one event from each group before every host-defined 10 ms boundary.
+`bno_app` settles for 300 ms in `SETTLING`, then `imu_session_mark_operational()`
+before printing. Every tenth application iteration it copies
+`ImuSampleSnapshot_t` and prints epoch, `validMask`, and per-group identities
+for groups that are valid in the current epoch. Equal requested periods do not
+guarantee equal report phase or exactly one event from each group before every
+host-defined 10 ms boundary.
 
 ### HAL transport
 
@@ -187,71 +199,55 @@ must not delay cooperative sensor service.
 
 ## Current data contract
 
-`app/app_contract.h` is the source of truth. The checked-in production
-contract remains `IMU_SAMPLE_STRUCT_VERSION 3`:
+`app/imu_contract.h` is the source of truth for `bno_app`. The production
+snapshot is `IMU_SAMPLE_CONTRACT_VERSION 1` (`ImuSampleSnapshot_t`). It is not
+compatible with leftover `IMU_SAMPLE_STRUCT_VERSION 3` / `ImuSample_t`.
 
-```c
-typedef struct {
-    uint8_t  version;
-    uint32_t seq;
-    uint64_t timestamp_uS;
+Each IMU group carries independent R1 metadata:
 
-    float yaw;
-    float pitch;
-    float roll;
-    float orientationErrRad;
+- `configurationEpoch` — session/report/policy generation; 0 means no session
+- `groupEventSeq` — process-lifetime per-group identity; first event is 1;
+  never reset on settle, epoch, or print row 1
+- `hostDecodeNs` — `CLOCK_MONOTONIC` when the host accepted the event
+- `sensorTimeUs` — SH-2 `timestamp_uS` (may be briefly non-monotonic)
+- `deviceReportSeq` — raw wrapping SH-2 sequence; diagnostic only
+- `rawStatus` — unmodified SH-2 accuracy/status, not a go/no-go verdict
 
-    float ax;
-    float ay;
-    float az;
-
-    float gx;
-    float gy;
-    float gz;
-
-    uint8_t validMask;
-} ImuSample_t;
-```
-
-`seq` increments for every decoded real sensor event, regardless of report
-group. `timestamp_uS` is the BNO085 timestamp of the most recently decoded
-event and can occasionally move backward by a few microseconds because of
-SH-2/SHTP behavior; any `dt` calculation must guard against `dt <= 0`.
-
-`validMask` is sticky session-seen state: bit 0 means at least one orientation
-report has been decoded, bit 1 means at least one acceleration report, and bit
-2 means at least one gyro report. It does not mean that a group is new in this
-publication frame, below an age limit, or currently error-free.
+Comparable identity is `(configurationEpoch, groupEventSeq)` only.
+`validMask` is sticky seen-in-this-epoch state: bit 0 rotation, bit 1 accel,
+bit 2 gyro. It is cleared on epoch increment. It does not mean a group is
+fresh since the previous 10 ms print.
 
 Orientation uses Tait-Bryan ZYX angles (yaw about Z, pitch about Y, and roll
 about X). `orientationErrRad` is the rotation-vector heading-error estimate in
-radians; it is not the SH-2 0–3 report status scale.
+radians; it is not the SH-2 0–3 report status scale. The snapshot also stores
+the rotation-vector quaternion.
 
 ### Current snapshot semantics
 
 The callback writes only the fields belonging to the event that arrived, while
-leaving the other groups at their previous values. A copied `ImuSample_t` can
-therefore combine orientation, acceleration, and gyro values from three
-different event times. Its aggregate `seq` and `timestamp_uS` identify only the
-newest decoded event, not all values in the structure.
+leaving the other groups at their previous values. Those previous values are
+ineligible after an epoch increment until a new decode sets the group's valid
+bit again.
 
-The reader currently ignores asynchronous reset/meta events and silently
-returns from a sensor callback when decoding fails. The production contract
-has no per-group sequence, per-group host/device time, raw status, reset flag,
-decode-failure count, transport/session health, or consumer-relative
-`freshMask`. An integration consumer must not infer these facts from
-`validMask` or the aggregate sequence.
+The snapshot can prove last-decode identity, host/device time, raw status, and
+whether a group has been seen in the current epoch. It cannot prove publisher
+freshness. `freshMask` / `staleMask` / `missingMask` are not snapshot fields.
+`bno_app` still prints a host-side 100 Hz view; it does not yet write an R9
+publication CSV.
+
+A reset observed on the SH-2 session increments epoch, clears `validMask`, and
+moves the reader to `RECOVERING`. Recovery must not pass through `CLOSED`.
 
 ## Calibration policy
 
-The standalone `bno_app` opens the SH-2 session and then calls
-`sh2_setCalConfig(0)`. This disables dynamic calibration for that session so
-flight acquisition uses the previously saved dynamic calibration data (DCD).
-Under this policy, BNO085 firmware can report calibrated-gyro status 0 because
-the runtime zero-rate observer is halted, while the saved DCD still provides
-bias correction. Readiness must not reject data solely because gyro status is
-0; the existing application instead documents rotation-vector quality and
-`orientationErrRad` as the relevant indicators.
+The standalone `bno_app` does not call `sh2_setCalConfig()` itself.
+`imu_session_configure_production(0)` disables dynamic calibration for that
+session so flight acquisition uses the previously saved dynamic calibration
+data (DCD). Under this policy, BNO085 firmware can report calibrated-gyro
+status 0 because the runtime zero-rate observer is halted, while the saved DCD
+still provides bias correction. Readiness must not reject data solely because
+gyro status is 0; use rotation-vector quality and `orientationErrRad` instead.
 
 The current `bno_cal` and `bno_orient` programs each open and own an independent
 SH-2 session. They must not run concurrently with `bno_app` or another SH-2
@@ -292,9 +288,10 @@ The host publication loop itself averaged 99.9988 Hz (10.000122 ms mean
 period), with a 10.195362 ms 99th-percentile period and 10.220795 ms maximum.
 These results confirm approximately 100 Hz average delivery for every report,
 but they also demonstrate that average rate is not equivalent to
-all-three-fresh-per-frame behavior. The present version-3 production contract
-cannot expose the 3.415% of evaluated boundaries where at least one group did
-not advance.
+all-three-fresh-per-frame behavior. Generation-1 per-group identities make
+that mismatch measurable later; `bno_app` still does not compute a publisher
+`freshMask`. The capture above was logged with the older validation contract.
+
 
 ## Diagnostic scope
 
@@ -302,7 +299,7 @@ not advance.
 |---|---|---|
 | `test_min_period` | Queries report metadata and confirms requested-rate support | Simultaneous three-stream behavior or frame freshness |
 | `test_report_len` | Exercises report/wire lengths, generally one selected report at a time | All-three-fresh delivery in a merged 10 ms frame |
-| `bno_app` | Continuously services all three reports and snapshots the latest mailbox | Which groups changed since the prior snapshot |
+| `bno_app` | Continuously services all three reports and snapshots epoch plus per-group identities | Publisher-relative freshness or CSV publication |
 | `bno_validate` | Captures independent host/device times, report sequence, aggregate sequence, and status for each group | Runtime `freshMask`, pass/fail enforcement, or production-contract health reporting |
 | `test_quad_decode` | Verifies the pure AMT102 quadrature decoder | IMU timing or freshness |
 
@@ -312,34 +309,25 @@ Build commands from `bno/`:
 make            # bin/bno_app
 make tools      # app, calibration, orientation, validation, encoder bring-up
 make tests      # diagnostic binaries
-make test       # build and execute host-only test_quad_decode
+make test       # host-only test_quad_decode and test_session_r1_epoch
 make clean      # remove build/ and bin/
 ```
 
 ## Integration work remaining
 
-No contract or code redesign is included in this documentation update. Before
-the BNO reader is integrated with pressure acquisition, networking, video, or
-a GUI, the implementation still needs an explicit production freshness and
-health contract. The likely direction is to preserve independent event
-identity and timing for rotation vector, acceleration, and gyro, expose raw
-status and reader health facts, and let the process-level publisher compute
-consumer-relative freshness and age at each merged frame boundary.
+Phase 2 session-owner consolidation is in `bno_app`: one HAL/SH-2 owner,
+generation-1 R1/R2 snapshot, configuration epoch, and production flight-cal
+mask 0 applied by the session. Publisher freshness, CSV/companion metadata,
+CLI, command state machines, and `twg/integration` are not in this phase.
 
-The design must decide whether every merged 100 Hz row strictly requires all
-three IMU groups (and the pressure sample) to be fresh, or whether publication
-continues with a freshness mask and a numerical stale tolerance. It must also
-define maximum per-group age, any allowed publication holdoff, startup/reset
-settling behavior, and policy during calibration, tare, and report
-reconfiguration.
+Before the BNO reader is integrated with pressure acquisition, networking,
+video, or a GUI, the process-level publisher must still derive consumer-relative
+freshness and age at each merged frame boundary from R1 identities. That work
+must not ask `imu_session` to compute integration-relative freshness.
 
-Calibration and tare should ultimately become nonblocking commands/state
-machines owned by the same active SH-2 session as normal acquisition. CLI
-options and a future GUI should submit commands through one internal API rather
-than open competing sessions. The top-level integration executable must remain
-the sole scheduler, continue servicing SH-2 at 1 kHz, advance sensor command
-state machines cooperatively, and publish an explicit operating mode such as
-running, calibrating, taring, resetting, or settling.
+Calibration and tare remain exclusive-session binaries. They should ultimately
+become nonblocking commands owned by the same active SH-2 session as normal
+acquisition. The top-level integration executable must remain the sole
+scheduler and continue servicing SH-2 at 1 kHz.
 
-Implementation work after this documentation checkpoint is to be performed on
-the `bno-integrate` branch rather than directly on `main`.
+Implementation continues on the `bno-integrate` branch rather than `main`.

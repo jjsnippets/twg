@@ -22,7 +22,7 @@
 #   make bringup        build bin/amt102_bringup
 #   make tools          build all production & field tools
 #   make tests          build all hardware diagnostics and unit tests
-#   make test           build and execute host unit test (bin/test_quad_decode)
+#   make test           build and execute host unit tests
 #   make all            build all tools and test binaries
 #   make clean          remove build/ and bin/
 #
@@ -57,7 +57,7 @@ APPHALOBJ := $(BUILDDIR)/app_sh2_hal_rpi.o
 RTOBJ     := $(BUILDDIR)/rt_realtime.o
 
 # App objects
-APPOBJS := $(BUILDDIR)/app_app_sensor.o $(BUILDDIR)/app_main.o
+APPOBJS := $(BUILDDIR)/app_imu_session.o $(BUILDDIR)/app_main.o
 
 # Calibration objects
 CALOBJS := $(BUILDDIR)/cal_cal_sensor.o $(BUILDDIR)/cal_cal_main.o
@@ -85,6 +85,7 @@ TESTSINGLESENSORSRC := $(TESTDIR)/test_single_sensor.c
 TESTMINPERIODSRC    := $(TESTDIR)/test_min_period.c
 TESTREPORTLENSRC    := $(TESTDIR)/test_report_len.c
 TESTQDSRC           := $(TESTDIR)/test_quad_decode.c
+TESTSESSIONSRC      := $(TESTDIR)/test_session_r1_epoch.c
 
 .PHONY: default all app cal orient validate bringup tools tests test clean
 
@@ -135,8 +136,12 @@ tests: \
 	$(BINDIR)/test_report_len \
 	$(BINDIR)/test_quad_decode
 
-test: $(BINDIR)/test_quad_decode
+test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch
 	$(BINDIR)/test_quad_decode
+	$(BINDIR)/test_session_r1_epoch
+
+$(BINDIR)/test_session_r1_epoch: $(TESTSESSIONSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BINDIR)/test_quad_decode: $(TESTQDSRC) $(BUILDDIR)/val_quad_decode.o | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
