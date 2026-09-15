@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Phase 3 scheduling-ownership audit.
+# Reusable production modules must not own StartRT, RT_SleepUntil, or exit.
+# imu_session must not sleep, print, or terminate.
+
+set -u
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+BNO_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
+REPO_DIR=$(cd "${BNO_DIR}/.." && pwd)
+
+IMU_C="${BNO_DIR}/app/imu_session.c"
+IMU_H="${BNO_DIR}/app/imu_session.h"
+HAL_C="${BNO_DIR}/app/sh2_hal_rpi.c"
+RT_C="${REPO_DIR}/rt/realtime.c"
+
+fail=0
+
+relpath() {
+    local path="$1"
+    echo "${path#${REPO_DIR}/}"
+}
+
+scan_calls() {
+    local file="$1"
+    shift
+    local token hits
+
+    if [ ! -f "$file" ]; then
+        echo "FAIL missing file: $(relpath "$file")"
+        fail=$((fail + 1))
+        return
+    fi
+
+    for token in "$@"; do
+        hits=$(grep -nE "(^|[^[:alnum:]_])${token}[[:space:]]*\(" "$file" || true)
+        if [ -n "$hits" ]; then
+            echo "FAIL $(relpath "$file"): forbidden ${token}("
+            echo "$hits"
+            fail=$((fail + 1))
+        fi
+    done
+}
+
+scan_calls "$IMU_C" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
+scan_calls "$IMU_H" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
+scan_calls "$RT_C" exit
+scan_calls "$HAL_C" StartRT RT_SleepUntil exit
+
+if [ -f "$HAL_C" ]; then
+    if grep -qE "(^|[^[:alnum:]_])nanosleep[[:space:]]*\(" "$HAL_C"; then
+        echo "whitelist: $(relpath "$HAL_C") nanosleep in sleep_us() (RESET_LOW_US 10 ms, RESET_WAIT_US 120 ms, INT_POLL_STEP_US 500 us; wake poll up to 200 ms)"
+    else
+        echo "FAIL $(relpath "$HAL_C"): expected whitelisted nanosleep was not found"
+        fail=$((fail + 1))
+    fi
+fi
+
+if [ -f "$RT_C" ]; then
+    if grep -qE "(^|[^[:alnum:]_])clock_nanosleep[[:space:]]*\(" "$RT_C"; then
+        echo "allow: $(relpath "$RT_C") clock_nanosleep (RT_SleepUntil implementation)"
+    fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo "audit_scheduling: ${fail} failure(s)"
+    exit 1
+fi
+
+echo "audit_scheduling: pass"
+exit 0

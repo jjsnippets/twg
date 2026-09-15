@@ -34,9 +34,11 @@ sudo ./bin/bno_app    # runs the 100 Hz snapshot loop; Ctrl-C to stop
 ```
 
 - Requires `sudo` (or suitable capabilities) for real-time priority
-  (`SCHED_FIFO` 90) and memory locking (`mlockall`). `StartRT()` failure is
-  non-fatal: the application logs a warning and continues under default
-  scheduling.
+  (`SCHED_FIFO` 90) and memory locking (`mlockall`). `StartRT()` never
+  prints or exits. `bno_app` maps the returned bits: `MLOCKALL` and/or
+  `SCHEDULER` warn and continue under default scheduling; `INVALID_PERIOD`
+  or `CLOCK` is fatal before the 1 kHz loop. A later `RT_SleepUntil()`
+  error is counted, printed in the scheduling report, then fatal.
 - Runs a 300 ms service-only settle phase, marks the session OPERATIONAL,
   then a fixed 10 s acquisition window, printing the latest snapshot at
   100 Hz. Group event sequences are not reset after settle.
@@ -102,6 +104,7 @@ bno/
 ├── app/                     reusable production reader + standalone consumer
 │   ├── imu_contract.h       generation-1 R1/R2/R3 contract used by bno_app
 │   ├── imu_session.c/.h     sole HAL/SH-2 owner for bno_app
+│   ├── app_rt_policy.h      StartRT warn-vs-fatal policy (main-owned)
 │   ├── main.c               standalone bno_app loop/example
 │   ├── app_contract.h       leftover ImuSample_t version 3 (unused by bno_app)
 │   ├── app_sensor.c/.h      leftover v3 reader (unused by bno_app)
@@ -171,6 +174,9 @@ host-defined 10 ms boundary.
   write is retryable by the SH-2 stack.
 - Reset holds RST low for 10 ms, releases it, and waits 120 ms. `sh2_open()`
   drains the advertisement and startup traffic.
+- Those waits, and the 500 µs wake/INT poll (up to 200 ms), use `nanosleep`
+  inside `sh2_hal_rpi.c`. Phase 3 records them as a whitelist; it does not
+  move them into `imu_session`.
 - Host time is based on `CLOCK_MONOTONIC`.
 
 Historical note: the original HAL transferred the full 1024-byte receive
@@ -196,6 +202,40 @@ The BNO085 needs prompt servicing after data-ready. Any integrated owner must
 preserve the approximately 1 ms SH-2 service cadence and avoid blocking work in
 that loop. Long I/O, printing, file writes, calibration prompts, and sleeps
 must not delay cooperative sensor service.
+
+`bno_app` is the sole production caller of `StartRT()` and `RT_SleepUntil()`.
+`app_rt_policy.h` selects the process policy; `imu_session` must not schedule,
+print, or call `exit`. Standalone diagnostics that have their own `main()`
+may call the RT helper; reusable modules may not.
+
+| `StartRT()` bits | `bno_app` policy |
+|---|---|
+| `RT_START_OK` | Use requested FIFO / lock setup |
+| `MLOCKALL` and/or `SCHEDULER` only | Warn on stderr and continue |
+| Any `INVALID_PERIOD` or `CLOCK` bit | Fatal before the loop |
+| Unknown bits | Fatal before the loop |
+
+`CLOCK` or `INVALID_PERIOD` wins if mixed with lock/scheduler bits, because
+the 1 kHz grid cannot be armed.
+
+### Scheduling diagnostics
+
+`bno_app` prints one private scheduling report to stderr at normal shutdown,
+and the same report on a fatal clock/sleep error. These fields are **not**
+R9/R10, not publisher freshness, and not a 10 ms publication deadline.
+
+Settle (300 ms) and the 10 s operational window are counted separately.
+Loop-body time is the full pre-sleep work, including `imu_session_service()`,
+snapshot copy, and the 100 Hz `printf()`.
+
+| Field | Meaning |
+|---|---|
+| `loops` | Finished 1 kHz iterations in that window |
+| `max_body_ns` | Longest pre-sleep body in that window |
+| `overrun_iters` | Iterations where `RT_SleepUntil()` returned `> 0` |
+| `skipped_1ms` | Sum of those skipped 1 ms deadlines |
+| `sleep_err` | `RT_SleepUntil()` `< 0` count (clean run is 0) |
+| `start_rt status` / `policy` | Raw bits and `ok` / `warn_and_continue` / `fatal` |
 
 ## Current data contract
 
@@ -309,16 +349,18 @@ Build commands from `bno/`:
 make            # bin/bno_app
 make tools      # app, calibration, orientation, validation, encoder bring-up
 make tests      # diagnostic binaries
-make test       # host-only test_quad_decode and test_session_r1_epoch
+make test       # host: quad_decode, session_r1_epoch, realtime_start,
+                # rt_fallback_policy, scheduling audit
 make clean      # remove build/ and bin/
 ```
 
 ## Integration work remaining
 
-Phase 2 session-owner consolidation is in `bno_app`: one HAL/SH-2 owner,
-generation-1 R1/R2 snapshot, configuration epoch, and production flight-cal
-mask 0 applied by the session. Publisher freshness, CSV/companion metadata,
-CLI, command state machines, and `twg/integration` are not in this phase.
+Phase 3 scheduling ownership is in `bno_app`: one `StartRT` /
+`RT_SleepUntil` owner, no lower-layer `exit`, warn-and-continue on lock or
+scheduler failure, fatal on clock or invalid period, and private 1 kHz
+loop-body diagnostics. Publisher freshness, CSV/companion metadata, CLI,
+command state machines, and `twg/integration` are still later work.
 
 Before the BNO reader is integrated with pressure acquisition, networking,
 video, or a GUI, the process-level publisher must still derive consumer-relative
