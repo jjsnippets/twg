@@ -204,11 +204,17 @@ static void start_stage(ImuCmdIdentity_t id)
     r->warningRequired = false;
     r->startedNs = 0ull;
     r->endedNs = 0ull;
+    r->epochBefore = 0u;
+    r->epochAfter = 0u;
     r->requestedTareAxes = (id == IMU_CMD_ID_TARE) ? s_plan.tareAxes
                                                    : IMU_CMD_TARE_AXES_NONE;
     r->probeMaskRequestedValid = (id == IMU_CMD_ID_PROBE &&
                                   s_plan.probeMaskPresent);
     r->probeMaskRequested = r->probeMaskRequestedValid ? s_plan.probeMask : 0u;
+    r->dcdSaved                = false;
+    r->verified                = false;
+    r->restoredProduction      = false;
+    memset(&r->terminalProgress, 0, sizeof(r->terminalProgress));
     zero_sub(&r->sub);
 }
 
@@ -608,6 +614,7 @@ bool imu_cmd_get_progress(ImuCmdProgress_t *out)
         return false;
     }
     memset(out, 0, sizeof(*out));
+    out->version = IMU_CMD_PROGRESS_VERSION;
     out->active = s_active;
     out->requiredAction = s_action;
     if (s_active == IMU_CMD_ID_PROBE && s_stage_start_ns != 0ull) {

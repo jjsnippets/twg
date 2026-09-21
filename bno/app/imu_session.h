@@ -6,6 +6,39 @@
 
 #include "app/imu_contract.h"
 
+#define IMU_CAL_FACTS_VERSION 1u
+
+#define IMU_CAL_MAG_RATE_HZ   50u
+#define IMU_CAL_SLOW_RATE_HZ  10u
+#define IMU_CAL_MAG_INTERVAL_US   (1000000u / IMU_CAL_MAG_RATE_HZ)
+#define IMU_CAL_SLOW_INTERVAL_US  (1000000u / IMU_CAL_SLOW_RATE_HZ)
+
+/*
+ * Calibration-only mailbox. Not part of production R2.
+ * Accuracies are report STATUS bits 0-3. rvErrRad is the RV payload
+ * heading-error estimate in radians, not the 0-3 status.
+ */
+typedef struct {
+    uint8_t  version;
+    uint32_t configurationEpoch;
+    uint64_t hostDecodeNs;
+    uint8_t  accelAccuracy;
+    uint8_t  gyroAccuracy;
+    uint8_t  magAccuracy;
+    uint8_t  rvAccuracy;
+    float    rvErrRad;
+    bool     haveMag;
+    float    magXuT;
+    float    magYuT;
+    float    magZuT;
+    bool     valid;
+} ImuCalFacts_t;
+
+typedef enum {
+    IMU_SESSION_REOPEN_RECOVERY = 0,
+    IMU_SESSION_REOPEN_VERIFY
+} ImuSessionReopenKind_t;
+
 /*
  * Sole HAL / SH-2 session owner for production BNO085 use.
  *
@@ -43,6 +76,34 @@ bool imu_session_open(void);
  * false on SH-2 failure or illegal state; does not call exit.
  */
 bool imu_session_configure_production(uint8_t flightCalMask);
+
+/*
+ * Enables the calibration report set and applies sh2_setCalConfig(calMask).
+ * Legal from CONFIGURING. Increments epoch (report set + policy change),
+ * clears validMask, enters CALIBRATION. Does not open a second session.
+ */
+bool imu_session_configure_calibration(uint8_t calMask);
+
+/* Reads back the active ME cal mask. False if no open session. */
+bool imu_session_get_cal_policy(uint8_t *outMask);
+
+/*
+ * sh2_saveDcdNow through the session owner.
+ * Does not increment epoch. Increment happens on the later verify reopen.
+ */
+bool imu_session_save_dcd(void);
+
+/*
+ * Planned calibration verification reopen.
+ * Must not pass through CLOSED. Increments epoch once, clears validity,
+ * returns CONFIGURING. A successful planned reopen is not recovery and
+ * must not set recovery-observed / recovery-success counters.
+ * If reopen fails, normal recovery/fault accounting begins.
+ */
+bool imu_session_begin_verification_reopen(void);
+
+/* Copy the calibration mailbox. False if out is NULL or never constructed. */
+bool imu_session_get_cal_facts(ImuCalFacts_t *out);
 
 /*
  * CONFIGURING -> SETTLING. Epoch unchanged. Samples may decode but are
@@ -107,6 +168,11 @@ void imu_session_test_reset(void);
 bool imu_session_test_open(bool success);
 void imu_session_test_inject_reset(void);
 bool imu_session_test_force_state(ImuReaderState_t state);
+void imu_session_test_inject_cal_facts(const ImuCalFacts_t *facts);
+void imu_session_test_set_save_dcd_result(bool success);
+void imu_session_test_set_reopen_result(bool success);
+bool imu_session_test_recovery_observed(void);
+uint32_t imu_session_test_recovery_attempt_count(void);
 
 typedef struct {
     uint8_t  groupBit;

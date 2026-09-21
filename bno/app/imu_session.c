@@ -31,6 +31,13 @@ static bool sRecoveryEpochTaken;
 static uint64_t sAdoptedSeq[GROUP_COUNT];
 static bool sHaveAdopted[GROUP_COUNT];
 static uint64_t sAssignedSeq[GROUP_COUNT];
+static ImuCalFacts_t s_calFacts;
+static uint8_t s_calMask;
+static bool s_calFactsValid;
+static bool s_testSaveDcdOk = true;
+static bool s_testReopenOk = true;
+static bool s_recoveryObserved;
+static uint32_t s_recoveryAttempts;
 static void asyncEventCallback(void *cookie, sh2_AsyncEvent_t *pEvent);
 static void sensorCallback(void *cookie, sh2_SensorEvent_t *pEvent);
 
@@ -76,10 +83,19 @@ static void clear_validity(void)
     sSnapshot.gyroMeta.epochUpdateCount = 0;
 }
 
+static void clear_cal_facts(void)
+{
+    memset(&s_calFacts, 0, sizeof(s_calFacts));
+    s_calFacts.version = IMU_CAL_FACTS_VERSION;
+    s_calFacts.configurationEpoch = sEpoch;
+    s_calFactsValid = false;
+}
+
 static void increment_epoch(void)
 {
     sEpoch += 1u;
     clear_validity();
+    clear_cal_facts();
     sync_header();
 }
 
@@ -107,6 +123,78 @@ static bool configure_sensor(sh2_SensorId_t sensorId)
     cfg.batchInterval_us = 0;
 
     return sh2_setSensorConfig(sensorId, &cfg) == SH2_OK;
+}
+
+static bool configure_sensor_interval(sh2_SensorId_t sensorId, uint32_t intervalUs)
+{
+    sh2_SensorConfig_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.reportInterval_us = intervalUs;
+    cfg.batchInterval_us = 0;
+    return sh2_setSensorConfig(sensorId, &cfg) == SH2_OK;
+}
+
+static bool apply_hardware_calibration(uint8_t calMask)
+{
+    uint8_t readback = calMask;
+    if (!sHal) {
+      s_calMask = calMask;
+      return true;
+    }
+    
+    if (!configure_sensor_interval(SH2_MAGNETIC_FIELD_CALIBRATED, IMU_CAL_MAG_INTERVAL_US) ||
+        !configure_sensor_interval(SH2_ACCELEROMETER, IMU_CAL_SLOW_INTERVAL_US) ||
+        !configure_sensor_interval(SH2_GYROSCOPE_CALIBRATED, IMU_CAL_SLOW_INTERVAL_US) ||
+        !configure_sensor_interval(SH2_ROTATION_VECTOR, IMU_CAL_SLOW_INTERVAL_US)) {
+        return false;
+    }
+
+    if (sh2_setCalConfig(calMask) != SH2_OK) {
+        return false;
+    }
+    
+    if (sh2_getCalConfig(&readback) == SH2_OK) {
+        s_calMask = readback;
+    } else {
+        s_calMask = calMask;
+    }
+    
+    return true;
+}
+
+static void adopt_cal_facts_from_event(const sh2_SensorValue_t *value, uint64_t hostNs)
+{
+    if (value == NULL) {
+        return;
+    }
+    
+    s_calFacts.version = IMU_CAL_FACTS_VERSION;
+    s_calFacts.configurationEpoch = sEpoch;
+    s_calFacts.hostDecodeNs = hostNs;
+    s_calFacts.valid = true;
+    s_calFactsValid = true;
+    
+    switch (value->sensorId) {
+      case SH2_MAGNETIC_FIELD_CALIBRATED:
+        s_calFacts.magAccuracy = value->status;
+        s_calFacts.haveMag = true;
+        s_calFacts.magXuT = value->un.magneticField.x;
+        s_calFacts.magYuT = value->un.magneticField.y;
+        s_calFacts.magZuT = value->un.magneticField.z;
+        break;
+      case SH2_ACCELEROMETER:
+        s_calFacts.accelAccuracy = value->status;
+        break;
+      case SH2_GYROSCOPE_CALIBRATED:
+        s_calFacts.gyroAccuracy = value->status;
+        break;
+      case SH2_ROTATION_VECTOR:
+        s_calFacts.rvAccuracy = value->status;
+        s_calFacts.rvErrRad = value->un.rotationVector.accuracy;
+        break;
+      default:
+        break;
+    }
 }
 
 static bool apply_hardware_production(uint8_t flightCalMask)
@@ -291,6 +379,19 @@ static void sensorCallback(void *cookie, sh2_SensorEvent_t *pEvent)
 
     memset(&event, 0, sizeof(event));
     hostNs = monotonic_ns();
+    
+    if (sState == IMU_READER_STATE_CALIBRATION) {
+      switch (value.sensorId) {
+        case SH2_MAGNETIC_FIELD_CALIBRATED:
+        case SH2_ACCELEROMETER:
+        case SH2_GYROSCOPE_CALIBRATED:
+        case SH2_ROTATION_VECTOR:
+            adopt_cal_facts_from_event(&value, hostNs);
+            return;
+        default:
+            return;
+      }
+    }
 
     switch (value.sensorId) {
         case SH2_ROTATION_VECTOR: {
@@ -455,6 +556,9 @@ bool imu_session_begin_recovery(void)
         sState == IMU_READER_STATE_OPENING) {
         return false;
     }
+    
+    s_recoveryObserved = true;
+    s_recoveryAttempts += 1u;
 
     if (!sRecoveryEpochTaken) {
         increment_epoch();
@@ -504,6 +608,14 @@ void imu_session_test_reset(void)
     memset(sAdoptedSeq, 0, sizeof(sAdoptedSeq));
     memset(sHaveAdopted, 0, sizeof(sHaveAdopted));
     memset(sAssignedSeq, 0, sizeof(sAssignedSeq));
+    s_calMask = 0;
+    s_calFactsValid = false;
+    s_testSaveDcdOk = true;
+    s_testReopenOk = true;
+    s_recoveryObserved = false;
+    s_recoveryAttempts = 0u;
+    memset(&s_calFacts, 0, sizeof(s_calFacts));
+    s_calFacts.version = IMU_CAL_FACTS_VERSION;
     zero_mailbox();
     sHasMailbox = false;
     sSnapshot.readerState = IMU_READER_STATE_CLOSED;
@@ -540,4 +652,103 @@ bool imu_session_test_force_state(ImuReaderState_t state)
 void imu_session_test_inject_group(const ImuSessionTestGroupEvent_t *event)
 {
     apply_group(event);
+}
+
+
+bool imu_session_configure_calibration(uint8_t calMask)
+{
+    if (sState != IMU_READER_STATE_CONFIGURING) {
+        return false;
+    }
+    if (!apply_hardware_calibration(calMask)) {
+        enter_faulted();
+        return false;
+    }
+    increment_epoch();
+    sState = IMU_READER_STATE_CALIBRATION;
+    sync_header();
+    return true;
+}
+
+bool imu_session_get_cal_policy(uint8_t *outMask)
+{
+    if (outMask == NULL || sState == IMU_READER_STATE_CLOSED ||
+        sState == IMU_READER_STATE_OPENING) {
+        return false;
+    }
+    *outMask = s_calMask;
+    return true;
+}
+
+bool imu_session_save_dcd(void)
+{
+    if (sState == IMU_READER_STATE_CLOSED || sState == IMU_READER_STATE_OPENING) {
+        return false;
+    }
+    if (!sHal) {
+        return s_testSaveDcdOk;
+    }
+    return sh2_saveDcdNow() == SH2_OK;
+}
+
+bool imu_session_begin_verification_reopen(void)
+{
+    bool ok;
+
+    if (sState == IMU_READER_STATE_CLOSED || sState == IMU_READER_STATE_OPENING) {
+        return false;
+    }
+    increment_epoch();
+    ok = (sHal == NULL) ? s_testReopenOk : reopen_hardware();
+    if (!ok) {
+        s_recoveryObserved = true;
+        s_recoveryAttempts += 1u;
+        sState = IMU_READER_STATE_RECOVERING;
+        enter_faulted();
+        return false;
+    }
+    sState = IMU_READER_STATE_CONFIGURING;
+    sRecoveryEpochTaken = false;
+    sync_header();
+    return true;
+}
+
+bool imu_session_get_cal_facts(ImuCalFacts_t *out)
+{
+    if (out == NULL || !sHasMailbox) {
+        return false;
+    }
+    *out = s_calFacts;
+    return true;
+}
+
+void imu_session_test_inject_cal_facts(const ImuCalFacts_t *facts)
+{
+    if (facts == NULL) {
+        return;
+    }
+    s_calFacts = *facts;
+    s_calFacts.version = IMU_CAL_FACTS_VERSION;
+    s_calFacts.configurationEpoch = sEpoch;
+    s_calFactsValid = facts->valid;
+}
+
+void imu_session_test_set_save_dcd_result(bool success)
+{
+    s_testSaveDcdOk = success;
+}
+
+void imu_session_test_set_reopen_result(bool success)
+{
+    s_testReopenOk = success;
+}
+
+bool imu_session_test_recovery_observed(void)
+{
+    return s_recoveryObserved;
+}
+
+uint32_t imu_session_test_recovery_attempt_count(void)
+{
+    return s_recoveryAttempts;
 }

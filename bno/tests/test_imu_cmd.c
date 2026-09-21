@@ -40,6 +40,11 @@ static void check_state(ImuCmdIdentity_t id, ImuCmdResultState_t want,
                 tid, what, (int)r.state, (int)want);
         g_fail++;
     }
+    if (r.version != IMU_CMD_RESULT_VERSION) {
+        fprintf(stderr, "FAIL %s %s: result version %u != %u\n",
+                tid, what, r.version, IMU_CMD_RESULT_VERSION);
+        g_fail++;
+    }
 }
 
 static void check_reason(ImuCmdIdentity_t id, ImuCmdReason_t want,
@@ -156,6 +161,7 @@ static void test_k01(void)
     ImuCmdPlan_t plan;
     ImuCmdIdentity_t id;
     ImuCmdEvent_t e;
+    ImuCmdProgress_t prog;
 
     check(imu_cmd_plan_acquire_default(&plan), "K01", "default plan");
     check(imu_cmd_init(&plan), "K01", "init");
@@ -166,6 +172,8 @@ static void test_k01(void)
     }
 
     imu_cmd_service();
+    check(imu_cmd_get_progress(&prog), "K01", "progress read");
+    check(prog.version == IMU_CMD_PROGRESS_VERSION, "K01", "progress version 2");
     check(active_id() == IMU_CMD_ID_SETTLE, "K01", "settle active");
     check(imu_cmd_request() == IMU_CMD_REQ_SETTLE, "K01", "settle request");
     check(!imu_cmd_do_not_acquire(), "K01", "may acquire");

@@ -15,7 +15,8 @@
 #include <stdint.h>
 
 #define IMU_CMD_PLAN_VERSION           1u
-#define IMU_CMD_RESULT_VERSION         1u
+#define IMU_CMD_RESULT_VERSION         2u
+#define IMU_CMD_PROGRESS_VERSION       2u
 
 #define IMU_CMD_PROBE_DEADLINE_S       10u
 #define IMU_CMD_ACQUIRE_DEFAULT_S      10u
@@ -63,6 +64,15 @@ typedef enum {
     IMU_CMD_REASON_TARE_CLEAR_PARTIAL,
     IMU_CMD_REASON_TARE_CLEAR_FAILED,
     IMU_CMD_REASON_TARE_VERIFY_FAILED,
+    IMU_CMD_REASON_CAL_CONFIG_FAILED,
+    IMU_CMD_REASON_CAL_MAG_EXHAUSTED,
+    IMU_CMD_REASON_CAL_HOLD_DEGRADED,
+    IMU_CMD_REASON_CAL_SAVE_FAILED,
+    IMU_CMD_REASON_CAL_REOPEN_FAILED,
+    IMU_CMD_REASON_CAL_VERIFY_CONFIG_FAILED,
+    IMU_CMD_REASON_CAL_VERIFY_GATE_FAILED,
+    IMU_CMD_REASON_CAL_RESTORE_FAILED,
+    IMU_CMD_REASON_CAL_SESSION_UNUSABLE,
     IMU_CMD_REASON_CONFIG_FAILED,
     IMU_CMD_REASON_PROBE_DEADLINE,
     IMU_CMD_REASON_SESSION_UNUSABLE,
@@ -88,6 +98,40 @@ typedef enum {
     IMU_CMD_ACTION_PRESS_Q_TO_END,
     IMU_CMD_ACTION_ALIGN_AND_CONFIRM
 } ImuCmdOperatorAction_t;
+
+typedef enum {
+    IMU_CMD_CAL_PHASE_NONE = 0,
+    IMU_CMD_CAL_PHASE_STARTUP,
+    IMU_CMD_CAL_PHASE_ACCEL,
+    IMU_CMD_CAL_PHASE_GYRO,
+    IMU_CMD_CAL_PHASE_MAG,
+    IMU_CMD_CAL_PHASE_HOLD,
+    IMU_CMD_CAL_PHASE_SAVE,
+    IMU_CMD_CAL_PHASE_RESET,
+    IMU_CMD_CAL_PHASE_VERIFY,
+    IMU_CMD_CAL_PHASE_RESTORE
+} ImuCmdCalPhase_t;
+
+typedef struct {
+    ImuCmdCalPhase_t phase;
+    uint8_t currentPoseIndex;
+    uint8_t totalPoseCount;
+    uint8_t accelRound;
+    uint8_t magRound;
+    uint8_t saveAttempt;
+    uint8_t dcdRequestAttempt;
+    uint64_t stateEntryNs;
+    uint64_t deadlineNs;
+    uint64_t remainingNs;
+    uint64_t sustainedGoodNs;
+    uint8_t accelAccuracy;
+    uint8_t gyroAccuracy;
+    uint8_t magAccuracy;
+    uint8_t rvAccuracy;
+    float rvErrRad;
+    float magXuT, magYuT, magZuT;
+    bool gatePassingNow;
+} ImuCmdCalProgress_t;
 
 typedef enum {
     IMU_CMD_REQ_NONE = 0,
@@ -141,24 +185,32 @@ typedef struct {
 
 typedef struct {
     uint32_t version;
+    ImuCmdIdentity_t active;
+    ImuCmdOperatorAction_t requiredAction;
+    bool probeTimeValid;
+    uint64_t probeRemainingNs;
+    ImuCmdCalProgress_t cal;
+} ImuCmdProgress_t;
+
+typedef struct {
+    uint32_t version;
     ImuCmdIdentity_t identity;
     ImuCmdResultState_t state;
     ImuCmdReason_t reason;
     bool warningRequired;
     uint64_t startedNs;
     uint64_t endedNs;
+    uint32_t epochBefore;
+    uint32_t epochAfter;
     ImuCmdTareAxes_t requestedTareAxes;
     uint8_t probeMaskRequested;
     bool probeMaskRequestedValid;
     ImuCmdSubResults_t sub;
+    bool dcdSaved;
+    bool verified;
+    bool restoredProduction;
+    ImuCmdProgress_t terminalProgress;
 } ImuCmdResult_t;
-
-typedef struct {
-    ImuCmdIdentity_t active;
-    ImuCmdOperatorAction_t requiredAction;
-    bool probeTimeValid;
-    uint64_t probeRemainingNs;
-} ImuCmdProgress_t;
 
 typedef struct {
     ImuCmdIdentity_t identity;

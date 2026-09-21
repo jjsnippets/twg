@@ -105,6 +105,7 @@ bno/
 │   ├── imu_contract.h       generation-1 R1/R2/R3 contract used by bno_app
 │   ├── imu_session.c/.h     sole HAL/SH-2 owner for bno_app
 │   ├── imu_cmd.c/.h         host-only stage coordinator (not linked into bno_app)
+│   ├── imu_cal.c/.h         host-only guided-calibration state machine (not linked into bno_app)
 │   ├── app_rt_policy.h      StartRT warn-vs-fatal policy (main-owned)
 │   ├── main.c               standalone bno_app loop/example
 │   ├── app_contract.h       leftover ImuSample_t version 3 (unused by bno_app)
@@ -157,6 +158,58 @@ SIGINT/SIGTERM are one process-stop event (`abandoned`, reason
 `process_stop`). `recovery_failed` sets `do_not_acquire`. Tare-now versus
 persist, and partial tare-clear, stay distinct sub-results. Host coverage is
 `tests/test_imu_cmd.c`.
+
+`app/imu_cal.c` is a host-only guided-calibration state machine. It
+does not own the SH-2 session, sleep, print, read stdin, or call
+`exit`. `bno_app` and `imu_cmd` do not link or drive it in Phase 5.
+The caller supplies monotonic time, `ImuCalFacts_t`, operator `q` /
+confirm, and completed session-action results. `imu_cal` emits at most
+one pending request: `CONFIGURE_CALIBRATION` (mask `0x07` at start,
+mask `0` after verify reopen), `SAVE_DCD`, `VERIFY_REOPEN`, or
+`RESTORE_PRODUCTION` with the flight mask from `imu_cal_init`. It
+never calls `imu_session_*` or `sh2_*`.
+
+Oracle: `bno/calibration/cal_main.c` and `cal_sensor.c` at
+`c90b75a8f553a2774b2d46d2cd279baef208dc7f`. Keep that tool until
+parity. Do not write a calibration trajectory CSV; live facts stay on
+R8.
+
+Flow:
+
+1. Configure calibration reports / policy.
+2. Six accelerometer faces, 2 s each, then 3 s sustained accel >= 2.
+   Up to 3 rounds. Exhaustion is informational.
+3. Gyro rest, 15 s timeout. Exhaustion is informational.
+4. Up to 3 outer mag/hold/save attempts. Each mag attempt has up to 5
+   inner rounds: 8 s motion, then 3 s sustained mag >= 2. Mag
+   exhaustion fails the command.
+5. 10 s hold, then 3 s sustained accel+mag >= 2. Hold degrade starts
+   the next outer attempt, or fails after attempt 3.
+6. Save DCD through the session owner. One 5 s retry on the same
+   attempt. A second failure starts the next outer attempt, or fails
+   after attempt 3.
+7. Planned verification reopen, then configure mask 0. Reopen failure
+   is `RECOVERY_FAILED` and does not restore.
+8. 10 s verify motion, then 3 s sustained accel+mag. Failure restores
+   production and returns `CAL_VERIFY_GATE_FAILED`.
+9. Every ordinary terminal path emits `RESTORE_PRODUCTION` first.
+   Restore failure is `RECOVERY_FAILED`.
+
+`q` in any active state except restore-wait cancels, restores, and
+returns `CANCELLED` / `OPERATOR_Q` with a warning. All deadlines are
+nanoseconds on the caller clock: `imu_cal_post(TICK)` updates `nowNs`;
+`imu_cal_service()` evaluates gates. Sustained-good needs two ticks:
+the first arms `goodSinceNs`, a later tick at least 3 s after that
+passes the gate.
+
+R8 (`ImuCmdProgress_t` v2) carries phase, pose, rounds, save attempt,
+deadlines, live accuracies, mag vector, and `gatePassingNow`. R7
+(`ImuCmdResult_t` v2) carries epoch before/after, `dcdSaved`,
+`verified`, `restoredProduction`, and `terminalProgress`.
+
+Host coverage is `tests/test_imu_cal.c` plus `tests/test_session_cal.c`
+for the session seams. `make -C bno test` injects time, facts,
+confirms, `q`, and session results. It does not open SPI.
 
 ### Continuous acquisition
 

@@ -24,7 +24,7 @@
 #   make tests          build all hardware diagnostics and unit tests
 #   make test           host tests: quad_decode, session_r1_epoch,
 #                       realtime_start, rt_fallback_policy, imu_cmd,
-#                       scheduling audit
+#                       session_cal, imu_cal, scheduling audit
 #   make all            build all tools and test binaries
 #   make clean          remove build/ and bin/
 #
@@ -91,6 +91,8 @@ TESTSESSIONSRC      := $(TESTDIR)/test_session_r1_epoch.c
 TESTRTSTARTSRC      := $(RTDIR)/test_realtime_start.c
 TESTRTFALLBACKSRC   := $(TESTDIR)/test_rt_fallback_policy.c
 TESTCMDSRC          := $(TESTDIR)/test_imu_cmd.c
+TESTSESSIONCALSRC   := $(TESTDIR)/test_session_cal.c
+TESTCALSRC          := $(TESTDIR)/test_imu_cal.c
 
 .PHONY: default all app cal orient validate bringup tools tests test clean
 
@@ -143,12 +145,15 @@ tests: \
 
 test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_realtime_start $(BINDIR)/test_rt_fallback_policy \
-	$(BINDIR)/test_imu_cmd
+	$(BINDIR)/test_imu_cmd $(BINDIR)/test_session_cal \
+	$(BINDIR)/test_imu_cal
 	$(BINDIR)/test_quad_decode
 	$(BINDIR)/test_session_r1_epoch
 	$(BINDIR)/test_realtime_start
 	$(BINDIR)/test_rt_fallback_policy
 	$(BINDIR)/test_imu_cmd
+	$(BINDIR)/test_session_cal
+	$(BINDIR)/test_imu_cal
 	bash $(TESTDIR)/audit_scheduling.sh
 
 $(BINDIR)/test_session_r1_epoch: $(TESTSESSIONSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
@@ -165,6 +170,12 @@ $(BINDIR)/test_rt_fallback_policy: $(TESTRTFALLBACKSRC) | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
 
 $(BINDIR)/test_imu_cmd: $(TESTCMDSRC) $(APPDIR)/imu_cmd.c | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
+
+$(BINDIR)/test_session_cal: $(TESTSESSIONCALSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+$(BINDIR)/test_imu_cal: $(TESTCALSRC) $(APPDIR)/imu_cal.c | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
 
 $(BINDIR)/test_quad_decode: $(TESTQDSRC) $(BUILDDIR)/val_quad_decode.o | $(BINDIR)
