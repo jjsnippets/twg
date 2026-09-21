@@ -104,6 +104,7 @@ bno/
 ├── app/                     reusable production reader + standalone consumer
 │   ├── imu_contract.h       generation-1 R1/R2/R3 contract used by bno_app
 │   ├── imu_session.c/.h     sole HAL/SH-2 owner for bno_app
+│   ├── imu_cmd.c/.h         host-only stage coordinator (not linked into bno_app)
 │   ├── app_rt_policy.h      StartRT warn-vs-fatal policy (main-owned)
 │   ├── main.c               standalone bno_app loop/example
 │   ├── app_contract.h       leftover ImuSample_t version 3 (unused by bno_app)
@@ -141,6 +142,21 @@ calls `sh2_service()` on the caller's thread. `StartRT()` and
 application and selected standalone diagnostics are separate process-level
 owners when run alone; their loops must not be nested or transplanted into the
 future integrated executable.
+
+### Command coordinator
+
+`app/imu_cmd.c` is a host-only stage coordinator. It takes an immutable plan,
+accepts injected events (`q`, confirm, process-stop, ticks, stub stage
+terminals), and records per-stage results. It does not open the BNO085, parse
+CLI, sleep, print, or call `exit`. `bno_app` does not link or call it.
+
+Order is calibrate or DCD-clear, then tare family, then check or probe, then
+settle, then acquire. Ordinary cal/tare failure warns and continues. `q`
+cancels the active command stage and is ignored during settle/acquire.
+SIGINT/SIGTERM are one process-stop event (`abandoned`, reason
+`process_stop`). `recovery_failed` sets `do_not_acquire`. Tare-now versus
+persist, and partial tare-clear, stay distinct sub-results. Host coverage is
+`tests/test_imu_cmd.c`.
 
 ### Continuous acquisition
 
@@ -342,6 +358,7 @@ that mismatch measurable later; `bno_app` still does not compute a publisher
 | `bno_app` | Continuously services all three reports and snapshots epoch plus per-group identities | Publisher-relative freshness or CSV publication |
 | `bno_validate` | Captures independent host/device times, report sequence, aggregate sequence, and status for each group | Runtime `freshMask`, pass/fail enforcement, or production-contract health reporting |
 | `test_quad_decode` | Verifies the pure AMT102 quadrature decoder | IMU timing or freshness |
+| `test_imu_cmd` | Host-only stage order, `q` vs process-stop, tare sub-results | Hardware, CLI, cal/tare/check machines, CSV |
 
 Build commands from `bno/`:
 
@@ -350,7 +367,7 @@ make            # bin/bno_app
 make tools      # app, calibration, orientation, validation, encoder bring-up
 make tests      # diagnostic binaries
 make test       # host: quad_decode, session_r1_epoch, realtime_start,
-                # rt_fallback_policy, scheduling audit
+                # rt_fallback_policy, imu_cmd, scheduling audit
 make clean      # remove build/ and bin/
 ```
 
@@ -361,6 +378,11 @@ Phase 3 scheduling ownership is in `bno_app`: one `StartRT` /
 scheduler failure, fatal on clock or invalid period, and private 1 kHz
 loop-body diagnostics. Publisher freshness, CSV/companion metadata, CLI,
 command state machines, and `twg/integration` are still later work.
+
+Phase 4 added `app/imu_cmd.c`. `bno_app` still does open → production
+configure → 300 ms settle → 10 s print and does not call the coordinator.
+Calibration, tare, and check machines, unified CLI, R9/CSV, and
+`twg/integration` remain later work.
 
 Before the BNO reader is integrated with pressure acquisition, networking,
 video, or a GUI, the process-level publisher must still derive consumer-relative
