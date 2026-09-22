@@ -78,6 +78,17 @@ bool imu_session_open(void);
 bool imu_session_configure_production(uint8_t flightCalMask);
 
 /*
+ * Restores the normal 100 Hz production report set and flight calibration
+ * policy after calibration. Legal from CALIBRATION and CONFIGURING only.
+ * A restore after an already configured calibration/verification path
+ * increments epoch once, clears validity and calibration-only facts, and
+ * leaves the session in CONFIGURING. It never closes or recovers the session.
+ * An initial CONFIGURING call before any report set was configured is allowed
+ * and behaves as the initial production apply (no extra epoch increment).
+ */
+bool imu_session_restore_production(uint8_t flightCalMask);
+
+/*
  * Enables the calibration report set and applies sh2_setCalConfig(calMask).
  * Legal from CONFIGURING. Increments epoch (report set + policy change),
  * clears validMask, enters CALIBRATION. Does not open a second session.
@@ -171,6 +182,7 @@ bool imu_session_test_force_state(ImuReaderState_t state);
 void imu_session_test_inject_cal_facts(const ImuCalFacts_t *facts);
 void imu_session_test_set_save_dcd_result(bool success);
 void imu_session_test_set_reopen_result(bool success);
+void imu_session_test_set_production_result(bool success);
 bool imu_session_test_recovery_observed(void);
 uint32_t imu_session_test_recovery_attempt_count(void);
 

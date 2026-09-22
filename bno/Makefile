@@ -24,7 +24,7 @@
 #   make tests          build all hardware diagnostics and unit tests
 #   make test           host tests: quad_decode, session_r1_epoch,
 #                       realtime_start, rt_fallback_policy, imu_cmd,
-#                       session_cal, imu_cal, scheduling audit
+#                       session_cal, imu_cal, imu_cal_adapter, scheduling audit
 #   make all            build all tools and test binaries
 #   make clean          remove build/ and bin/
 #
@@ -93,6 +93,7 @@ TESTRTFALLBACKSRC   := $(TESTDIR)/test_rt_fallback_policy.c
 TESTCMDSRC          := $(TESTDIR)/test_imu_cmd.c
 TESTSESSIONCALSRC   := $(TESTDIR)/test_session_cal.c
 TESTCALSRC          := $(TESTDIR)/test_imu_cal.c
+TESTCALADAPTERSRC   := $(TESTDIR)/test_imu_cal_adapter.c
 
 .PHONY: default all app cal orient validate bringup tools tests test clean
 
@@ -141,12 +142,13 @@ tests: \
 	$(BINDIR)/test_single_sensor \
 	$(BINDIR)/test_min_period \
 	$(BINDIR)/test_report_len \
-	$(BINDIR)/test_quad_decode
+	$(BINDIR)/test_quad_decode \
+	$(BINDIR)/test_imu_cal_adapter
 
 test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_realtime_start $(BINDIR)/test_rt_fallback_policy \
 	$(BINDIR)/test_imu_cmd $(BINDIR)/test_session_cal \
-	$(BINDIR)/test_imu_cal
+	$(BINDIR)/test_imu_cal $(BINDIR)/test_imu_cal_adapter
 	$(BINDIR)/test_quad_decode
 	$(BINDIR)/test_session_r1_epoch
 	$(BINDIR)/test_realtime_start
@@ -154,6 +156,7 @@ test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_imu_cmd
 	$(BINDIR)/test_session_cal
 	$(BINDIR)/test_imu_cal
+	$(BINDIR)/test_imu_cal_adapter
 	bash $(TESTDIR)/audit_scheduling.sh
 
 $(BINDIR)/test_session_r1_epoch: $(TESTSESSIONSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
@@ -177,6 +180,14 @@ $(BINDIR)/test_session_cal: $(TESTSESSIONCALSRC) $(BUILDDIR)/app_imu_session.o $
 
 $(BINDIR)/test_imu_cal: $(TESTCALSRC) $(APPDIR)/imu_cal.c | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
+
+$(BINDIR)/test_imu_cal_adapter: $(TESTCALADAPTERSRC) \
+	$(APPDIR)/imu_cal_adapter.c \
+	$(APPDIR)/imu_cal.c \
+	$(BUILDDIR)/app_imu_session.o \
+	$(SH2OBJS) \
+	$(APPHALOBJ) | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BINDIR)/test_quad_decode: $(TESTQDSRC) $(BUILDDIR)/val_quad_decode.o | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^

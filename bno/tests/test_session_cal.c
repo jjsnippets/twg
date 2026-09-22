@@ -30,7 +30,7 @@ static ImuSampleSnapshot_t snap(void)
     return s;
 }
 
-static void test_configure_cal_increments_epoch(void)
+static void test_s01_configure_cal_increments_epoch(void)
 {
     ImuSampleSnapshot_t before;
     ImuSampleSnapshot_t after;
@@ -45,7 +45,7 @@ static void test_configure_cal_increments_epoch(void)
     check(after.validMask == 0u, "S01", "validMask cleared");
 }
 
-static void test_cal_facts_not_in_r2(void)
+static void test_s02_cal_facts_not_in_r2(void)
 {
     ImuCalFacts_t facts;
     ImuCalFacts_t got;
@@ -77,7 +77,7 @@ static void test_cal_facts_not_in_r2(void)
     check(s.validMask == 0u, "S02", "R2 unchanged by cal mailbox");
 }
 
-static void test_save_dcd_no_epoch(void)
+static void test_s03_save_dcd_no_epoch(void)
 {
     ImuSampleSnapshot_t before;
     ImuSampleSnapshot_t after;
@@ -95,7 +95,7 @@ static void test_save_dcd_no_epoch(void)
     check(!imu_session_save_dcd(), "S03", "save fail");
 }
 
-static void test_verify_reopen_not_recovery(void)
+static void test_s04_verify_reopen_not_recovery(void)
 {
     ImuSampleSnapshot_t before;
     ImuSampleSnapshot_t after;
@@ -113,7 +113,7 @@ static void test_verify_reopen_not_recovery(void)
     check(imu_session_test_recovery_attempt_count() == 0u, "S04", "no recovery attempt");
 }
 
-static void test_verify_reopen_failure_is_recovery(void)
+static void test_s05_verify_reopen_failure_is_recovery(void)
 {
     open_configuring("S05");
     check(imu_session_configure_calibration(0x07u), "S05", "configure");
@@ -122,7 +122,7 @@ static void test_verify_reopen_failure_is_recovery(void)
     check(imu_session_test_recovery_attempt_count() >= 1u, "S05", "recovery attempt counted");
 }
 
-static void test_policy_roundtrip(void)
+static void test_s06_policy_roundtrip(void)
 {
     uint8_t mask = 0u;
 
@@ -132,7 +132,7 @@ static void test_policy_roundtrip(void)
     check(mask == 0x07u, "S06", "mask 0x07");
 }
 
-static void test_illegal_from_closed(void)
+static void test_s07_illegal_from_closed(void)
 {
     imu_session_test_reset();
     check(!imu_session_configure_calibration(0x07u), "S07", "cal from CLOSED");
@@ -140,15 +140,115 @@ static void test_illegal_from_closed(void)
     check(!imu_session_begin_verification_reopen(), "S07", "reopen from CLOSED");
 }
 
+static void test_s08_restore_from_calibration(void)
+{
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+    uint8_t mask = 0xffu;
+
+    open_configuring("S08");
+    check(imu_session_configure_calibration(0x07u), "S08", "configure cal");
+    before = snap();
+    check(imu_session_restore_production(0x00u), "S08", "restore production");
+    after = snap();
+    check(after.readerState == IMU_READER_STATE_CONFIGURING,
+          "S08", "back to CONFIGURING");
+    check(after.configurationEpoch == before.configurationEpoch + 1u,
+          "S08", "epoch +1 once");
+    check(after.validMask == 0u, "S08", "validity cleared");
+    check(imu_session_get_cal_policy(&mask), "S08", "read production policy");
+    check(mask == 0x00u, "S08", "production policy applied");
+}
+
+static void test_s09_restore_clears_cal_facts(void)
+{
+    ImuCalFacts_t facts;
+    ImuCalFacts_t got;
+
+    open_configuring("S09");
+    check(imu_session_configure_calibration(0x07u), "S09", "configure cal");
+
+    memset(&facts, 0, sizeof(facts));
+    facts.version = IMU_CAL_FACTS_VERSION;
+    facts.valid = true;
+    facts.magAccuracy = 2u;
+    imu_session_test_inject_cal_facts(&facts);
+
+    check(imu_session_restore_production(0x00u), "S09", "restore production");
+    check(imu_session_get_cal_facts(&got), "S09", "get cleared facts");
+    check(got.version == IMU_CAL_FACTS_VERSION,
+          "S09", "facts version retained");
+    check(!got.valid, "S09", "facts invalidated");
+    check(got.configurationEpoch == snap().configurationEpoch,
+          "S09", "facts epoch updated");
+}
+
+static void test_s10_restore_after_verify_reopen(void)
+{
+    ImuSampleSnapshot_t afterReopen;
+    ImuSampleSnapshot_t afterRestore;
+
+    open_configuring("S10");
+    check(imu_session_configure_calibration(0x07u), "S10", "configure cal");
+    check(imu_session_begin_verification_reopen(), "S10", "verify reopen");
+    afterReopen = snap();
+
+    check(imu_session_restore_production(0x00u), "S10", "restore production");
+    afterRestore = snap();
+    check(afterRestore.configurationEpoch == afterReopen.configurationEpoch + 1u,
+          "S10", "restore takes one epoch");
+    check(!imu_session_test_recovery_observed(),
+          "S10", "restore is not recovery");
+}
+
+static void test_s11_restore_failure_faults_without_epoch(void)
+{
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+
+    open_configuring("S11");
+    check(imu_session_configure_calibration(0x07u), "S11", "configure cal");
+    before = snap();
+
+    imu_session_test_set_production_result(false);
+    check(!imu_session_restore_production(0x00u), "S11", "restore fails");
+    after = snap();
+    check(after.readerState == IMU_READER_STATE_FAULTED, "S11", "faulted");
+    check(after.configurationEpoch == before.configurationEpoch,
+          "S11", "no claimed epoch change");
+    check(!imu_session_test_recovery_observed(),
+          "S11", "no synthetic recovery");
+}
+
+static void test_s12_restore_illegal_states(void)
+{
+    imu_session_test_reset();
+    check(!imu_session_restore_production(0x00u),
+          "S12", "restore from CLOSED");
+
+    open_configuring("S12");
+    check(imu_session_configure_production(0x00u),
+          "S12", "initial production configure");
+    check(imu_session_begin_settle(), "S12", "begin settle");
+    check(imu_session_mark_operational(), "S12", "mark operational");
+    check(!imu_session_restore_production(0x00u),
+          "S12", "restore from OPERATIONAL");
+}
+
 int main(void)
 {
-    test_configure_cal_increments_epoch();
-    test_cal_facts_not_in_r2();
-    test_save_dcd_no_epoch();
-    test_verify_reopen_not_recovery();
-    test_verify_reopen_failure_is_recovery();
-    test_policy_roundtrip();
-    test_illegal_from_closed();
+    test_s01_configure_cal_increments_epoch();
+    test_s02_cal_facts_not_in_r2();
+    test_s03_save_dcd_no_epoch();
+    test_s04_verify_reopen_not_recovery();
+    test_s05_verify_reopen_failure_is_recovery();
+    test_s06_policy_roundtrip();
+    test_s07_illegal_from_closed();
+    test_s08_restore_from_calibration();
+    test_s09_restore_clears_cal_facts();
+    test_s10_restore_after_verify_reopen();
+    test_s11_restore_failure_faults_without_epoch();
+    test_s12_restore_illegal_states();
     if (g_fail != 0) {
         fprintf(stderr, "test_session_cal: %d failures\n", g_fail);
         return 1;

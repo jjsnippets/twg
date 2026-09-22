@@ -123,6 +123,7 @@ static void drive_to_save(uint64_t *nowNs)
     sustain_good(nowNs);
     *nowNs += IMU_CAL_HOLD_WINDOW_NS;
     tick_and_service(*nowNs);
+    feed_accurate();
     sustain_good(nowNs);
     check(imu_cal_pending_request().type == IMU_CAL_REQ_SAVE_DCD,
           "HELPER", "at save");

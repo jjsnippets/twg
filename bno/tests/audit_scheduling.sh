@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase 3 scheduling-ownership audit.
 # Reusable production modules must not own StartRT, RT_SleepUntil, or exit.
-# imu_session must not sleep, print, or terminate.
+# imu_session, imu_cal, and imu_cal_adapter must not sleep, print, or terminate.
 
 set -u
 
@@ -11,6 +11,10 @@ REPO_DIR=$(cd "${BNO_DIR}/.." && pwd)
 
 IMU_C="${BNO_DIR}/app/imu_session.c"
 IMU_H="${BNO_DIR}/app/imu_session.h"
+CAL_C="${BNO_DIR}/app/imu_cal.c"
+CAL_H="${BNO_DIR}/app/imu_cal.h"
+CAL_ADAPTER_C="${BNO_DIR}/app/imu_cal_adapter.c"
+CAL_ADAPTER_H="${BNO_DIR}/app/imu_cal_adapter.h"
 HAL_C="${BNO_DIR}/app/sh2_hal_rpi.c"
 RT_C="${REPO_DIR}/rt/realtime.c"
 
@@ -44,6 +48,10 @@ scan_calls() {
 
 scan_calls "$IMU_C" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
 scan_calls "$IMU_H" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
+scan_calls "$CAL_C" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
+scan_calls "$CAL_H" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
+scan_calls "$CAL_ADAPTER_C" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
+scan_calls "$CAL_ADAPTER_H" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
 scan_calls "$RT_C" exit
 scan_calls "$HAL_C" StartRT RT_SleepUntil exit
 

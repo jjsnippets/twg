@@ -36,6 +36,7 @@ static uint8_t s_calMask;
 static bool s_calFactsValid;
 static bool s_testSaveDcdOk = true;
 static bool s_testReopenOk = true;
+static bool s_testProductionOk = true;
 static bool s_recoveryObserved;
 static uint32_t s_recoveryAttempts;
 static void asyncEventCallback(void *cookie, sh2_AsyncEvent_t *pEvent);
@@ -199,17 +200,30 @@ static void adopt_cal_facts_from_event(const sh2_SensorValue_t *value, uint64_t 
 
 static bool apply_hardware_production(uint8_t flightCalMask)
 {
+    uint8_t readback = flightCalMask;
+    
     if (!sHal) {
+        if (!s_testProductionOk) {
+            return false;
+        }
+        s_calMask = flightCalMask;
         return true;
     }
 
     if (!configure_sensor(SH2_ROTATION_VECTOR) ||
         !configure_sensor(SH2_LINEAR_ACCELERATION) ||
-        !configure_sensor(SH2_GYROSCOPE_CALIBRATED)) {
+        !configure_sensor(SH2_GYROSCOPE_CALIBRATED) ||
+        sh2_setCalConfig(flightCalMask) != SH2_OK) {
         return false;
     }
 
-    return sh2_setCalConfig(flightCalMask) == SH2_OK;
+    if (sh2_getCalConfig(&readback) == SH2_OK) {
+        s_calMask = readback;
+    } else {
+        s_calMask = flightCalMask;
+    }
+
+    return true;
 }
 
 static bool reopen_hardware(void)
@@ -511,6 +525,32 @@ bool imu_session_configure_production(uint8_t flightCalMask)
     return true;
 }
 
+bool imu_session_restore_production(uint8_t flightCalMask)
+{
+    bool hadConfiguredReports;
+
+    if (sState != IMU_READER_STATE_CALIBRATION &&
+        sState != IMU_READER_STATE_CONFIGURING) {
+        return false;
+    }
+
+    hadConfiguredReports = sHardwareConfigured;
+    if (!apply_hardware_production(flightCalMask)) {
+        enter_faulted();
+        return false;
+    }
+
+    if (hadConfiguredReports) {
+        increment_epoch();
+    }
+
+    sFlightCalMask = flightCalMask;
+    sHardwareConfigured = true;
+    sState = IMU_READER_STATE_CONFIGURING;
+    sync_header();
+    return true;
+}
+
 bool imu_session_begin_settle(void)
 {
     if (sState != IMU_READER_STATE_CONFIGURING) {
@@ -612,6 +652,7 @@ void imu_session_test_reset(void)
     s_calFactsValid = false;
     s_testSaveDcdOk = true;
     s_testReopenOk = true;
+    s_testProductionOk = true;
     s_recoveryObserved = false;
     s_recoveryAttempts = 0u;
     memset(&s_calFacts, 0, sizeof(s_calFacts));
@@ -665,6 +706,7 @@ bool imu_session_configure_calibration(uint8_t calMask)
         return false;
     }
     increment_epoch();
+    sHardwareConfigured = true;
     sState = IMU_READER_STATE_CALIBRATION;
     sync_header();
     return true;
@@ -741,6 +783,11 @@ void imu_session_test_set_save_dcd_result(bool success)
 void imu_session_test_set_reopen_result(bool success)
 {
     s_testReopenOk = success;
+}
+
+void imu_session_test_set_production_result(bool success)
+{
+    s_testProductionOk = success;
 }
 
 bool imu_session_test_recovery_observed(void)
