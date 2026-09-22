@@ -24,7 +24,8 @@
 #   make tests          build all hardware diagnostics and unit tests
 #   make test           host tests: quad_decode, session_r1_epoch,
 #                       realtime_start, rt_fallback_policy, imu_cmd,
-#                       session_cal, imu_cal, imu_cal_adapter, scheduling audit
+#                       session_cal, imu_cal, imu_cal_adapter, imu_cmd_cal,
+#                       scheduling audit
 #   make all            build all tools and test binaries
 #   make clean          remove build/ and bin/
 #
@@ -91,6 +92,7 @@ TESTSESSIONSRC      := $(TESTDIR)/test_session_r1_epoch.c
 TESTRTSTARTSRC      := $(RTDIR)/test_realtime_start.c
 TESTRTFALLBACKSRC   := $(TESTDIR)/test_rt_fallback_policy.c
 TESTCMDSRC          := $(TESTDIR)/test_imu_cmd.c
+TESTCMDCALSRC       := $(TESTDIR)/test_imu_cmd_cal.c
 TESTSESSIONCALSRC   := $(TESTDIR)/test_session_cal.c
 TESTCALSRC          := $(TESTDIR)/test_imu_cal.c
 TESTCALADAPTERSRC   := $(TESTDIR)/test_imu_cal_adapter.c
@@ -148,7 +150,8 @@ tests: \
 test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_realtime_start $(BINDIR)/test_rt_fallback_policy \
 	$(BINDIR)/test_imu_cmd $(BINDIR)/test_session_cal \
-	$(BINDIR)/test_imu_cal $(BINDIR)/test_imu_cal_adapter
+	$(BINDIR)/test_imu_cal $(BINDIR)/test_imu_cal_adapter \
+	$(BINDIR)/test_imu_cmd_cal
 	$(BINDIR)/test_quad_decode
 	$(BINDIR)/test_session_r1_epoch
 	$(BINDIR)/test_realtime_start
@@ -157,6 +160,7 @@ test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_session_cal
 	$(BINDIR)/test_imu_cal
 	$(BINDIR)/test_imu_cal_adapter
+	$(BINDIR)/test_imu_cmd_cal
 	bash $(TESTDIR)/audit_scheduling.sh
 
 $(BINDIR)/test_session_r1_epoch: $(TESTSESSIONSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
@@ -172,7 +176,7 @@ $(BINDIR)/test_realtime_start: $(TESTRTSTARTSRC) $(RTDIR)/realtime.c | $(BINDIR)
 $(BINDIR)/test_rt_fallback_policy: $(TESTRTFALLBACKSRC) | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
 
-$(BINDIR)/test_imu_cmd: $(TESTCMDSRC) $(APPDIR)/imu_cmd.c | $(BINDIR)
+$(BINDIR)/test_imu_cmd: $(TESTCMDSRC) $(APPDIR)/imu_cmd.c $(APPDIR)/imu_cal.c | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
 
 $(BINDIR)/test_session_cal: $(TESTSESSIONCALSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
@@ -184,6 +188,15 @@ $(BINDIR)/test_imu_cal: $(TESTCALSRC) $(APPDIR)/imu_cal.c | $(BINDIR)
 $(BINDIR)/test_imu_cal_adapter: $(TESTCALADAPTERSRC) \
 	$(APPDIR)/imu_cal_adapter.c \
 	$(APPDIR)/imu_cal.c \
+	$(BUILDDIR)/app_imu_session.o \
+	$(SH2OBJS) \
+	$(APPHALOBJ) | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+$(BINDIR)/test_imu_cmd_cal: $(TESTCMDCALSRC) \
+	$(APPDIR)/imu_cmd.c \
+	$(APPDIR)/imu_cal.c \
+	$(APPDIR)/imu_cal_adapter.c \
 	$(BUILDDIR)/app_imu_session.o \
 	$(SH2OBJS) \
 	$(APPHALOBJ) | $(BINDIR)

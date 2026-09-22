@@ -2,19 +2,24 @@
 #define IMU_CMD_H
 
 /*
- * Host-only command coordinator (Phase 4).
+ * Host-only command coordinator (Phase 4, plan contract Phase 5.2).
  *
  * Immutable R6 plan in, injected events in, R7/R8 and next-stage
  * requests out. Does not open hardware, parse CLI, sleep, print, or
  * call exit. Does not include imu_session or imu_contract.
  *
- * bno_app does not link this module in Phase 4.
+ * Plan version 2 adds flightCalMask as immutable flight/production
+ * calibration policy. Default plans leave it 0x00. Calibration remains
+ * a planned identity in this header; composition into imu_cal is a
+ * later Phase 5.2 step. This header must not include imu_cal.
+ *
+ * bno_app does not link this module in Phase 5.2.
  */
 
 #include <stdbool.h>
 #include <stdint.h>
 
-#define IMU_CMD_PLAN_VERSION           1u
+#define IMU_CMD_PLAN_VERSION           2u
 #define IMU_CMD_RESULT_VERSION         2u
 #define IMU_CMD_PROGRESS_VERSION       2u
 
@@ -173,6 +178,7 @@ typedef struct {
     bool persistTare;
     bool probeMaskPresent;
     uint8_t probeMask;
+    uint8_t flightCalMask;
     uint32_t probeDeadlineS;
     uint32_t acquisitionDurationS;
     uint32_t settleDurationMs;

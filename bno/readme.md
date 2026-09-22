@@ -147,30 +147,54 @@ future integrated executable.
 
 ### Command coordinator
 
-`app/imu_cmd.c` is a host-only stage coordinator. It takes an immutable plan,
-accepts injected events (`q`, confirm, process-stop, ticks, stub stage
-terminals), and records per-stage results. It does not open the BNO085, parse
-CLI, sleep, print, or call `exit`. `bno_app` does not link or call it.
+`app/imu_cmd.c` is a host-only command-stage coordinator. It accepts an
+immutable `ImuCmdPlan_t`, injected operator/process/timing events, and records
+per-stage `ImuCmdResult_t` values. It does not open the BNO085, call
+`imu_session_*`, parse CLI, sleep, print, read stdin, or call `exit`.
+`bno_app` does not link or call it.
 
-Order is calibrate or DCD-clear, then tare family, then check or probe, then
-settle, then acquire. Ordinary cal/tare failure warns and continues. `q`
-cancels the active command stage and is ignored during settle/acquire.
-SIGINT/SIGTERM are one process-stop event (`abandoned`, reason
-`process_stop`). `recovery_failed` sets `do_not_acquire`. Tare-now versus
-persist, and partial tare-clear, stay distinct sub-results. Host coverage is
-`tests/test_imu_cmd.c`.
+Stage order remains slot 1 (calibration or DCD-clear), slot 2 (tare family),
+slot 3 (check or probe), settle, then acquisition. `flightCalMask` is immutable
+run-plan data used by the composed calibration stage when restoring the
+production policy; therefore `IMU_CMD_PLAN_VERSION` is version 2. Ordinary
+stage failure and stage-local `q` warn and continue when the session remains
+usable. `PROCESS_STOP` is instead a coordinator-level terminal event: the
+active stage becomes `ABANDONED` with reason `PROCESS_STOP`, acquisition is
+inhibited, and the plan stops. `RECOVERY_FAILED` similarly sets
+`do_not_acquire` and stops the plan.
 
-`app/imu_cal.c` is a host-only guided-calibration state machine. It
-does not own the SH-2 session, sleep, print, read stdin, or call
-`exit`. `bno_app` and `imu_cmd` still do not link or drive it.
-The caller supplies monotonic time, `ImuCalFacts_t`, operator `q` /
-confirm, and completed session-action results. `imu_cal` emits at most
-one pending request: `CONFIGURE_CALIBRATION` (mask `0x07` at start,
-mask `0` after verify reopen), `SAVE_DCD`, `VERIFY_REOPEN`, or
-`RESTORE_PRODUCTION` with the flight mask from `imu_cal_init`. It
-never calls `imu_session_*` or `sh2_*`. A later owner loop may call
-`imu_cal_adapter_pump()` after servicing `imu_session` and `imu_cal`;
-only that adapter translates the four requests into `imu_session_*`.
+Calibration is no longer a stub stage. While `CALIBRATION` is active,
+`imu_cmd` owns the `imu_cal` lifecycle: it initializes the machine on the
+stage's first `TICK`, forwards `TICK`, `OPERATOR_Q`, and
+`OPERATOR_CONFIRM`, services the machine, mirrors its progress, and adopts its
+complete result. A `q` therefore reaches `imu_cal` first; it requests
+production restoration before `imu_cmd` records the terminal
+`CANCELLED` / `OPERATOR_Q` result. The coordinator preserves the complete
+calibration result, including epochs, DCD-save status, verification status,
+production-restoration status, and terminal progress. It does not reduce that
+result to the old stub terminal representation.
+
+`IMU_CMD_EVENT_STAGE_TERMINAL` remains the host seam for DCD-clear, tare,
+tare-clear, tare-check, check, and probe. It is rejected while a real
+calibration stage is active, so an injected terminal cannot bypass
+calibration's restoration path. `q` remains ignored during settle and
+acquisition. Tare-now versus persist, and partial tare-clear, remain distinct
+sub-results. Generic coordinator coverage is in `tests/test_imu_cmd.c`;
+calibration composition coverage is in `tests/test_imu_cmd_cal.c`.
+
+`app/imu_cal.c` is the host-only guided-calibration state machine used by the
+composed calibration stage. It does not own the SH-2 session, sleep, print,
+read stdin, or call `exit`. It receives caller-supplied monotonic time,
+`ImuCalFacts_t`, operator `q` / confirm, and completed session-action results.
+It emits at most one pending request: `CONFIGURE_CALIBRATION` (mask `0x07` at
+start, mask `0` after verify reopen), `SAVE_DCD`, `VERIFY_REOPEN`, or
+`RESTORE_PRODUCTION` with the immutable flight mask supplied to
+`imu_cal_init`. It never calls `imu_session_*` or `sh2_*`.
+
+The calibration submachine remains independent of the session owner. Only
+`imu_cal_adapter` translates its four pending-request kinds into
+`imu_session_*` calls. The external host owner, not `imu_cmd`, pumps that
+adapter.
 
 Oracle: `bno/calibration/cal_main.c` and `cal_sensor.c` at
 `c90b75a8f553a2774b2d46d2cd279baef208dc7f`. Keep that tool until
@@ -218,13 +242,26 @@ and session results. It does not open SPI.
 ### Phase 5.1 calibration adapter contract
 
 `app/imu_cal_adapter.c` is a thin runtime bridge between host-only
-`imu_cal` and the sole SH-2 owner, `imu_session`. It does not own a
-scheduler, clock, operator input, printing, process lifetime, session
-open/close, session service, settling, or the operational transition.
-`bno_app` does not link or call it.
+`imu_cal` and the sole SH-2 owner, `imu_session`. It does not own a scheduler,
+clock, operator input, printing, process lifetime, session open/close, session
+service, settling, or the operational transition. `bno_app` does not link or
+call it.
 
-The caller services `imu_session` and `imu_cal` separately, then calls
-`imu_cal_adapter_pump()` once per owner-loop turn. One successful pump:
+For Phase 5.2 host composition tests, the owner-loop turn is deliberately
+explicit and has one fixed order:
+
+1. Call `imu_session_service()`.
+2. If composed calibration is active, call `imu_cal_adapter_pump()`.
+3. Post the current `TICK` to `imu_cmd`.
+4. Post any injected operator event to `imu_cmd`.
+5. Call `imu_cmd_service()` once.
+
+The adapter is pumped before the coordinator's tick/service work. A request
+created by `imu_cal` during step 5 is therefore executed on the next owner-loop
+turn. This preserves the one-request-per-pump boundary and avoids a hidden
+second `imu_cmd_service()` pass.
+
+One successful adapter pump:
 
 1. Forwards the latest available `ImuCalFacts_t` mailbox into `imu_cal`.
 2. Consumes at most one pending `imu_cal` request.
@@ -237,6 +274,14 @@ posted as `success == false`; `imu_cal` owns retry, restore, and terminal
 policy. `imu_cal_adapter_pump()` returns false only when required session
 evidence cannot be obtained, the request is unsupported, or `imu_cal`
 refuses the result event.
+
+An adapter `false` is not an ordinary failed session action. In the Phase 5.2
+composition host loop it is routed to `imu_cmd` as
+`IMU_CMD_EVENT_SESSION_UNRESTORABLE`; `imu_cmd` records
+`RECOVERY_FAILED`, inhibits acquisition, and stops the plan. An ordinary
+session operation failure is instead posted by the adapter as a matching
+session result with `success == false`, allowing `imu_cal` to own retry,
+restore, and terminal policy.
 
 | `imu_cal` request | Session action |
 |---|---|
@@ -262,9 +307,11 @@ unusable/recovery failure.
 
 Host coverage is `tests/test_imu_cal_adapter.c` (A01 configure, A02
 save, A03 planned reopen, A04 restore after `q`, A05 posted restore
-failure) plus `tests/test_session_cal.c` restore seams. Do not treat
-those tests as hardware parity. `bno_cal` and `bno_orient` remain
-exclusive-session regression oracles.
+failure) plus `tests/test_session_cal.c` restore seams. `tests/test_imu_cmd_cal.c`
+adds the M-family composed host proof that `imu_cmd` drives the real calibration state
+machine through this adapter boundary. Do not treat any of these host tests as
+hardware parity. `bno_cal` and `bno_orient` remain exclusive-session regression
+oracles. The adapter is not a scheduler or command coordinator.
 
 The adapter is not a scheduler or command coordinator. `imu_cmd`, CLI,
 `main`, production settle/operational transitions, R9/CSV/logger,
@@ -475,6 +522,7 @@ that mismatch measurable later; `bno_app` still does not compute a publisher
 | `test_imu_cal` | Host-only guided-cal gates, save/retry, `q`, restore requests | Hardware, CLI, `imu_session` execution |
 | `test_session_cal` | Calibration configure, DCD save, planned reopen, production restore, epoch/recovery accounting | Publisher freshness or CLI |
 | `test_imu_cal_adapter` | One-request-per-pump translation of the four `imu_cal` requests through `imu_session` | CLI, `main`, `imu_cmd` dispatch, hardware |
+| `test_imu_cmd_cal` | Host-only `imu_cmd` → `imu_cal` → `imu_cal_adapter` → `imu_session` composition, including successful calibration, `q` restoration, and unrecoverable adapter routing | SPI hardware, CLI, `main`, `bno_app` wiring, tare/check/probe, CSV |
 
 Build commands from `bno/`:
 
@@ -484,7 +532,7 @@ make tools      # app, calibration, orientation, validation, encoder bring-up
 make tests      # diagnostic binaries
 make test       # host: quad_decode, session_r1_epoch, realtime_start,
                 # rt_fallback_policy, imu_cmd, session_cal, imu_cal,
-                # imu_cal_adapter, scheduling audit
+                # imu_cal_adapter, imu_cmd_cal, scheduling audit
 make clean      # remove build/ and bin/
 ```
 
@@ -499,12 +547,17 @@ command state machines, and `twg/integration` are still later work.
 Phase 4 added `app/imu_cmd.c`. `bno_app` still does open → production
 configure → 300 ms settle → 10 s print and does not call the coordinator.
 
-Phase 5.1 added `app/imu_cal_adapter.c`. `bno_app` still does open →
-production configure → 300 ms settle → 10 s print and does not call
-`imu_cal`, the adapter, or `imu_cmd`. Unified CLI, tare/check/probe
-machines, R9/CSV, and `twg/integration` remain later work. The next
-phase must start with a clarification review before either wiring the
-adapter into `imu_cmd` or beginning tare migration.
+Phase 5.2 completed host-only composition of `imu_cmd`, `imu_cal`, and
+`imu_cal_adapter`. This is not production wiring: `bno_app` still does open →
+production configure → 300 ms settle → 10 s print and does not link or call
+`imu_cmd`, `imu_cal`, or `imu_cal_adapter`.
+
+Phase 5 is complete. The next implementation phase is Phase 6 tare migration,
+which must begin with its own clarification and contract review. Unified CLI,
+stdin prompts, `main`-loop changes, `bno_app` wiring, check/probe machines,
+R9/CSV, and `twg/integration` remain later work. `bno_cal` and `bno_orient`
+remain exclusive-session regression oracles until hardware parity is
+demonstrated.
 
 Before the BNO reader is integrated with pressure acquisition, networking,
 video, or a GUI, the process-level publisher must still derive consumer-relative

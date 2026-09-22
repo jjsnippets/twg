@@ -8,8 +8,10 @@
 #include "app/imu_cmd.h"
 
 /*
- * Phase 4 host-only oracles: 1I family K plus T sub-results.
- * No SPI, no session, no sudo.
+ * Phase 4 / 5.2 generic coordinator oracles: family K plus T sub-results
+ * and G plan/stop checks. Calibration is no longer completed through
+ * STAGE_TERMINAL; that seam remains only for unmigrated stages.
+ * No SPI, no session, no sudo, no imu_cal driving.
  */
 
 static int g_fail;
@@ -156,7 +158,7 @@ static bool finish_settle_acquire(const char *tid)
     return true;
 }
 
-static void test_k01(void)
+static void test_k01_default_plan_skips_commands_and_acquires(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdIdentity_t id;
@@ -164,6 +166,8 @@ static void test_k01(void)
     ImuCmdProgress_t prog;
 
     check(imu_cmd_plan_acquire_default(&plan), "K01", "default plan");
+    check(plan.version == IMU_CMD_PLAN_VERSION, "K01", "plan version macro");
+    check(plan.flightCalMask == 0u, "K01", "default flight mask 0");
     check(imu_cmd_init(&plan), "K01", "init");
 
     for (id = IMU_CMD_ID_CALIBRATION; id <= IMU_CMD_ID_PROBE; id++) {
@@ -195,7 +199,7 @@ static void test_k01(void)
     check(!imu_cmd_warning_required(), "K01", "no warning");
 }
 
-static void test_k02(void)
+static void test_k02_tare_q_before_now_continues_to_check(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
@@ -235,26 +239,27 @@ static void test_k02(void)
     (void)finish_settle_acquire("K02");
 }
 
-static void test_k03(void)
+static void test_k03_dcd_clear_fail_still_runs_tare(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
 
     imu_cmd_plan_clear(&plan);
-    plan.slot1 = IMU_CMD_ID_CALIBRATION;
+    plan.slot1 = IMU_CMD_ID_DCD_CLEAR;
     plan.slot2 = IMU_CMD_ID_TARE;
     plan.tareAxes = IMU_CMD_TARE_AXES_Z;
     plan.persistTare = true;
     check(imu_cmd_init(&plan), "K03", "init");
 
     imu_cmd_service();
-    check(active_id() == IMU_CMD_ID_CALIBRATION, "K03", "cal running");
-    e = make_terminal(IMU_CMD_ID_CALIBRATION, IMU_CMD_STATE_FAILED,
-                      IMU_CMD_REASON_GATE_NOT_REACHED, true);
-    check(imu_cmd_post(&e), "K03", "cal fail");
-    check_state(IMU_CMD_ID_CALIBRATION, IMU_CMD_STATE_FAILED, "K03", "cal failed");
-    check_reason(IMU_CMD_ID_CALIBRATION, IMU_CMD_REASON_GATE_NOT_REACHED,
-                 "K03", "gate");
+    check(active_id() == IMU_CMD_ID_DCD_CLEAR, "K03", "dcd clear running");
+    e = make_terminal(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_FAILED,
+                      IMU_CMD_REASON_DCD_CLEAR_FAILED, true);
+    check(imu_cmd_post(&e), "K03", "dcd clear fail");
+    check_state(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_FAILED, "K03",
+                "dcd clear failed");
+    check_reason(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_REASON_DCD_CLEAR_FAILED,
+                 "K03", "dcd_clear_failed");
     check(imu_cmd_warning_required(), "K03", "warning");
 
     imu_cmd_service();
@@ -262,24 +267,24 @@ static void test_k03(void)
     check(!imu_cmd_do_not_acquire(), "K03", "session usable");
 }
 
-static void test_k04(void)
+static void test_k04_dcd_recovery_failed_stops_plan(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
 
     imu_cmd_plan_clear(&plan);
-    plan.slot1 = IMU_CMD_ID_CALIBRATION;
+    plan.slot1 = IMU_CMD_ID_DCD_CLEAR;
     plan.slot2 = IMU_CMD_ID_TARE;
     plan.tareAxes = IMU_CMD_TARE_AXES_Z;
     plan.persistTare = true;
     check(imu_cmd_init(&plan), "K04", "init");
 
     imu_cmd_service();
-    e = make_terminal(IMU_CMD_ID_CALIBRATION, IMU_CMD_STATE_RECOVERY_FAILED,
+    e = make_terminal(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_RECOVERY_FAILED,
                       IMU_CMD_REASON_SESSION_UNUSABLE, true);
     check(imu_cmd_post(&e), "K04", "recovery_failed");
-    check_state(IMU_CMD_ID_CALIBRATION, IMU_CMD_STATE_RECOVERY_FAILED,
-                "K04", "cal recovery_failed");
+    check_state(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_RECOVERY_FAILED,
+                "K04", "dcd recovery_failed");
     check(imu_cmd_do_not_acquire(), "K04", "do not acquire");
     check(imu_cmd_plan_complete(), "K04", "stopped");
 
@@ -294,7 +299,7 @@ static void test_k04(void)
     check(imu_cmd_request() == IMU_CMD_REQ_STOP_PLAN, "K04", "stop plan");
 }
 
-static void test_k05a(void)
+static void test_k05a_probe_deadline_times_out(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
@@ -323,7 +328,7 @@ static void test_k05a(void)
     (void)finish_settle_acquire("K05a");
 }
 
-static void test_k05b(void)
+static void test_k05b_probe_q_ends_early(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
@@ -352,7 +357,7 @@ static void test_k05b(void)
     (void)finish_settle_acquire("K05b");
 }
 
-static void test_k06(void)
+static void test_k06_process_stop_abandons_dcd_clear(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
@@ -380,7 +385,7 @@ static void test_k06(void)
     check(active_id() == IMU_CMD_ID_NONE, "K06", "no further stage");
 }
 
-static void test_k07(void)
+static void test_k07_acquisition_ignores_operator_q(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
@@ -407,7 +412,7 @@ static void test_k07(void)
                 "duration end");
 }
 
-static void test_t01(void)
+static void test_t01_tare_now_and_persist_succeed(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
@@ -433,7 +438,7 @@ static void test_t01(void)
     check(!imu_cmd_warning_required(), "T01", "no warning");
 }
 
-static void test_t02(void)
+static void test_t02_tare_now_failed_skips_persist(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
@@ -459,7 +464,7 @@ static void test_t02(void)
     check(r.sub.persist != IMU_CMD_SUB_SUCCEEDED, "T02", "persist not ok");
 }
 
-static void test_t03(void)
+static void test_t03_tare_persist_failed_continues(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
@@ -489,7 +494,7 @@ static void test_t03(void)
     (void)finish_settle_acquire("T03");
 }
 
-static void test_t04(void)
+static void test_t04_tare_clear_active_and_saved_succeed(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
@@ -513,7 +518,7 @@ static void test_t04(void)
     check(r.sub.clearSaved == IMU_CMD_SUB_SUCCEEDED, "T04", "saved");
 }
 
-static void test_t05(void)
+static void test_t05_tare_clear_partial_continues(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
@@ -541,7 +546,7 @@ static void test_t05(void)
     (void)finish_settle_acquire("T05");
 }
 
-static void test_g_illegal(void)
+static void test_g01_illegal_plans_rejected(void)
 {
     ImuCmdPlan_t plan;
 
@@ -566,18 +571,18 @@ static void test_g_illegal(void)
     check(!imu_cmd_init(&plan), "G04", "duration 0");
 }
 
-static void test_g_stop_preserves_prior(void)
+static void test_g05_process_stop_preserves_prior(void)
 {
     ImuCmdPlan_t plan;
     ImuCmdEvent_t e;
 
     imu_cmd_plan_clear(&plan);
-    plan.slot1 = IMU_CMD_ID_CALIBRATION;
+    plan.slot1 = IMU_CMD_ID_DCD_CLEAR;
     check(imu_cmd_init(&plan), "G05", "init");
     imu_cmd_service();
-    e = make_terminal(IMU_CMD_ID_CALIBRATION, IMU_CMD_STATE_SUCCEEDED,
+    e = make_terminal(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_SUCCEEDED,
                       IMU_CMD_REASON_OK, false);
-    check(imu_cmd_post(&e), "G05", "cal ok");
+    check(imu_cmd_post(&e), "G05", "dcd clear ok");
     imu_cmd_service();
     e = make_event(IMU_CMD_EVENT_SETTLE_DONE);
     check(imu_cmd_post(&e), "G05", "settle");
@@ -585,31 +590,46 @@ static void test_g_stop_preserves_prior(void)
     check(active_id() == IMU_CMD_ID_ACQUISITION, "G05", "acquire");
     e = make_event(IMU_CMD_EVENT_PROCESS_STOP);
     check(imu_cmd_post(&e), "G05", "stop");
-    check_state(IMU_CMD_ID_CALIBRATION, IMU_CMD_STATE_SUCCEEDED, "G05",
-                "cal not rewritten");
-    check_reason(IMU_CMD_ID_CALIBRATION, IMU_CMD_REASON_OK, "G05", "still ok");
+    check_state(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_SUCCEEDED, "G05",
+                "dcd clear not rewritten");
+    check_reason(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_REASON_OK, "G05", "still ok");
     check_state(IMU_CMD_ID_ACQUISITION, IMU_CMD_STATE_ABANDONED, "G05",
                 "acquire abandoned");
     check(imu_cmd_process_stop_seen(), "G05", "stop seen");
 }
 
+static void test_g06_stale_plan_version_rejected(void)
+{
+    ImuCmdPlan_t plan;
+
+    imu_cmd_plan_clear(&plan);
+    check(plan.version == IMU_CMD_PLAN_VERSION, "G06",
+          "clear uses current version");
+    check(IMU_CMD_PLAN_VERSION != 1u, "G06", "current plan is not version 1");
+    plan.version = 1u;
+    check(!imu_cmd_init(&plan), "G06", "stale version-1 plan");
+    check(imu_cmd_init_reason() == IMU_CMD_REASON_ILLEGAL_PLAN, "G06",
+          "illegal plan");
+}
+
 int main(void)
 {
-    test_k01();
-    test_k02();
-    test_k03();
-    test_k04();
-    test_k05a();
-    test_k05b();
-    test_k06();
-    test_k07();
-    test_t01();
-    test_t02();
-    test_t03();
-    test_t04();
-    test_t05();
-    test_g_illegal();
-    test_g_stop_preserves_prior();
+    test_k01_default_plan_skips_commands_and_acquires();
+    test_k02_tare_q_before_now_continues_to_check();
+    test_k03_dcd_clear_fail_still_runs_tare();
+    test_k04_dcd_recovery_failed_stops_plan();
+    test_k05a_probe_deadline_times_out();
+    test_k05b_probe_q_ends_early();
+    test_k06_process_stop_abandons_dcd_clear();
+    test_k07_acquisition_ignores_operator_q();
+    test_t01_tare_now_and_persist_succeed();
+    test_t02_tare_now_failed_skips_persist();
+    test_t03_tare_persist_failed_continues();
+    test_t04_tare_clear_active_and_saved_succeed();
+    test_t05_tare_clear_partial_continues();
+    test_g01_illegal_plans_rejected();
+    test_g05_process_stop_preserves_prior();
+    test_g06_stale_plan_version_rejected();
 
     if (g_fail != 0) {
         fprintf(stderr, "test_imu_cmd: %d failure(s)\n", g_fail);

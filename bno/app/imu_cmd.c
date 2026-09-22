@@ -1,4 +1,5 @@
 #include "imu_cmd.h"
+#include "app/imu_cal.h"
 
 #include <string.h>
 
@@ -17,6 +18,7 @@ static bool s_unrestorable;
 static bool s_confirmed;
 static uint64_t s_last_ns;
 static uint64_t s_stage_start_ns;
+static bool s_cal_initialized;
 static ImuCmdReason_t s_init_reason;
 static unsigned s_slot_done;
 
@@ -178,6 +180,57 @@ static void idle_request(void)
     s_request_id = IMU_CMD_ID_NONE;
     s_confirmed = false;
     s_stage_start_ns = 0ull;
+    s_cal_initialized = false;
+}
+
+static void complete_active_bookkeeping(void)
+{
+    ImuCmdResult_t *r;
+    unsigned slot;
+    ImuCmdIdentity_t id = s_active;
+
+    if (id == IMU_CMD_ID_NONE) {
+        return;
+    }
+
+    r = &s_results[id];
+    if (r->warningRequired) {
+        s_warning = true;
+    }
+
+    slot = slot_of(id);
+    if (slot > s_slot_done) {
+        s_slot_done = slot;
+    }
+
+    if (r->state == IMU_CMD_STATE_RECOVERY_FAILED || s_unrestorable) {
+        s_do_not_acquire = true;
+        s_complete = true;
+        idle_request();
+        s_request = IMU_CMD_REQ_STOP_PLAN;
+        s_request_id = IMU_CMD_ID_NONE;
+        return;
+    }
+
+    if (r->state == IMU_CMD_STATE_ABANDONED &&
+        r->reason == IMU_CMD_REASON_PROCESS_STOP) {
+        if (id != IMU_CMD_ID_ACQUISITION) {
+            s_do_not_acquire = true;
+        }
+        s_complete = true;
+        idle_request();
+        s_request = IMU_CMD_REQ_STOP_PLAN;
+        s_request_id = IMU_CMD_ID_NONE;
+        return;
+    }
+
+    if (id == IMU_CMD_ID_ACQUISITION) {
+        s_complete = true;
+        idle_request();
+        return;
+    }
+
+    idle_request();
 }
 
 static void start_stage(ImuCmdIdentity_t id)
@@ -186,6 +239,7 @@ static void start_stage(ImuCmdIdentity_t id)
 
     s_active = id;
     s_confirmed = !needs_confirm(id);
+    s_cal_initialized = false;
     s_action = action_for(id);
     s_stage_start_ns = 0ull;    // Duration windows arm on the first TICK of this stage.
     s_request_id = id;
@@ -222,7 +276,6 @@ static void finish_active(ImuCmdResultState_t state, ImuCmdReason_t reason,
                           bool warning, const ImuCmdSubResults_t *sub)
 {
     ImuCmdResult_t *r;
-    unsigned slot;
     ImuCmdIdentity_t id = s_active;
 
     if (id == IMU_CMD_ID_NONE) {
@@ -237,46 +290,36 @@ static void finish_active(ImuCmdResultState_t state, ImuCmdReason_t reason,
     if (sub != NULL) {
         r->sub = *sub;
     }
-    if (warning) {
-        s_warning = true;
-    }
+    complete_active_bookkeeping();
+}
 
-    slot = slot_of(id);
-    if (slot > s_slot_done) {
-        s_slot_done = slot;
-    }
+static bool is_terminal_state(ImuCmdResultState_t state)
+{
+    return state != IMU_CMD_STATE_NOT_REQUESTED &&
+           state != IMU_CMD_STATE_RUNNING;
+}
 
-    if (state == IMU_CMD_STATE_RECOVERY_FAILED || s_unrestorable) {
-        s_do_not_acquire = true;
-        s_complete = true;
-        s_request = IMU_CMD_REQ_STOP_PLAN;
-        s_request_id = IMU_CMD_ID_NONE;
-        s_active = IMU_CMD_ID_NONE;
-        s_action = IMU_CMD_ACTION_NONE;
-        s_confirmed = false;
-        s_stage_start_ns = 0ull;
+static void adopt_calibration_result(void)
+{
+    ImuCmdResult_t result;
+
+    if (s_active != IMU_CMD_ID_CALIBRATION || !s_cal_initialized) {
         return;
     }
 
-    if (state == IMU_CMD_STATE_ABANDONED &&
-        reason == IMU_CMD_REASON_PROCESS_STOP) {
-        if (id != IMU_CMD_ID_ACQUISITION) {
-            s_do_not_acquire = true;
-        }
-        s_complete = true;
-        s_request = IMU_CMD_REQ_STOP_PLAN;
-        s_request_id = IMU_CMD_ID_NONE;
-        idle_request();
+    if (!imu_cal_get_result(&result) ||
+        result.version != IMU_CMD_RESULT_VERSION ||
+        result.identity != IMU_CMD_ID_CALIBRATION ||
+        !is_terminal_state(result.state)) {
+        finish_active(IMU_CMD_STATE_RECOVERY_FAILED,
+                      IMU_CMD_REASON_CAL_SESSION_UNUSABLE,
+                      true,
+                      &s_results[IMU_CMD_ID_CALIBRATION].sub);
         return;
     }
 
-    if (id == IMU_CMD_ID_ACQUISITION) {
-        s_complete = true;
-        idle_request();
-        return;
-    }
-
-    idle_request();
+    s_results[IMU_CMD_ID_CALIBRATION] = result;
+    complete_active_bookkeeping();
 }
 
 static void apply_tare_rules(ImuCmdStageTerminal_t *term)
@@ -365,6 +408,7 @@ bool imu_cmd_init(const ImuCmdPlan_t *plan)
     s_confirmed = false;
     s_last_ns = 0ull;
     s_stage_start_ns = 0ull;
+    s_cal_initialized = false;
     s_slot_done = 0u;
 
     for (i = 0u; i < (unsigned)IMU_CMD_ID_COUNT; i++) {
@@ -401,6 +445,17 @@ static bool post_q(void)
 {
     ImuCmdSubResults_t sub;
 
+    if (s_active == IMU_CMD_ID_CALIBRATION) {
+        ImuCalEvent_t event;
+
+        if (!s_cal_initialized) {
+            return false;
+        }
+        memset(&event, 0, sizeof(event));
+        event.type = IMU_CAL_EVENT_OPERATOR_Q;
+        return imu_cal_post(&event);
+    }
+
     if (s_active == IMU_CMD_ID_NONE ||
         s_active == IMU_CMD_ID_SETTLE ||
         s_active == IMU_CMD_ID_ACQUISITION) {
@@ -418,6 +473,17 @@ static bool post_q(void)
 
 static bool post_confirm(void)
 {
+    if (s_active == IMU_CMD_ID_CALIBRATION) {
+        ImuCalEvent_t event;
+
+        if (!s_cal_initialized) {
+            return false;
+        }
+        memset(&event, 0, sizeof(event));
+        event.type = IMU_CAL_EVENT_OPERATOR_CONFIRM;
+        return imu_cal_post(&event);
+    }
+
     if (s_active == IMU_CMD_ID_NONE || s_confirmed ||
         (s_action != IMU_CMD_ACTION_CONFIRM &&
          s_action != IMU_CMD_ACTION_ALIGN_AND_CONFIRM)) {
@@ -451,9 +517,33 @@ static bool post_tick(uint64_t ns)
     uint64_t limit;
 
     s_last_ns = ns;
+
+    if (s_active == IMU_CMD_ID_CALIBRATION) {
+        ImuCalEvent_t event;
+
+        if (!s_cal_initialized) {
+            s_stage_start_ns = ns;
+            s_results[s_active].startedNs = ns;
+            s_cal_initialized = imu_cal_init(s_plan.flightCalMask, ns);
+            if (!s_cal_initialized) {
+                finish_active(IMU_CMD_STATE_RECOVERY_FAILED,
+                              IMU_CMD_REASON_CAL_SESSION_UNUSABLE,
+                              true,
+                              &s_results[IMU_CMD_ID_CALIBRATION].sub);
+            }
+            return s_cal_initialized;
+        }
+
+        memset(&event, 0, sizeof(event));
+        event.type = IMU_CAL_EVENT_TICK;
+        event.monotonicNs = ns;
+        return imu_cal_post(&event);
+    }
+
     if (s_active == IMU_CMD_ID_NONE) {
         return true;
     }
+
     if (s_stage_start_ns == 0ull) {
         s_stage_start_ns = ns;
         s_results[s_active].startedNs = ns;
@@ -491,6 +581,9 @@ static bool post_terminal(const ImuCmdStageTerminal_t *term_in)
     ImuCmdStageTerminal_t term;
 
     if (s_active == IMU_CMD_ID_NONE || term_in->identity != s_active) {
+        return false;
+    }
+    if (s_active == IMU_CMD_ID_CALIBRATION) {
         return false;
     }
     if (term_in->state == IMU_CMD_STATE_NOT_REQUESTED ||
@@ -560,8 +653,25 @@ void imu_cmd_service(void)
 {
     ImuCmdIdentity_t id;
 
-    if (!s_inited || s_active != IMU_CMD_ID_NONE || s_complete ||
-        s_process_stop) {
+    if (!s_inited || s_complete || s_process_stop) {
+        return;
+    }
+
+    if (s_active == IMU_CMD_ID_CALIBRATION) {
+        if (!s_cal_initialized) {
+            return;
+        }
+
+        imu_cal_service();
+        if (!imu_cal_complete()) {
+            return;
+        }
+
+        adopt_calibration_result();
+        return;
+    }
+
+    if (s_active != IMU_CMD_ID_NONE) {
         return;
     }
 
@@ -613,6 +723,16 @@ bool imu_cmd_get_progress(ImuCmdProgress_t *out)
     if (!s_inited || out == NULL) {
         return false;
     }
+
+    if (s_active == IMU_CMD_ID_CALIBRATION && s_cal_initialized) {
+        if (!imu_cal_get_progress(out)) {
+            return false;
+        }
+        out->version = IMU_CMD_PROGRESS_VERSION;
+        out->active = IMU_CMD_ID_CALIBRATION;
+        return true;
+    }
+
     memset(out, 0, sizeof(*out));
     out->version = IMU_CMD_PROGRESS_VERSION;
     out->active = s_active;
