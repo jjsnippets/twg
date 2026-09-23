@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "app/imu_contract.h"
+#include "app/imu_check.h"
 
 #define IMU_CAL_FACTS_VERSION 1u
 #define IMU_TARE_FACTS_VERSION 1u
@@ -13,6 +14,11 @@
 #define IMU_CAL_SLOW_RATE_HZ  10u
 #define IMU_CAL_MAG_INTERVAL_US   (1000000u / IMU_CAL_MAG_RATE_HZ)
 #define IMU_CAL_SLOW_INTERVAL_US  (1000000u / IMU_CAL_SLOW_RATE_HZ)
+
+#define IMU_CHECK_MAG_RATE_HZ      50u
+#define IMU_CHECK_SLOW_RATE_HZ     10u
+#define IMU_CHECK_MAG_INTERVAL_US  (1000000u / IMU_CHECK_MAG_RATE_HZ)
+#define IMU_CHECK_SLOW_INTERVAL_US (1000000u / IMU_CHECK_SLOW_RATE_HZ)
 
 /*
  * Calibration-only mailbox. Not part of production R2.
@@ -34,6 +40,41 @@ typedef struct {
     float    magZuT;
     bool     valid;
 } ImuCalFacts_t;
+
+/*
+ * CHECK and PROBE are separate reader modes, not a boolean overlay on
+ * CALIBRATION or OPERATIONAL.
+ */
+typedef enum {
+    IMU_SESSION_CHECK_MODE_CHECK = 1,
+    IMU_SESSION_CHECK_MODE_PROBE
+} ImuSessionCheckMode_t;
+
+/*
+ * The call's return value is success. A readable-but-different mask makes
+ * success false while retaining actualMaskValid and actualMask here.
+ * An unavailable readback is not invented and is not by itself a failure.
+ */
+typedef struct {
+    bool actualMaskValid;
+    uint8_t actualMask;
+} ImuSessionCheckConfigResult_t;
+
+/* Host-only report-configuration observation IDs. Not SH-2 sensor IDs. */
+typedef enum {
+    IMU_SESSION_TEST_REPORT_MAG = 0,
+    IMU_SESSION_TEST_REPORT_ACCEL,
+    IMU_SESSION_TEST_REPORT_GYRO,
+    IMU_SESSION_TEST_REPORT_RV,
+    IMU_SESSION_TEST_REPORT_LINEAR,
+    IMU_SESSION_TEST_REPORT_COUNT
+} ImuSessionTestReportId_t;
+
+typedef struct {
+    bool attempted;
+    uint32_t reportIntervalUs;
+    uint32_t batchIntervalUs;
+} ImuSessionTestReportConfig_t;
 
 typedef enum {
     IMU_SESSION_TARE_AXES_Z = 1,
@@ -118,8 +159,8 @@ bool imu_session_configure_production(uint8_t flightCalMask);
 
 /*
  * Restores the normal 100 Hz production report set and flight calibration
- * policy after calibration or tare. Legal from CALIBRATION, TARE, and
- * CONFIGURING only.
+ * policy after calibration, tare, check, or probe. Legal from CALIBRATION,
+ * TARE, CHECK, PROBE, and CONFIGURING only.
  * A restore after an already configured calibration/verification path
  * increments epoch once, clears validity and calibration-only facts, and
  * leaves the session in CONFIGURING. It never closes or recovers the session.
@@ -127,6 +168,22 @@ bool imu_session_configure_production(uint8_t flightCalMask);
  * and behaves as the initial production apply (no extra epoch increment).
  */
 bool imu_session_restore_production(uint8_t flightCalMask);
+
+/*
+ * Legal from CONFIGURING only. On successful report/mask configuration,
+ * starts exactly one new epoch, clears production R2 validity and old check
+ * facts, then enters CHECK or PROBE. CHECK requires mask 0x00; PROBE accepts
+ * the complete requested uint8_t, including 0x00.
+ *
+ * A readable mask mismatch returns false but retains the new, actionable
+ * CHECK/PROBE state and epoch so the caller can request production restore.
+ * A hard configuration failure faults rather than claiming entry or epoch.
+ */
+bool imu_session_configure_check(ImuSessionCheckMode_t mode, uint8_t mask,
+                                 ImuSessionCheckConfigResult_t *out);
+
+/* Copy the separate check mailbox; never reinterpret production R2 as it. */
+bool imu_session_get_check_facts(ImuCheckFacts_t *out);
 
 /*
  * Enables the calibration report set and applies sh2_setCalConfig(calMask).
@@ -261,6 +318,23 @@ void imu_session_test_set_configure_tare_result(bool success);
 void imu_session_test_set_tare_now_result(bool success);
 void imu_session_test_set_persist_tare_result(bool success);
 void imu_session_test_set_clear_tare_result(bool success);
+
+/*
+ * Host-only check/probe seams. Report injection acts like one decoded
+ * diagnostic report; the bulk injection seam permits negative adapter tests
+ * with a deliberately wrong version or epoch. Neither modifies R2.
+*/
+void imu_session_test_set_configure_check_result(bool success);
+void imu_session_test_set_check_readback(bool available, uint8_t actualMask);
+void imu_session_test_inject_check_report(ImuSessionTestReportId_t report,
+                                          uint8_t status,
+                                          uint64_t hostDecodeNs,
+                                          float rvErrRad,
+                                          float magX, float magY, float magZ);
+void imu_session_test_inject_check_facts(const ImuCheckFacts_t *facts);
+bool imu_session_test_get_report_config(ImuSessionTestReportId_t report,
+                                        ImuSessionTestReportConfig_t *out);
+
 uint8_t imu_session_test_last_tare_axes(void);
 uint8_t imu_session_test_last_tare_basis(void);
 bool imu_session_test_have_last_tare_now(void);

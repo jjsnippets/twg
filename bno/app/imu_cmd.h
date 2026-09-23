@@ -26,8 +26,8 @@
 #include <stdint.h>
 
 #define IMU_CMD_PLAN_VERSION           2u
-#define IMU_CMD_RESULT_VERSION         3u
-#define IMU_CMD_PROGRESS_VERSION       3u
+#define IMU_CMD_RESULT_VERSION         4u
+#define IMU_CMD_PROGRESS_VERSION       4u
 
 #define IMU_CMD_PROBE_DEADLINE_S       10u
 #define IMU_CMD_ACQUIRE_DEFAULT_S      10u
@@ -185,6 +185,55 @@ typedef struct {
 } ImuCmdTareProgress_t;
 
 typedef enum {
+    IMU_CMD_CHECK_PHASE_NONE = 0,
+    IMU_CMD_CHECK_PHASE_STARTUP,
+    IMU_CMD_CHECK_PHASE_CONFIGURE,
+    IMU_CMD_CHECK_PHASE_MONITOR,
+    IMU_CMD_CHECK_PHASE_RESTORE,
+    IMU_CMD_CHECK_PHASE_COMPLETE
+} ImuCmdCheckPhase_t;
+
+/*
+ * Latest check/probe verdict. Observation flags and values are valid only
+ * for facts accepted in the configured epoch. A probe alone has a deadline.
+ * gateReached is sticky; gatePassingNow is the current verdict.
+ */
+typedef struct {
+    ImuCmdIdentity_t identity;
+    ImuCmdCheckPhase_t phase;
+    uint64_t stateEntryNs;
+    bool deadlineValid;
+    uint64_t deadlineNs;
+    uint64_t remainingNs;
+    uint64_t sustainedGoodNs;
+    uint8_t effectiveMask;
+    bool requestedMaskValid;
+    uint8_t requestedMask;
+    bool actualMaskValid;
+    uint8_t actualMask;
+    uint32_t factsEpoch;
+    bool factsEpochMatched;
+    bool haveAccel;
+    bool haveGyro;
+    bool haveMag;
+    bool haveRv;
+    uint64_t accelHostDecodeNs;
+    uint64_t gyroHostDecodeNs;
+    uint64_t magHostDecodeNs;
+    uint64_t rvHostDecodeNs;
+    uint8_t accelStatus;
+    uint8_t gyroStatus;
+    uint8_t magStatus;
+    uint8_t rvStatus;
+    float rvErrRad;
+    float magXuT;
+    float magYuT;
+    float magZuT;
+    bool gatePassingNow;
+    bool gateReached;
+} ImuCmdCheckProgress_t;
+
+typedef enum {
     IMU_CMD_REQ_NONE = 0,
     IMU_CMD_REQ_RUN_COMMAND,
     IMU_CMD_REQ_SETTLE,
@@ -243,6 +292,7 @@ typedef struct {
     uint64_t probeRemainingNs;
     ImuCmdCalProgress_t cal;
     ImuCmdTareProgress_t tare;
+    ImuCmdCheckProgress_t check;
 } ImuCmdProgress_t;
 
 typedef struct {

@@ -1,8 +1,9 @@
+#include <string.h>
+
 #include "imu_cmd.h"
 #include "app/imu_cal.h"
 #include "app/imu_tare.h"
-
-#include <string.h>
+#include "app/imu_check.h"
 
 static bool s_inited;
 static ImuCmdPlan_t s_plan;
@@ -21,6 +22,7 @@ static uint64_t s_last_ns;
 static uint64_t s_stage_start_ns;
 static bool s_cal_initialized;
 static bool s_tare_initialized;
+static bool s_check_initialized;
 static ImuCmdReason_t s_init_reason;
 static unsigned s_slot_done;
 
@@ -184,6 +186,7 @@ static void idle_request(void)
     s_stage_start_ns = 0ull;
     s_cal_initialized = false;
     s_tare_initialized = false;
+    s_check_initialized = false;
 }
 
 static void complete_active_bookkeeping(void)
@@ -244,6 +247,7 @@ static void start_stage(ImuCmdIdentity_t id)
     s_confirmed = !needs_confirm(id);
     s_cal_initialized = false;
     s_tare_initialized = false;
+    s_check_initialized = false;
     s_action = action_for(id);
     s_stage_start_ns = 0ull;    // Duration windows arm on the first TICK of this stage.
     s_request_id = id;
@@ -308,6 +312,33 @@ static bool is_tare_family(ImuCmdIdentity_t id)
     return id == IMU_CMD_ID_TARE ||
            id == IMU_CMD_ID_TARE_CLEAR ||
            id == IMU_CMD_ID_TARE_CHECK;
+}
+
+static bool is_check_family(ImuCmdIdentity_t id)
+{
+    return id == IMU_CMD_ID_CHECK || id == IMU_CMD_ID_PROBE;
+}
+
+static void adopt_check_result(void)
+{
+    ImuCmdResult_t result;
+
+    if (!is_check_family(s_active) || !s_check_initialized) {
+        return;
+    }
+    if (!imu_check_get_result(&result) ||
+        result.version != IMU_CMD_RESULT_VERSION ||
+        result.identity != s_active ||
+        !is_terminal_state(result.state)) {
+        finish_active(IMU_CMD_STATE_RECOVERY_FAILED,
+                      IMU_CMD_REASON_SESSION_UNUSABLE,
+                      true, &s_results[s_active].sub);
+       return;
+    }
+
+    /* Preserve R7's full terminalProgress.check and probe sub-results. */
+    s_results[s_active] = result;
+    complete_active_bookkeeping();
 }
 
 static void adopt_calibration_result(void)
@@ -405,6 +436,7 @@ bool imu_cmd_init(const ImuCmdPlan_t *plan)
     s_stage_start_ns = 0ull;
     s_cal_initialized = false;
     s_tare_initialized = false;
+    s_check_initialized = false;
     s_slot_done = 0u;
 
     for (i = 0u; i < (unsigned)IMU_CMD_ID_COUNT; i++) {
@@ -462,6 +494,18 @@ static bool post_q(void)
         event.type = IMU_TARE_EVENT_OPERATOR_Q;
         return imu_tare_post(&event);
     }
+
+    if (is_check_family(s_active)) {
+        ImuCheckEvent_t event;
+
+        if (!s_check_initialized) {
+            return false;
+        }
+        memset(&event, 0, sizeof(event));
+        event.type = IMU_CHECK_EVENT_OPERATOR_Q;
+        return imu_check_post(&event);
+    }
+
     if (s_active == IMU_CMD_ID_NONE ||
         s_active == IMU_CMD_ID_SETTLE ||
         s_active == IMU_CMD_ID_ACQUISITION) {
@@ -469,9 +513,6 @@ static bool post_q(void)
     }
 
     sub = s_results[s_active].sub;
-    if (s_active == IMU_CMD_ID_PROBE) {
-        sub.probeOperatorEndedEarly = true;
-    }
     finish_active(IMU_CMD_STATE_CANCELLED, IMU_CMD_REASON_OPERATOR_Q,
                   q_sets_warning(s_active), &sub);
     return true;
@@ -580,6 +621,28 @@ static bool post_tick(uint64_t ns)
         return imu_tare_post(&event);
     }
 
+    if (is_check_family(s_active)) {
+        ImuCheckEvent_t event;
+
+        if (!s_check_initialized) {
+            s_stage_start_ns = ns;
+            s_results[s_active].startedNs = ns;
+            s_check_initialized = imu_check_init(
+                s_active, s_plan.probeMaskPresent, s_plan.probeMask,
+                s_plan.flightCalMask, ns);
+            if (!s_check_initialized) {
+                finish_active(IMU_CMD_STATE_RECOVERY_FAILED,
+                              IMU_CMD_REASON_SESSION_UNUSABLE,
+                              true, &s_results[s_active].sub);
+                return false;
+            }
+        }
+
+        memset(&event, 0, sizeof(event));
+        event.type = IMU_CHECK_EVENT_TICK;
+        event.monotonicNs = ns;
+        return imu_check_post(&event);
+    }
 
     if (s_active == IMU_CMD_ID_NONE) {
         return true;
@@ -594,18 +657,6 @@ static bool post_tick(uint64_t ns)
         return true;
     }
     elapsed = ns - s_stage_start_ns;
-
-    if (s_active == IMU_CMD_ID_PROBE) {
-        limit = duration_ns(s_plan.probeDeadlineS);
-        if (elapsed >= limit) {
-            ImuCmdSubResults_t sub = s_results[s_active].sub;
-
-            sub.probeTimedOut = true;
-            finish_active(IMU_CMD_STATE_TIMED_OUT, IMU_CMD_REASON_PROBE_DEADLINE,
-                          false, &sub);
-        }
-        return true;
-    }
 
     if (s_active == IMU_CMD_ID_ACQUISITION) {
         limit = duration_ns(s_plan.acquisitionDurationS);
@@ -630,6 +681,9 @@ static bool post_terminal(const ImuCmdStageTerminal_t *term_in)
     if (is_tare_family(s_active)) {
         return false;
     }
+    if (is_check_family(s_active)) {
+        return false;
+    }
     if (term_in->state == IMU_CMD_STATE_NOT_REQUESTED ||
         term_in->state == IMU_CMD_STATE_RUNNING) {
         return false;
@@ -637,9 +691,6 @@ static bool post_terminal(const ImuCmdStageTerminal_t *term_in)
 
     term = *term_in;
     s_results[s_active].sub = term.sub;
-    if (term.identity == IMU_CMD_ID_PROBE && term.sub.probeMaskActualValid) {
-        /* actual mask is stored in sub; requested already on the result */
-    }
     finish_active(term.state, term.reason, term.warningRequired, &term.sub);
     return true;
 }
@@ -728,6 +779,18 @@ void imu_cmd_service(void)
         return;
     }
 
+    if (is_check_family(s_active)) {
+        if (!s_check_initialized) {
+            return;
+        }
+        imu_check_service();
+       if (!imu_check_complete()) {
+            return;
+        }
+        adopt_check_result();
+        return;
+    }
+
     if (s_active != IMU_CMD_ID_NONE) {
         return;
     }
@@ -774,9 +837,6 @@ bool imu_cmd_get_result(ImuCmdIdentity_t id, ImuCmdResult_t *out)
 
 bool imu_cmd_get_progress(ImuCmdProgress_t *out)
 {
-    uint64_t limit;
-    uint64_t elapsed;
-
     if (!s_inited || out == NULL) {
         return false;
     }
@@ -799,17 +859,19 @@ bool imu_cmd_get_progress(ImuCmdProgress_t *out)
         return true;
     }
 
+    if (is_check_family(s_active) && s_check_initialized) {
+        if (!imu_check_get_progress(out)) {
+            return false;
+       }
+        out->version = IMU_CMD_PROGRESS_VERSION;
+        out->active = s_active;
+        return true;
+    }
+
     memset(out, 0, sizeof(*out));
     out->version = IMU_CMD_PROGRESS_VERSION;
     out->active = s_active;
     out->requiredAction = s_action;
-    if (s_active == IMU_CMD_ID_PROBE && s_stage_start_ns != 0ull) {
-        limit = duration_ns(s_plan.probeDeadlineS);
-        elapsed = (s_last_ns >= s_stage_start_ns) ? (s_last_ns - s_stage_start_ns)
-                                                  : 0ull;
-        out->probeTimeValid = true;
-        out->probeRemainingNs = (elapsed >= limit) ? 0ull : (limit - elapsed);
-    }
     return true;
 }
 

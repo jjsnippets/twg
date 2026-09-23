@@ -37,6 +37,13 @@ static bool s_calFactsValid;
 static bool s_testSaveDcdOk = true;
 static bool s_testReopenOk = true;
 static ImuTareFacts_t s_tareFacts;
+static ImuCheckFacts_t s_checkFacts;
+static bool s_testConfigureCheckOk = true;
+static bool s_testCheckReadbackAvailable = true;
+static uint8_t s_testCheckReadbackMask;
+static bool s_testCheckReadbackOverride;
+static ImuSessionTestReportConfig_t
+s_reportConfig[IMU_SESSION_TEST_REPORT_COUNT];
 static bool s_testConfigureTareOk = true;
 static bool s_testTareNowOk = true;
 static bool s_testPersistTareOk = true;
@@ -111,12 +118,20 @@ static void clear_tare_facts(void)
     s_tareEventSeq = seq;
 }
 
+static void clear_check_facts(void)
+{
+    memset(&s_checkFacts, 0, sizeof(s_checkFacts));
+    s_checkFacts.version = IMU_CHECK_FACTS_VERSION;
+    s_checkFacts.configurationEpoch = sEpoch;
+}
+
 static void increment_epoch(void)
 {
     sEpoch += 1u;
     clear_validity();
     clear_cal_facts();
     clear_tare_facts();
+    clear_check_facts();
     sync_header();
 }
 
@@ -143,7 +158,102 @@ static bool configure_sensor(sh2_SensorId_t sensorId)
     cfg.reportInterval_us = SENSOR_INTERVAL_US;
     cfg.batchInterval_us = 0;
 
+    /* This is an attempted report configuration, not receipt evidence. */
+    if (sensorId == SH2_ROTATION_VECTOR) {
+        s_reportConfig[IMU_SESSION_TEST_REPORT_RV].attempted = true;
+        s_reportConfig[IMU_SESSION_TEST_REPORT_RV].reportIntervalUs =
+            SENSOR_INTERVAL_US;
+        s_reportConfig[IMU_SESSION_TEST_REPORT_RV].batchIntervalUs = 0u;
+    } else if (sensorId == SH2_LINEAR_ACCELERATION) {
+        s_reportConfig[IMU_SESSION_TEST_REPORT_LINEAR].attempted = true;
+        s_reportConfig[IMU_SESSION_TEST_REPORT_LINEAR].reportIntervalUs =
+            SENSOR_INTERVAL_US;
+        s_reportConfig[IMU_SESSION_TEST_REPORT_LINEAR].batchIntervalUs = 0u;
+    } else if (sensorId == SH2_GYROSCOPE_CALIBRATED) {
+        s_reportConfig[IMU_SESSION_TEST_REPORT_GYRO].attempted = true;
+        s_reportConfig[IMU_SESSION_TEST_REPORT_GYRO].reportIntervalUs =
+            SENSOR_INTERVAL_US;
+        s_reportConfig[IMU_SESSION_TEST_REPORT_GYRO].batchIntervalUs = 0u;
+    }
+
     return sh2_setSensorConfig(sensorId, &cfg) == SH2_OK;
+}
+
+static void note_check_report(ImuSessionTestReportId_t report,
+                              uint32_t intervalUs)
+{
+    s_reportConfig[report].attempted = true;
+    s_reportConfig[report].reportIntervalUs = intervalUs;
+    s_reportConfig[report].batchIntervalUs = 0u;
+}
+
+/* Zero interval is the SH-2 disable request; batch stays zero. */
+static bool set_check_report(sh2_SensorId_t sensorId,
+                             ImuSessionTestReportId_t report,
+                             uint32_t intervalUs)
+{
+    sh2_SensorConfig_t cfg;
+
+    note_check_report(report, intervalUs);
+    if (!sHal) {
+        return true;
+    }
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.reportInterval_us = intervalUs;
+    cfg.batchInterval_us = 0u;
+    return sh2_setSensorConfig(sensorId, &cfg) == SH2_OK;
+}
+
+/*
+ * Configure the diagnostic set explicitly; do not reuse CALIBRATION mode.
+ * Stage the hardware first and publish the new reader epoch only after the
+ * report set and sh2_setCalConfig have succeeded.
+ */
+static bool apply_hardware_check(uint8_t mask,
+                                 ImuSessionCheckConfigResult_t *out)
+{
+    uint8_t readback = 0u;
+
+    if (!s_testConfigureCheckOk) {
+        return false;
+    }
+    if (!set_check_report(SH2_LINEAR_ACCELERATION,
+                          IMU_SESSION_TEST_REPORT_LINEAR, 0u) ||
+        !set_check_report(SH2_MAGNETIC_FIELD_CALIBRATED,
+                          IMU_SESSION_TEST_REPORT_MAG,
+                          IMU_CHECK_MAG_INTERVAL_US) ||
+        !set_check_report(SH2_ACCELEROMETER,
+                          IMU_SESSION_TEST_REPORT_ACCEL,
+                          IMU_CHECK_SLOW_INTERVAL_US) ||
+        !set_check_report(SH2_GYROSCOPE_CALIBRATED,
+                          IMU_SESSION_TEST_REPORT_GYRO,
+                          IMU_CHECK_SLOW_INTERVAL_US) ||
+        !set_check_report(SH2_ROTATION_VECTOR,
+                          IMU_SESSION_TEST_REPORT_RV,
+                          IMU_CHECK_SLOW_INTERVAL_US)) {
+        return false;
+    }
+
+    if (sHal) {
+        if (sh2_setCalConfig(mask) != SH2_OK) {
+            return false;
+        }
+        out->actualMaskValid = sh2_getCalConfig(&readback) == SH2_OK;
+    } else {
+        out->actualMaskValid = s_testCheckReadbackAvailable;
+        readback = s_testCheckReadbackOverride
+                 ? s_testCheckReadbackMask : mask;
+    }
+
+    if (out->actualMaskValid) {
+        out->actualMask = readback;
+        s_calMask = readback;
+    } else {
+        /* Existing policy getter may hold an applied/requested estimate.
+         * Only out->actualMaskValid may assert observed readback. */
+        s_calMask = mask;
+    }
+    return true;
 }
 
 static bool configure_sensor_interval(sh2_SensorId_t sensorId, uint32_t intervalUs)
@@ -226,11 +336,24 @@ static bool apply_hardware_production(uint8_t flightCalMask)
         if (!s_testProductionOk) {
             return false;
         }
+        /* Model the exact production report set in the host trace. */
+        note_check_report(IMU_SESSION_TEST_REPORT_MAG, 0u);
+        note_check_report(IMU_SESSION_TEST_REPORT_ACCEL, 0u);
+        note_check_report(IMU_SESSION_TEST_REPORT_RV, SENSOR_INTERVAL_US);
+        note_check_report(IMU_SESSION_TEST_REPORT_LINEAR,
+                          SENSOR_INTERVAL_US);
+        note_check_report(IMU_SESSION_TEST_REPORT_GYRO,
+                          SENSOR_INTERVAL_US);
         s_calMask = flightCalMask;
         return true;
     }
 
-    if (!configure_sensor(SH2_ROTATION_VECTOR) ||
+    /* Disable diagnostic-only reports before restoring the 100 Hz set. */
+    if (!set_check_report(SH2_ACCELEROMETER,
+                          IMU_SESSION_TEST_REPORT_ACCEL, 0u) ||
+        !set_check_report(SH2_MAGNETIC_FIELD_CALIBRATED,
+                          IMU_SESSION_TEST_REPORT_MAG, 0u) ||
+        !configure_sensor(SH2_ROTATION_VECTOR) ||
         !configure_sensor(SH2_LINEAR_ACCELERATION) ||
         !configure_sensor(SH2_GYROSCOPE_CALIBRATED) ||
         sh2_setCalConfig(flightCalMask) != SH2_OK) {
@@ -244,6 +367,46 @@ static bool apply_hardware_production(uint8_t flightCalMask)
     }
 
     return true;
+}
+
+static void adopt_check_facts_from_event(const sh2_SensorValue_t *value,
+                                         uint64_t hostNs)
+{
+    if (value == NULL || sEpoch == IMU_EPOCH_NONE) {
+        return;
+    }
+
+    s_checkFacts.version = IMU_CHECK_FACTS_VERSION;
+    s_checkFacts.configurationEpoch = sEpoch;
+    switch (value->sensorId) {
+    case SH2_ACCELEROMETER:
+        s_checkFacts.haveAccel = true;
+        s_checkFacts.accelHostDecodeNs = hostNs;
+        s_checkFacts.accelStatus = value->status;
+        break;
+    case SH2_GYROSCOPE_CALIBRATED:
+        s_checkFacts.haveGyro = true;
+        s_checkFacts.gyroHostDecodeNs = hostNs;
+        s_checkFacts.gyroStatus = value->status;
+        break;
+    case SH2_MAGNETIC_FIELD_CALIBRATED:
+        s_checkFacts.haveMag = true;
+        s_checkFacts.magHostDecodeNs = hostNs;
+        s_checkFacts.magStatus = value->status;
+        s_checkFacts.magXuT = value->un.magneticField.x;
+        s_checkFacts.magYuT = value->un.magneticField.y;
+        s_checkFacts.magZuT = value->un.magneticField.z;
+        break;
+    case SH2_ROTATION_VECTOR:
+        s_checkFacts.haveRv = true;
+        s_checkFacts.rvHostDecodeNs = hostNs;
+        s_checkFacts.rvStatus = value->status;
+        s_checkFacts.rvErrRad = value->un.rotationVector.accuracy;
+        break;
+    default:
+        return;
+    }
+    s_checkFacts.valid = true;
 }
 
 static bool reopen_hardware(void)
@@ -461,7 +624,13 @@ static void sensorCallback(void *cookie, sh2_SensorEvent_t *pEvent)
 
     memset(&event, 0, sizeof(event));
     hostNs = monotonic_ns();
-    
+
+    if (sState == IMU_READER_STATE_CHECK ||
+        sState == IMU_READER_STATE_PROBE) {
+        adopt_check_facts_from_event(&value, hostNs);
+        return; /* Diagnostic data must not enter production R2. */
+    }
+
     if (sState == IMU_READER_STATE_CALIBRATION) {
       switch (value.sensorId) {
         case SH2_MAGNETIC_FIELD_CALIBRATED:
@@ -615,12 +784,61 @@ bool imu_session_configure_production(uint8_t flightCalMask)
     return true;
 }
 
+bool imu_session_configure_check(ImuSessionCheckMode_t mode, uint8_t mask,
+                                  ImuSessionCheckConfigResult_t *out)
+{
+    ImuSessionCheckConfigResult_t observed;
+    ImuReaderState_t target;
+
+    if (out == NULL) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    if (sState != IMU_READER_STATE_CONFIGURING ||
+        (mode != IMU_SESSION_CHECK_MODE_CHECK &&
+         mode != IMU_SESSION_CHECK_MODE_PROBE) ||
+        (mode == IMU_SESSION_CHECK_MODE_CHECK && mask != 0u)) {
+        return false;
+    }
+
+    memset(&observed, 0, sizeof(observed));
+    if (!apply_hardware_check(mask, &observed)) {
+        /* SH-2 calls may already have changed reports: not an actionable
+         * diagnostic mode, and no successful entry epoch is claimed. */
+        enter_faulted();
+        return false;
+    }
+
+    target = mode == IMU_SESSION_CHECK_MODE_CHECK
+           ? IMU_READER_STATE_CHECK : IMU_READER_STATE_PROBE;
+    increment_epoch();
+    sHardwareConfigured = true;
+    sState = target;
+    sync_header();
+    *out = observed;
+
+    /* Readable mismatch is failure, but the configured session remains
+     * actionable: the machine can request production restoration. */
+    return !observed.actualMaskValid || observed.actualMask == mask;
+}
+
+bool imu_session_get_check_facts(ImuCheckFacts_t *out)
+{
+    if (out == NULL || !sHasMailbox) {
+        return false;
+    }
+    *out = s_checkFacts;
+    return true;
+}
+
 bool imu_session_restore_production(uint8_t flightCalMask)
 {
     bool hadConfiguredReports;
 
     if (sState != IMU_READER_STATE_CALIBRATION &&
         sState != IMU_READER_STATE_TARE &&
+        sState != IMU_READER_STATE_CHECK &&
+        sState != IMU_READER_STATE_PROBE &&
         sState != IMU_READER_STATE_CONFIGURING) {
         return false;
     }
@@ -749,6 +967,11 @@ void imu_session_test_reset(void)
     memset(&s_calFacts, 0, sizeof(s_calFacts));
     s_calFacts.version = IMU_CAL_FACTS_VERSION;
     s_testConfigureTareOk = true;
+    s_testConfigureCheckOk = true;
+    s_testCheckReadbackAvailable = true;
+    s_testCheckReadbackMask = 0u;
+    s_testCheckReadbackOverride = false;
+    memset(s_reportConfig, 0, sizeof(s_reportConfig));
     s_testTareNowOk = true;
     s_testPersistTareOk = true;
     s_testClearTareOk = true;
@@ -758,8 +981,87 @@ void imu_session_test_reset(void)
     s_tareEventSeq = 0ull;
     zero_mailbox();
     clear_tare_facts();
+    clear_check_facts();
     sHasMailbox = false;
     sSnapshot.readerState = IMU_READER_STATE_CLOSED;
+}
+
+void imu_session_test_set_configure_check_result(bool success)
+{
+    s_testConfigureCheckOk = success;
+}
+
+void imu_session_test_set_check_readback(bool available, uint8_t actualMask)
+{
+    s_testCheckReadbackAvailable = available;
+    s_testCheckReadbackMask = actualMask;
+    s_testCheckReadbackOverride = true;
+}
+
+void imu_session_test_inject_check_report(ImuSessionTestReportId_t report,
+                                          uint8_t status,
+                                          uint64_t hostDecodeNs,
+                                          float rvErrRad,
+                                          float magX, float magY, float magZ)
+{
+    if (sState != IMU_READER_STATE_CHECK &&
+        sState != IMU_READER_STATE_PROBE) {
+        return;
+    }
+    s_checkFacts.version = IMU_CHECK_FACTS_VERSION;
+    s_checkFacts.configurationEpoch = sEpoch;
+    switch (report) {
+    case IMU_SESSION_TEST_REPORT_ACCEL:
+        s_checkFacts.haveAccel = true;
+        s_checkFacts.accelHostDecodeNs = hostDecodeNs;
+        s_checkFacts.accelStatus = status;
+        break;
+    case IMU_SESSION_TEST_REPORT_GYRO:
+        s_checkFacts.haveGyro = true;
+        s_checkFacts.gyroHostDecodeNs = hostDecodeNs;
+        s_checkFacts.gyroStatus = status;
+        break;
+    case IMU_SESSION_TEST_REPORT_MAG:
+        s_checkFacts.haveMag = true;
+        s_checkFacts.magHostDecodeNs = hostDecodeNs;
+        s_checkFacts.magStatus = status;
+        s_checkFacts.magXuT = magX;
+        s_checkFacts.magYuT = magY;
+        s_checkFacts.magZuT = magZ;
+        break;
+    case IMU_SESSION_TEST_REPORT_RV:
+        s_checkFacts.haveRv = true;
+        s_checkFacts.rvHostDecodeNs = hostDecodeNs;
+        s_checkFacts.rvStatus = status;
+        s_checkFacts.rvErrRad = rvErrRad;
+        break;
+    default:
+        return;
+    }
+    s_checkFacts.valid = true;
+}
+
+void imu_session_test_inject_check_facts(const ImuCheckFacts_t *facts)
+{
+    if (facts == NULL ||
+        (sState != IMU_READER_STATE_CHECK &&
+         sState != IMU_READER_STATE_PROBE)) {
+        return;
+    }
+    /* Deliberately do not fix version or epoch: adapter negative tests
+     * must be able to observe and reject malformed mailbox snapshots. */
+    s_checkFacts = *facts;
+}
+
+bool imu_session_test_get_report_config(ImuSessionTestReportId_t report,
+                                        ImuSessionTestReportConfig_t *out)
+{
+    if (out == NULL || (unsigned)report >=
+                       (unsigned)IMU_SESSION_TEST_REPORT_COUNT) {
+        return false;
+    }
+    *out = s_reportConfig[report];
+    return true;
 }
 
 bool imu_session_test_open(bool success)

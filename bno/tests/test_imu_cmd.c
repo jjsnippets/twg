@@ -11,8 +11,9 @@
  * Phase 4 / 5.2 / 6.1 generic coordinator oracles: family K plus T
  * sub-results and G plan/stop/version checks. Calibration and the tare
  * family are real stages; STAGE_TERMINAL remains only for DCD-clear,
- * check, and probe. Tare T01-T05 and K02 live in test_imu_tare.c /
- * test_imu_cmd_tare.c.
+ * check, or probe. Tare T01-T05 and K02 live in test_imu_tare.c /
+ * test_imu_cmd_tare.c; real check/probe behavior lives in
+ * test_imu_cmd_check.c.
  * No SPI, no session, no sudo.
  */
 
@@ -128,38 +129,6 @@ static ImuCmdResult_t result_of(ImuCmdIdentity_t id)
     return r;
 }
 
-static bool finish_settle_acquire(const char *tid)
-{
-    ImuCmdEvent_t e;
-
-    imu_cmd_service();
-    if (active_id() != IMU_CMD_ID_SETTLE) {
-        fprintf(stderr, "FAIL %s: expected settle\n", tid);
-        g_fail++;
-        return false;
-    }
-    e = make_event(IMU_CMD_EVENT_SETTLE_DONE);
-    if (!imu_cmd_post(&e)) {
-        fprintf(stderr, "FAIL %s: settle done\n", tid);
-        g_fail++;
-        return false;
-    }
-    imu_cmd_service();
-    if (active_id() != IMU_CMD_ID_ACQUISITION) {
-        fprintf(stderr, "FAIL %s: expected acquire\n", tid);
-        g_fail++;
-        return false;
-    }
-    e = make_tick(T0);
-    (void)imu_cmd_post(&e);
-    e = make_tick(T0 + 10ull * NS_S);
-    (void)imu_cmd_post(&e);
-    check_state(IMU_CMD_ID_ACQUISITION, IMU_CMD_STATE_SUCCEEDED, tid,
-                "acquire succeeded");
-    check(imu_cmd_plan_complete(), tid, "plan complete");
-    return true;
-}
-
 static void test_k01_default_plan_skips_commands_and_acquires(void)
 {
     ImuCmdPlan_t plan;
@@ -170,8 +139,8 @@ static void test_k01_default_plan_skips_commands_and_acquires(void)
     check(imu_cmd_plan_acquire_default(&plan), "K01", "default plan");
     check(plan.version == IMU_CMD_PLAN_VERSION, "K01", "plan version macro");
     check(IMU_CMD_PLAN_VERSION == 2u, "K01", "plan version remains 2");
-    check(IMU_CMD_RESULT_VERSION == 3u, "K01", "result version 3");
-    check(IMU_CMD_PROGRESS_VERSION == 3u, "K01", "progress version 3");
+    check(IMU_CMD_RESULT_VERSION == 4u, "K01", "result version 4");
+    check(IMU_CMD_PROGRESS_VERSION == 4u, "K01", "progress version 4");
     check(plan.flightCalMask == 0u, "K01", "default flight mask 0");
     check(imu_cmd_init(&plan), "K01", "init");
 
@@ -182,7 +151,7 @@ static void test_k01_default_plan_skips_commands_and_acquires(void)
 
     imu_cmd_service();
     check(imu_cmd_get_progress(&prog), "K01", "progress read");
-    check(prog.version == IMU_CMD_PROGRESS_VERSION, "K01", "progress version 3");
+    check(prog.version == IMU_CMD_PROGRESS_VERSION, "K01", "progress version 4");
     check(prog.cal.phase == IMU_CMD_CAL_PHASE_NONE, "K01",
           "cal progress zero on settle");
     check(prog.tare.identity == IMU_CMD_ID_NONE, "K01",
@@ -198,6 +167,12 @@ static void test_k01_default_plan_skips_commands_and_acquires(void)
     check(prog.tare.rotationEventSequence == 0ull, "K01",
           "tare rotation sequence zero");
     check(!prog.tare.verificationEvidence, "K01", "tare verify evidence clear");
+    check(prog.check.identity == IMU_CMD_ID_NONE, "K01",
+          "check identity zero on settle");
+    check(prog.check.phase == IMU_CMD_CHECK_PHASE_NONE, "K01",
+          "check phase zero on settle");
+    check(!prog.check.deadlineValid && !prog.check.gatePassingNow &&
+          !prog.check.gateReached, "K01", "check progress zero on settle");
     check(active_id() == IMU_CMD_ID_SETTLE, "K01", "settle active");
     check(imu_cmd_request() == IMU_CMD_REQ_SETTLE, "K01", "settle request");
     check(!imu_cmd_do_not_acquire(), "K01", "may acquire");
@@ -277,64 +252,6 @@ static void test_k04_dcd_recovery_failed_stops_plan(void)
     check_state(IMU_CMD_ID_ACQUISITION, IMU_CMD_STATE_NOT_REQUESTED, "K04",
                 "no acquire");
     check(imu_cmd_request() == IMU_CMD_REQ_STOP_PLAN, "K04", "stop plan");
-}
-
-static void test_k05a_probe_deadline_times_out(void)
-{
-    ImuCmdPlan_t plan;
-    ImuCmdEvent_t e;
-    ImuCmdResult_t r;
-
-    imu_cmd_plan_clear(&plan);
-    plan.slot3 = IMU_CMD_ID_PROBE;
-    plan.probeMaskPresent = true;
-    plan.probeMask = 0x02;
-    plan.probeDeadlineS = IMU_CMD_PROBE_DEADLINE_S;
-    check(imu_cmd_init(&plan), "K05a", "init");
-
-    imu_cmd_service();
-    check(active_id() == IMU_CMD_ID_PROBE, "K05a", "probe running");
-    e = make_tick(T0);
-    check(imu_cmd_post(&e), "K05a", "arm");
-    e = make_tick(T0 + 10ull * NS_S);
-    check(imu_cmd_post(&e), "K05a", "10 s tick");
-    check_state(IMU_CMD_ID_PROBE, IMU_CMD_STATE_TIMED_OUT, "K05a", "timed_out");
-    check_reason(IMU_CMD_ID_PROBE, IMU_CMD_REASON_PROBE_DEADLINE, "K05a",
-                 "probe_deadline");
-    r = result_of(IMU_CMD_ID_PROBE);
-    check(r.sub.probeTimedOut, "K05a", "sub timed out");
-    check(!r.sub.probeOperatorEndedEarly, "K05a", "not operator q");
-    check(!imu_cmd_do_not_acquire(), "K05a", "probe continues");
-    (void)finish_settle_acquire("K05a");
-}
-
-static void test_k05b_probe_q_ends_early(void)
-{
-    ImuCmdPlan_t plan;
-    ImuCmdEvent_t e;
-    ImuCmdResult_t r;
-
-    imu_cmd_plan_clear(&plan);
-    plan.slot3 = IMU_CMD_ID_PROBE;
-    plan.probeMaskPresent = true;
-    plan.probeMask = 0x02;
-    check(imu_cmd_init(&plan), "K05b", "init");
-
-    imu_cmd_service();
-    e = make_tick(T0);
-    check(imu_cmd_post(&e), "K05b", "arm");
-    e = make_tick(T0 + 3ull * NS_S);
-    check(imu_cmd_post(&e), "K05b", "3 s");
-    check(active_id() == IMU_CMD_ID_PROBE, "K05b", "still probe");
-    e = make_event(IMU_CMD_EVENT_OPERATOR_Q);
-    check(imu_cmd_post(&e), "K05b", "q");
-    check_state(IMU_CMD_ID_PROBE, IMU_CMD_STATE_CANCELLED, "K05b", "cancelled");
-    check_reason(IMU_CMD_ID_PROBE, IMU_CMD_REASON_OPERATOR_Q, "K05b",
-                 "operator_q");
-    r = result_of(IMU_CMD_ID_PROBE);
-    check(r.sub.probeOperatorEndedEarly, "K05b", "ended early");
-    check(!r.sub.probeTimedOut, "K05b", "not deadline");
-    (void)finish_settle_acquire("K05b");
 }
 
 static void test_k06_process_stop_abandons_dcd_clear(void)
@@ -464,8 +381,8 @@ static void test_g07_stale_result_and_progress_versions_are_not_current(void)
     ImuCmdResult_t result;
     ImuCmdProgress_t progress;
 
-    check(IMU_CMD_RESULT_VERSION != 2u, "G07", "result is not version 2");
-    check(IMU_CMD_PROGRESS_VERSION != 2u, "G07", "progress is not version 2");
+    check(IMU_CMD_RESULT_VERSION == 4u, "G07", "result is version 4");
+    check(IMU_CMD_PROGRESS_VERSION == 4u, "G07", "progress is version 4");
     check(imu_cmd_plan_acquire_default(&plan), "G07", "default plan");
     check(plan.version == 2u, "G07", "plan stays version 2");
     check(imu_cmd_init(&plan), "G07", "init");
@@ -482,6 +399,8 @@ static void test_g07_stale_result_and_progress_versions_are_not_current(void)
           "stale progress version 2 is not current");
     check(progress.tare.phase == IMU_CMD_TARE_PHASE_NONE, "G07",
           "tare progress remains zero-initialized");
+    check(progress.check.phase == IMU_CMD_CHECK_PHASE_NONE, "G07",
+          "check progress remains zero-initialized");
 }
 
 int main(void)
@@ -489,8 +408,6 @@ int main(void)
     test_k01_default_plan_skips_commands_and_acquires();
     test_k03_dcd_clear_fail_still_runs_tare();
     test_k04_dcd_recovery_failed_stops_plan();
-    test_k05a_probe_deadline_times_out();
-    test_k05b_probe_q_ends_early();
     test_k06_process_stop_abandons_dcd_clear();
     test_k07_acquisition_ignores_operator_q();
     test_g01_illegal_plans_rejected();
