@@ -7,6 +7,7 @@
 #include "app/imu_contract.h"
 
 #define IMU_CAL_FACTS_VERSION 1u
+#define IMU_TARE_FACTS_VERSION 1u
 
 #define IMU_CAL_MAG_RATE_HZ   50u
 #define IMU_CAL_SLOW_RATE_HZ  10u
@@ -33,6 +34,44 @@ typedef struct {
     float    magZuT;
     bool     valid;
 } ImuCalFacts_t;
+
+typedef enum {
+    IMU_SESSION_TARE_AXES_Z = 1,
+    IMU_SESSION_TARE_AXES_FULL
+} ImuSessionTareAxes_t;
+
+typedef enum {
+    IMU_SESSION_TARE_SUB_NOT_ATTEMPTED = 0,
+    IMU_SESSION_TARE_SUB_SUCCEEDED,
+    IMU_SESSION_TARE_SUB_FAILED
+} ImuSessionTareSubResult_t;
+
+typedef struct {
+    bool success;
+    ImuSessionTareSubResult_t clearActive;
+    ImuSessionTareSubResult_t clearSaved;
+} ImuSessionClearTareResult_t;
+
+/*
+ * Tare-only mailbox. Not part of production R2.
+ * rotationEventSequence is process-lifetime; validity is epoch-scoped.
+ */
+typedef struct {
+    uint8_t version;
+    uint32_t configurationEpoch;
+    uint64_t hostDecodeNs;
+    uint64_t rotationEventSequence;
+    uint8_t rotationStatus;
+    float quatI;
+    float quatJ;
+    float quatK;
+    float quatReal;
+    float yawRad;
+    float pitchRad;
+    float rollRad;
+    float oriErrRad;
+    bool valid;
+} ImuTareFacts_t;
 
 typedef enum {
     IMU_SESSION_REOPEN_RECOVERY = 0,
@@ -79,7 +118,8 @@ bool imu_session_configure_production(uint8_t flightCalMask);
 
 /*
  * Restores the normal 100 Hz production report set and flight calibration
- * policy after calibration. Legal from CALIBRATION and CONFIGURING only.
+ * policy after calibration or tare. Legal from CALIBRATION, TARE, and
+ * CONFIGURING only.
  * A restore after an already configured calibration/verification path
  * increments epoch once, clears validity and calibration-only facts, and
  * leaves the session in CONFIGURING. It never closes or recovers the session.
@@ -115,6 +155,40 @@ bool imu_session_begin_verification_reopen(void);
 
 /* Copy the calibration mailbox. False if out is NULL or never constructed. */
 bool imu_session_get_cal_facts(ImuCalFacts_t *out);
+
+/*
+ * Enables rotation vector at 100 Hz, batching off, cal mask 0x00.
+ * Legal from CONFIGURING only. Increments epoch once, clears validity
+ * and tare facts, enters TARE. Failure faults without claiming epoch.
+ */
+bool imu_session_configure_tare(void);
+
+/*
+ * sh2_setTareNow through the session owner.
+ * Z -> SH2_TARE_Z (0x04). Full -> X|Y|Z (0x07).
+ * Basis SH2_TARE_BASIS_ROTATION_VECTOR (0).
+ * Legal in TARE. Success increments epoch once and clears tare facts.
++ * Failure leaves epoch and TARE unchanged.
+ */
+bool imu_session_tare_now(ImuSessionTareAxes_t axes);
+
+/*
+ * sh2_persistTare through the session owner. Legal in TARE.
+ * Does not increment epoch.
+ */
+bool imu_session_persist_tare(void);
+
+/*
+ * sh2_clearTare through the session owner. Legal in TARE.
+ * One observed success maps both clearActive and clearSaved to SUCCEEDED.
+ * One failure maps both to FAILED. This backend cannot observe a partial
+ * clear. Success increments epoch once and clears tare facts.
+ */
+bool imu_session_clear_tare(ImuSessionClearTareResult_t *out);
+
+/* Copy the tare mailbox. False if out is NULL or never constructed. */
+bool imu_session_get_tare_facts(ImuTareFacts_t *out);
+
 
 /*
  * CONFIGURING -> SETTLING. Epoch unchanged. Samples may decode but are
@@ -182,6 +256,14 @@ bool imu_session_test_force_state(ImuReaderState_t state);
 void imu_session_test_inject_cal_facts(const ImuCalFacts_t *facts);
 void imu_session_test_set_save_dcd_result(bool success);
 void imu_session_test_set_reopen_result(bool success);
+void imu_session_test_inject_tare_facts(const ImuTareFacts_t *facts);
+void imu_session_test_set_configure_tare_result(bool success);
+void imu_session_test_set_tare_now_result(bool success);
+void imu_session_test_set_persist_tare_result(bool success);
+void imu_session_test_set_clear_tare_result(bool success);
+uint8_t imu_session_test_last_tare_axes(void);
+uint8_t imu_session_test_last_tare_basis(void);
+bool imu_session_test_have_last_tare_now(void);
 void imu_session_test_set_production_result(bool success);
 bool imu_session_test_recovery_observed(void);
 uint32_t imu_session_test_recovery_attempt_count(void);

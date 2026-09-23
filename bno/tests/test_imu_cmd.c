@@ -8,10 +8,12 @@
 #include "app/imu_cmd.h"
 
 /*
- * Phase 4 / 5.2 generic coordinator oracles: family K plus T sub-results
- * and G plan/stop checks. Calibration is no longer completed through
- * STAGE_TERMINAL; that seam remains only for unmigrated stages.
- * No SPI, no session, no sudo, no imu_cal driving.
+ * Phase 4 / 5.2 / 6.1 generic coordinator oracles: family K plus T
+ * sub-results and G plan/stop/version checks. Calibration and the tare
+ * family are real stages; STAGE_TERMINAL remains only for DCD-clear,
+ * check, and probe. Tare T01-T05 and K02 live in test_imu_tare.c /
+ * test_imu_cmd_tare.c.
+ * No SPI, no session, no sudo.
  */
 
 static int g_fail;
@@ -167,6 +169,9 @@ static void test_k01_default_plan_skips_commands_and_acquires(void)
 
     check(imu_cmd_plan_acquire_default(&plan), "K01", "default plan");
     check(plan.version == IMU_CMD_PLAN_VERSION, "K01", "plan version macro");
+    check(IMU_CMD_PLAN_VERSION == 2u, "K01", "plan version remains 2");
+    check(IMU_CMD_RESULT_VERSION == 3u, "K01", "result version 3");
+    check(IMU_CMD_PROGRESS_VERSION == 3u, "K01", "progress version 3");
     check(plan.flightCalMask == 0u, "K01", "default flight mask 0");
     check(imu_cmd_init(&plan), "K01", "init");
 
@@ -177,7 +182,22 @@ static void test_k01_default_plan_skips_commands_and_acquires(void)
 
     imu_cmd_service();
     check(imu_cmd_get_progress(&prog), "K01", "progress read");
-    check(prog.version == IMU_CMD_PROGRESS_VERSION, "K01", "progress version 2");
+    check(prog.version == IMU_CMD_PROGRESS_VERSION, "K01", "progress version 3");
+    check(prog.cal.phase == IMU_CMD_CAL_PHASE_NONE, "K01",
+          "cal progress zero on settle");
+    check(prog.tare.identity == IMU_CMD_ID_NONE, "K01",
+          "tare identity zero on settle");
+    check(prog.tare.requestedAxes == IMU_CMD_TARE_AXES_NONE, "K01",
+          "tare axes zero on settle");
+    check(prog.tare.phase == IMU_CMD_TARE_PHASE_NONE, "K01",
+          "tare phase zero on settle");
+    check(!prog.tare.confirmationPending, "K01", "tare confirm not pending");
+    check(!prog.tare.attitudeValid, "K01", "tare attitude not valid");
+    check(!prog.tare.attitudeEpochMatched, "K01", "tare epoch match clear");
+    check(prog.tare.rotationEpoch == 0u, "K01", "tare rotation epoch zero");
+    check(prog.tare.rotationEventSequence == 0ull, "K01",
+          "tare rotation sequence zero");
+    check(!prog.tare.verificationEvidence, "K01", "tare verify evidence clear");
     check(active_id() == IMU_CMD_ID_SETTLE, "K01", "settle active");
     check(imu_cmd_request() == IMU_CMD_REQ_SETTLE, "K01", "settle request");
     check(!imu_cmd_do_not_acquire(), "K01", "may acquire");
@@ -197,46 +217,6 @@ static void test_k01_default_plan_skips_commands_and_acquires(void)
                 "acquire");
     check(imu_cmd_plan_complete(), "K01", "complete");
     check(!imu_cmd_warning_required(), "K01", "no warning");
-}
-
-static void test_k02_tare_q_before_now_continues_to_check(void)
-{
-    ImuCmdPlan_t plan;
-    ImuCmdEvent_t e;
-    ImuCmdResult_t r;
-
-    imu_cmd_plan_clear(&plan);
-    plan.slot2 = IMU_CMD_ID_TARE;
-    plan.tareAxes = IMU_CMD_TARE_AXES_Z;
-    plan.persistTare = true;
-    plan.confirmTare = true;
-    plan.slot3 = IMU_CMD_ID_CHECK;
-    check(imu_cmd_init(&plan), "K02", "init");
-
-    imu_cmd_service();
-    check(active_id() == IMU_CMD_ID_TARE, "K02", "tare running");
-    check(active_action() == IMU_CMD_ACTION_ALIGN_AND_CONFIRM, "K02",
-          "align confirm");
-
-    e = make_event(IMU_CMD_EVENT_OPERATOR_Q);
-    check(imu_cmd_post(&e), "K02", "q before tare-now");
-    check_state(IMU_CMD_ID_TARE, IMU_CMD_STATE_CANCELLED, "K02", "tare cancelled");
-    check_reason(IMU_CMD_ID_TARE, IMU_CMD_REASON_OPERATOR_Q, "K02", "operator_q");
-    r = result_of(IMU_CMD_ID_TARE);
-    check(r.sub.tareNow == IMU_CMD_SUB_NOT_ATTEMPTED, "K02",
-          "no tare-now sub-result");
-    check(r.sub.persist == IMU_CMD_SUB_NOT_ATTEMPTED, "K02",
-          "no persist sub-result");
-
-    imu_cmd_service();
-    check(active_id() == IMU_CMD_ID_CHECK, "K02", "check still runs");
-    check(imu_cmd_request() == IMU_CMD_REQ_RUN_COMMAND, "K02", "run check");
-    check(imu_cmd_request_identity() == IMU_CMD_ID_CHECK, "K02", "check id");
-
-    e = make_event(IMU_CMD_EVENT_OPERATOR_Q);
-    check(imu_cmd_post(&e), "K02", "end check");
-    check_state(IMU_CMD_ID_CHECK, IMU_CMD_STATE_CANCELLED, "K02", "check ended");
-    (void)finish_settle_acquire("K02");
 }
 
 static void test_k03_dcd_clear_fail_still_runs_tare(void)
@@ -412,140 +392,6 @@ static void test_k07_acquisition_ignores_operator_q(void)
                 "duration end");
 }
 
-static void test_t01_tare_now_and_persist_succeed(void)
-{
-    ImuCmdPlan_t plan;
-    ImuCmdEvent_t e;
-    ImuCmdResult_t r;
-
-    imu_cmd_plan_clear(&plan);
-    plan.slot2 = IMU_CMD_ID_TARE;
-    plan.tareAxes = IMU_CMD_TARE_AXES_Z;
-    plan.persistTare = true;
-    check(imu_cmd_init(&plan), "T01", "init");
-    imu_cmd_service();
-    e = make_event(IMU_CMD_EVENT_OPERATOR_CONFIRM);
-    check(imu_cmd_post(&e), "T01", "confirm");
-    e = make_terminal(IMU_CMD_ID_TARE, IMU_CMD_STATE_SUCCEEDED,
-                      IMU_CMD_REASON_OK, false);
-    e.terminal.sub.tareNow = IMU_CMD_SUB_SUCCEEDED;
-    e.terminal.sub.persist = IMU_CMD_SUB_SUCCEEDED;
-    check(imu_cmd_post(&e), "T01", "terminal");
-    check_state(IMU_CMD_ID_TARE, IMU_CMD_STATE_SUCCEEDED, "T01", "tare ok");
-    r = result_of(IMU_CMD_ID_TARE);
-    check(r.sub.tareNow == IMU_CMD_SUB_SUCCEEDED, "T01", "tare-now");
-    check(r.sub.persist == IMU_CMD_SUB_SUCCEEDED, "T01", "persist");
-    check(!imu_cmd_warning_required(), "T01", "no warning");
-}
-
-static void test_t02_tare_now_failed_skips_persist(void)
-{
-    ImuCmdPlan_t plan;
-    ImuCmdEvent_t e;
-    ImuCmdResult_t r;
-
-    imu_cmd_plan_clear(&plan);
-    plan.slot2 = IMU_CMD_ID_TARE;
-    plan.tareAxes = IMU_CMD_TARE_AXES_FULL;
-    plan.persistTare = true;
-    check(imu_cmd_init(&plan), "T02", "init");
-    imu_cmd_service();
-    e = make_event(IMU_CMD_EVENT_OPERATOR_CONFIRM);
-    check(imu_cmd_post(&e), "T02", "confirm");
-    e = make_terminal(IMU_CMD_ID_TARE, IMU_CMD_STATE_FAILED,
-                      IMU_CMD_REASON_TARE_NOW_FAILED, true);
-    e.terminal.sub.tareNow = IMU_CMD_SUB_FAILED;
-    e.terminal.sub.persist = IMU_CMD_SUB_NOT_ATTEMPTED;
-    check(imu_cmd_post(&e), "T02", "tare-now fail");
-    check_state(IMU_CMD_ID_TARE, IMU_CMD_STATE_FAILED, "T02", "failed");
-    check_reason(IMU_CMD_ID_TARE, IMU_CMD_REASON_TARE_NOW_FAILED, "T02",
-                 "tare_now_failed");
-    r = result_of(IMU_CMD_ID_TARE);
-    check(r.sub.persist != IMU_CMD_SUB_SUCCEEDED, "T02", "persist not ok");
-}
-
-static void test_t03_tare_persist_failed_continues(void)
-{
-    ImuCmdPlan_t plan;
-    ImuCmdEvent_t e;
-    ImuCmdResult_t r;
-
-    imu_cmd_plan_clear(&plan);
-    plan.slot2 = IMU_CMD_ID_TARE;
-    plan.tareAxes = IMU_CMD_TARE_AXES_Z;
-    plan.persistTare = true;
-    check(imu_cmd_init(&plan), "T03", "init");
-    imu_cmd_service();
-    e = make_event(IMU_CMD_EVENT_OPERATOR_CONFIRM);
-    check(imu_cmd_post(&e), "T03", "confirm");
-    e = make_terminal(IMU_CMD_ID_TARE, IMU_CMD_STATE_SUCCEEDED,
-                      IMU_CMD_REASON_OK, false);
-    e.terminal.sub.tareNow = IMU_CMD_SUB_SUCCEEDED;
-    e.terminal.sub.persist = IMU_CMD_SUB_FAILED;
-    check(imu_cmd_post(&e), "T03", "persist fail");
-    check_state(IMU_CMD_ID_TARE, IMU_CMD_STATE_FAILED, "T03", "overall fail");
-    check_reason(IMU_CMD_ID_TARE, IMU_CMD_REASON_TARE_PERSIST_FAILED, "T03",
-                 "tare_persist_failed");
-    r = result_of(IMU_CMD_ID_TARE);
-    check(r.sub.tareNow == IMU_CMD_SUB_SUCCEEDED, "T03", "tare-now ok");
-    check(r.sub.persist == IMU_CMD_SUB_FAILED, "T03", "persist failed");
-    check(imu_cmd_warning_required(), "T03", "warning");
-    check(!imu_cmd_do_not_acquire(), "T03", "continue");
-    (void)finish_settle_acquire("T03");
-}
-
-static void test_t04_tare_clear_active_and_saved_succeed(void)
-{
-    ImuCmdPlan_t plan;
-    ImuCmdEvent_t e;
-    ImuCmdResult_t r;
-
-    imu_cmd_plan_clear(&plan);
-    plan.slot2 = IMU_CMD_ID_TARE_CLEAR;
-    plan.confirmTareClear = true;
-    check(imu_cmd_init(&plan), "T04", "init");
-    imu_cmd_service();
-    e = make_event(IMU_CMD_EVENT_OPERATOR_CONFIRM);
-    check(imu_cmd_post(&e), "T04", "confirm");
-    e = make_terminal(IMU_CMD_ID_TARE_CLEAR, IMU_CMD_STATE_SUCCEEDED,
-                      IMU_CMD_REASON_OK, false);
-    e.terminal.sub.clearActive = IMU_CMD_SUB_SUCCEEDED;
-    e.terminal.sub.clearSaved = IMU_CMD_SUB_SUCCEEDED;
-    check(imu_cmd_post(&e), "T04", "both clears");
-    check_state(IMU_CMD_ID_TARE_CLEAR, IMU_CMD_STATE_SUCCEEDED, "T04", "ok");
-    r = result_of(IMU_CMD_ID_TARE_CLEAR);
-    check(r.sub.clearActive == IMU_CMD_SUB_SUCCEEDED, "T04", "active");
-    check(r.sub.clearSaved == IMU_CMD_SUB_SUCCEEDED, "T04", "saved");
-}
-
-static void test_t05_tare_clear_partial_continues(void)
-{
-    ImuCmdPlan_t plan;
-    ImuCmdEvent_t e;
-    ImuCmdResult_t r;
-
-    imu_cmd_plan_clear(&plan);
-    plan.slot2 = IMU_CMD_ID_TARE_CLEAR;
-    check(imu_cmd_init(&plan), "T05", "init");
-    imu_cmd_service();
-    e = make_event(IMU_CMD_EVENT_OPERATOR_CONFIRM);
-    check(imu_cmd_post(&e), "T05", "confirm");
-    e = make_terminal(IMU_CMD_ID_TARE_CLEAR, IMU_CMD_STATE_SUCCEEDED,
-                      IMU_CMD_REASON_OK, false);
-    e.terminal.sub.clearActive = IMU_CMD_SUB_SUCCEEDED;
-    e.terminal.sub.clearSaved = IMU_CMD_SUB_FAILED;
-    check(imu_cmd_post(&e), "T05", "partial");
-    check_state(IMU_CMD_ID_TARE_CLEAR, IMU_CMD_STATE_FAILED, "T05", "failed");
-    check_reason(IMU_CMD_ID_TARE_CLEAR, IMU_CMD_REASON_TARE_CLEAR_PARTIAL,
-                 "T05", "partial reason");
-    r = result_of(IMU_CMD_ID_TARE_CLEAR);
-    check(r.sub.clearActive == IMU_CMD_SUB_SUCCEEDED, "T05", "active ok");
-    check(r.sub.clearSaved == IMU_CMD_SUB_FAILED, "T05", "saved fail");
-    check(imu_cmd_warning_required(), "T05", "warning");
-    check(!imu_cmd_do_not_acquire(), "T05", "continue");
-    (void)finish_settle_acquire("T05");
-}
-
 static void test_g01_illegal_plans_rejected(void)
 {
     ImuCmdPlan_t plan;
@@ -612,24 +458,45 @@ static void test_g06_stale_plan_version_rejected(void)
           "illegal plan");
 }
 
+static void test_g07_stale_result_and_progress_versions_are_not_current(void)
+{
+    ImuCmdPlan_t plan;
+    ImuCmdResult_t result;
+    ImuCmdProgress_t progress;
+
+    check(IMU_CMD_RESULT_VERSION != 2u, "G07", "result is not version 2");
+    check(IMU_CMD_PROGRESS_VERSION != 2u, "G07", "progress is not version 2");
+    check(imu_cmd_plan_acquire_default(&plan), "G07", "default plan");
+    check(plan.version == 2u, "G07", "plan stays version 2");
+    check(imu_cmd_init(&plan), "G07", "init");
+    check(imu_cmd_get_result(IMU_CMD_ID_SETTLE, &result), "G07",
+          "settle result");
+   check(result.version == IMU_CMD_RESULT_VERSION, "G07",
+          "fresh result version");
+    check(result.version != 2u, "G07",
+          "stale result version 2 is not current");
+    check(imu_cmd_get_progress(&progress), "G07", "progress");
+    check(progress.version == IMU_CMD_PROGRESS_VERSION, "G07",
+          "fresh progress version");
+    check(progress.version != 2u, "G07",
+          "stale progress version 2 is not current");
+    check(progress.tare.phase == IMU_CMD_TARE_PHASE_NONE, "G07",
+          "tare progress remains zero-initialized");
+}
+
 int main(void)
 {
     test_k01_default_plan_skips_commands_and_acquires();
-    test_k02_tare_q_before_now_continues_to_check();
     test_k03_dcd_clear_fail_still_runs_tare();
     test_k04_dcd_recovery_failed_stops_plan();
     test_k05a_probe_deadline_times_out();
     test_k05b_probe_q_ends_early();
     test_k06_process_stop_abandons_dcd_clear();
     test_k07_acquisition_ignores_operator_q();
-    test_t01_tare_now_and_persist_succeed();
-    test_t02_tare_now_failed_skips_persist();
-    test_t03_tare_persist_failed_continues();
-    test_t04_tare_clear_active_and_saved_succeed();
-    test_t05_tare_clear_partial_continues();
     test_g01_illegal_plans_rejected();
     test_g05_process_stop_preserves_prior();
     test_g06_stale_plan_version_rejected();
+    test_g07_stale_result_and_progress_versions_are_not_current();
 
     if (g_fail != 0) {
         fprintf(stderr, "test_imu_cmd: %d failure(s)\n", g_fail);

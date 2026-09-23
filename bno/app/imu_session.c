@@ -36,6 +36,15 @@ static uint8_t s_calMask;
 static bool s_calFactsValid;
 static bool s_testSaveDcdOk = true;
 static bool s_testReopenOk = true;
+static ImuTareFacts_t s_tareFacts;
+static bool s_testConfigureTareOk = true;
+static bool s_testTareNowOk = true;
+static bool s_testPersistTareOk = true;
+static bool s_testClearTareOk = true;
+static uint8_t s_lastTareAxes;
+static uint8_t s_lastTareBasis;
+static bool s_haveLastTareNow;
+static uint64_t s_tareEventSeq;
 static bool s_testProductionOk = true;
 static bool s_recoveryObserved;
 static uint32_t s_recoveryAttempts;
@@ -92,11 +101,22 @@ static void clear_cal_facts(void)
     s_calFactsValid = false;
 }
 
+static void clear_tare_facts(void)
+{
+    uint64_t seq = s_tareEventSeq;
+
+    memset(&s_tareFacts, 0, sizeof(s_tareFacts));
+    s_tareFacts.version = IMU_TARE_FACTS_VERSION;
+    s_tareFacts.configurationEpoch = sEpoch;
+    s_tareEventSeq = seq;
+}
+
 static void increment_epoch(void)
 {
     sEpoch += 1u;
     clear_validity();
     clear_cal_facts();
+    clear_tare_facts();
     sync_header();
 }
 
@@ -250,6 +270,54 @@ static bool reopen_hardware(void)
     }
 
     return true;
+}
+
+static bool apply_hardware_tare(void)
+{
+    sh2_SensorConfig_t off;
+    uint8_t readback = 0u;
+
+    memset(&off, 0, sizeof(off));
+    off.reportInterval_us = 0u;
+
+    if (!sHal) {
+        if (!s_testConfigureTareOk) {
+            return false;
+        }
+        s_calMask = 0u;
+        return true;
+    }
+
+    if (!configure_sensor(SH2_ROTATION_VECTOR) ||
+        sh2_setSensorConfig(SH2_LINEAR_ACCELERATION, &off) != SH2_OK ||
+        sh2_setSensorConfig(SH2_GYROSCOPE_CALIBRATED, &off) != SH2_OK ||
+        sh2_setSensorConfig(SH2_MAGNETIC_FIELD_CALIBRATED, &off) != SH2_OK ||
+        sh2_setCalConfig(0u) != SH2_OK) {
+        return false;
+    }
+
+    if (sh2_getCalConfig(&readback) == SH2_OK) {
+        s_calMask = readback;
+    } else {
+        s_calMask = 0u;
+    }
+    return true;
+}
+
+static bool map_tare_axes(ImuSessionTareAxes_t axes, uint8_t *out)
+{
+    if (out == NULL) {
+        return false;
+    }
+    if (axes == IMU_SESSION_TARE_AXES_Z) {
+        *out = SH2_TARE_Z;
+        return true;
+    }
+    if (axes == IMU_SESSION_TARE_AXES_FULL) {
+        *out = (uint8_t)(SH2_TARE_X | SH2_TARE_Y | SH2_TARE_Z);
+        return true;
+    }
+    return false;
 }
 
 static bool should_adopt(int idx, uint64_t seq, uint64_t hostDecodeNs)
@@ -407,6 +475,28 @@ static void sensorCallback(void *cookie, sh2_SensorEvent_t *pEvent)
       }
     }
 
+    if (sState == IMU_READER_STATE_TARE) {
+        if (value.sensorId == SH2_ROTATION_VECTOR) {
+            s_tareEventSeq += 1ull;
+            s_tareFacts.version = IMU_TARE_FACTS_VERSION;
+            s_tareFacts.configurationEpoch = sEpoch;
+            s_tareFacts.hostDecodeNs = hostNs;
+            s_tareFacts.rotationEventSequence = s_tareEventSeq;
+            s_tareFacts.rotationStatus = value.status;
+            s_tareFacts.quatI = value.un.rotationVector.i;
+            s_tareFacts.quatJ = value.un.rotationVector.j;
+            s_tareFacts.quatK = value.un.rotationVector.k;
+            s_tareFacts.quatReal = value.un.rotationVector.real;
+            s_tareFacts.oriErrRad = value.un.rotationVector.accuracy;
+            q_to_ypr(s_tareFacts.quatReal, s_tareFacts.quatI, 
+                     s_tareFacts.quatJ, s_tareFacts.quatK, 
+                     &s_tareFacts.yawRad, &s_tareFacts.pitchRad,
+                     &s_tareFacts.rollRad);
+            s_tareFacts.valid = true;
+        }
+        return;
+    }
+
     switch (value.sensorId) {
         case SH2_ROTATION_VECTOR: {
             const sh2_RotationVectorWAcc_t *rv = &value.un.rotationVector;
@@ -530,6 +620,7 @@ bool imu_session_restore_production(uint8_t flightCalMask)
     bool hadConfiguredReports;
 
     if (sState != IMU_READER_STATE_CALIBRATION &&
+        sState != IMU_READER_STATE_TARE &&
         sState != IMU_READER_STATE_CONFIGURING) {
         return false;
     }
@@ -657,7 +748,16 @@ void imu_session_test_reset(void)
     s_recoveryAttempts = 0u;
     memset(&s_calFacts, 0, sizeof(s_calFacts));
     s_calFacts.version = IMU_CAL_FACTS_VERSION;
+    s_testConfigureTareOk = true;
+    s_testTareNowOk = true;
+    s_testPersistTareOk = true;
+    s_testClearTareOk = true;
+    s_lastTareAxes = 0u;
+    s_lastTareBasis = 0u;
+    s_haveLastTareNow = false;
+    s_tareEventSeq = 0ull;
     zero_mailbox();
+    clear_tare_facts();
     sHasMailbox = false;
     sSnapshot.readerState = IMU_READER_STATE_CLOSED;
 }
@@ -798,4 +898,143 @@ bool imu_session_test_recovery_observed(void)
 uint32_t imu_session_test_recovery_attempt_count(void)
 {
     return s_recoveryAttempts;
+}
+
+bool imu_session_configure_tare(void)
+{
+    if (sState != IMU_READER_STATE_CONFIGURING) {
+        return false;
+    }
+    if (!apply_hardware_tare()) {
+        enter_faulted();
+        return false;
+    }
+    increment_epoch();
+    sHardwareConfigured = true;
+    sState = IMU_READER_STATE_TARE;
+    sync_header();
+    return true;
+}
+
+bool imu_session_tare_now(ImuSessionTareAxes_t axes)
+{
+    uint8_t mapped = 0u;
+
+    if (sState != IMU_READER_STATE_TARE || !map_tare_axes(axes, &mapped)) {
+        return false;
+    }
+
+    s_lastTareAxes = mapped;
+    s_lastTareBasis = (uint8_t)SH2_TARE_BASIS_ROTATION_VECTOR;
+    s_haveLastTareNow = true;
+
+    if (sHal) {
+        if (sh2_setTareNow(mapped, SH2_TARE_BASIS_ROTATION_VECTOR) != SH2_OK) {
+            return false;
+        }
+    } else if (!s_testTareNowOk) {
+        return false;
+    }
+
+    increment_epoch();
+    sState = IMU_READER_STATE_TARE;
+    sync_header();
+    return true;
+}
+
+bool imu_session_persist_tare(void)
+{
+    if (sState != IMU_READER_STATE_TARE) {
+        return false;
+    }
+    if (!sHal) {
+        return s_testPersistTareOk;
+    }
+    return sh2_persistTare() == SH2_OK;
+}
+
+bool imu_session_clear_tare(ImuSessionClearTareResult_t *out)
+{
+    bool ok;
+
+    if (out == NULL) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    out->clearActive = IMU_SESSION_TARE_SUB_NOT_ATTEMPTED;
+    out->clearSaved = IMU_SESSION_TARE_SUB_NOT_ATTEMPTED;
+
+    if (sState != IMU_READER_STATE_TARE) {
+        return false;
+    }
+
+    ok = sHal ? (sh2_clearTare() == SH2_OK) : s_testClearTareOk;
+    out->success = ok;
+    out->clearActive = ok ? IMU_SESSION_TARE_SUB_SUCCEEDED
+                          : IMU_SESSION_TARE_SUB_FAILED;
+    out->clearSaved = out->clearActive;
+    if (ok) {
+        increment_epoch();
+        sState = IMU_READER_STATE_TARE;
+        sync_header();
+    }
+    return ok;
+}
+
+bool imu_session_get_tare_facts(ImuTareFacts_t *out)
+{
+    if (out == NULL || !sHasMailbox) {
+        return false;
+    }
+    *out = s_tareFacts;
+    return true;
+}
+
+void imu_session_test_inject_tare_facts(const ImuTareFacts_t *facts)
+{
+    uint64_t seq;
+
+    if (facts == NULL) {
+        return;
+    }
+    seq = s_tareEventSeq;
+    s_tareFacts = *facts;
+    s_tareFacts.version = IMU_TARE_FACTS_VERSION;
+    s_tareFacts.configurationEpoch = sEpoch;
+    s_tareEventSeq = seq;
+}
+
+void imu_session_test_set_configure_tare_result(bool success)
+{
+    s_testConfigureTareOk = success;
+}
+
+void imu_session_test_set_tare_now_result(bool success)
+{
+    s_testTareNowOk = success;
+}
+
+void imu_session_test_set_persist_tare_result(bool success)
+{
+    s_testPersistTareOk = success;
+}
+
+void imu_session_test_set_clear_tare_result(bool success)
+{
+    s_testClearTareOk = success;
+}
+
+uint8_t imu_session_test_last_tare_axes(void)
+{
+    return s_lastTareAxes;
+}
+
+uint8_t imu_session_test_last_tare_basis(void)
+{
+    return s_lastTareBasis;
+}
+
+bool imu_session_test_have_last_tare_now(void)
+{
+    return s_haveLastTareNow;
 }

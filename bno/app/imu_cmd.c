@@ -1,5 +1,6 @@
 #include "imu_cmd.h"
 #include "app/imu_cal.h"
+#include "app/imu_tare.h"
 
 #include <string.h>
 
@@ -19,6 +20,7 @@ static bool s_confirmed;
 static uint64_t s_last_ns;
 static uint64_t s_stage_start_ns;
 static bool s_cal_initialized;
+static bool s_tare_initialized;
 static ImuCmdReason_t s_init_reason;
 static unsigned s_slot_done;
 
@@ -181,6 +183,7 @@ static void idle_request(void)
     s_confirmed = false;
     s_stage_start_ns = 0ull;
     s_cal_initialized = false;
+    s_tare_initialized = false;
 }
 
 static void complete_active_bookkeeping(void)
@@ -240,6 +243,7 @@ static void start_stage(ImuCmdIdentity_t id)
     s_active = id;
     s_confirmed = !needs_confirm(id);
     s_cal_initialized = false;
+    s_tare_initialized = false;
     s_action = action_for(id);
     s_stage_start_ns = 0ull;    // Duration windows arm on the first TICK of this stage.
     s_request_id = id;
@@ -299,6 +303,13 @@ static bool is_terminal_state(ImuCmdResultState_t state)
            state != IMU_CMD_STATE_RUNNING;
 }
 
+static bool is_tare_family(ImuCmdIdentity_t id)
+{
+    return id == IMU_CMD_ID_TARE ||
+           id == IMU_CMD_ID_TARE_CLEAR ||
+           id == IMU_CMD_ID_TARE_CHECK;
+}
+
 static void adopt_calibration_result(void)
 {
     ImuCmdResult_t result;
@@ -322,43 +333,27 @@ static void adopt_calibration_result(void)
     complete_active_bookkeeping();
 }
 
-static void apply_tare_rules(ImuCmdStageTerminal_t *term)
+static void adopt_tare_result(void)
 {
-    if (term->identity == IMU_CMD_ID_TARE) {
-        if (term->sub.tareNow != IMU_CMD_SUB_SUCCEEDED) {
-            term->state = IMU_CMD_STATE_FAILED;
-            if (term->reason == IMU_CMD_REASON_NONE ||
-                term->reason == IMU_CMD_REASON_OK) {
-                term->reason = IMU_CMD_REASON_TARE_NOW_FAILED;
-            }
-            return;
-        }
-        if (term->sub.persist != IMU_CMD_SUB_SUCCEEDED) {
-            term->state = IMU_CMD_STATE_FAILED;
-            term->reason = IMU_CMD_REASON_TARE_PERSIST_FAILED;
-            term->warningRequired = true;
-            return;
-        }
-        if (term->state == IMU_CMD_STATE_SUCCEEDED) {
-            term->reason = IMU_CMD_REASON_OK;
-        }
+    ImuCmdResult_t result;
+
+    if (!is_tare_family(s_active) || !s_tare_initialized) {
         return;
     }
 
-    if (term->identity == IMU_CMD_ID_TARE_CLEAR) {
-        if (term->sub.clearActive != IMU_CMD_SUB_SUCCEEDED ||
-            term->sub.clearSaved != IMU_CMD_SUB_SUCCEEDED) {
-            term->state = IMU_CMD_STATE_FAILED;
-            if (term->sub.clearActive == IMU_CMD_SUB_SUCCEEDED ||
-                term->sub.clearSaved == IMU_CMD_SUB_SUCCEEDED) {
-                term->reason = IMU_CMD_REASON_TARE_CLEAR_PARTIAL;
-            } else if (term->reason == IMU_CMD_REASON_NONE ||
-                       term->reason == IMU_CMD_REASON_OK) {
-                term->reason = IMU_CMD_REASON_TARE_CLEAR_FAILED;
-            }
-            term->warningRequired = true;
-        }
+    if (!imu_tare_get_result(&result) ||
+        result.version != IMU_CMD_RESULT_VERSION ||
+        result.identity != s_active ||
+        !is_terminal_state(result.state)) {
+        finish_active(IMU_CMD_STATE_RECOVERY_FAILED,
+                      IMU_CMD_REASON_SESSION_UNUSABLE,
+                      true,
+                      &s_results[s_active].sub);
+        return;
     }
+
+    s_results[s_active] = result;
+    complete_active_bookkeeping();
 }
 
 static uint64_t duration_ns(uint32_t seconds)
@@ -409,6 +404,7 @@ bool imu_cmd_init(const ImuCmdPlan_t *plan)
     s_last_ns = 0ull;
     s_stage_start_ns = 0ull;
     s_cal_initialized = false;
+    s_tare_initialized = false;
     s_slot_done = 0u;
 
     for (i = 0u; i < (unsigned)IMU_CMD_ID_COUNT; i++) {
@@ -456,6 +452,16 @@ static bool post_q(void)
         return imu_cal_post(&event);
     }
 
+    if (is_tare_family(s_active)) {
+        ImuTareEvent_t event;
+
+        if (!s_tare_initialized) {
+            return false;
+        }
+        memset(&event, 0, sizeof(event));
+        event.type = IMU_TARE_EVENT_OPERATOR_Q;
+        return imu_tare_post(&event);
+    }
     if (s_active == IMU_CMD_ID_NONE ||
         s_active == IMU_CMD_ID_SETTLE ||
         s_active == IMU_CMD_ID_ACQUISITION) {
@@ -482,6 +488,17 @@ static bool post_confirm(void)
         memset(&event, 0, sizeof(event));
         event.type = IMU_CAL_EVENT_OPERATOR_CONFIRM;
         return imu_cal_post(&event);
+    }
+
+    if (is_tare_family(s_active)) {
+        ImuTareEvent_t event;
+
+        if (!s_tare_initialized) {
+            return false;
+        }
+        memset(&event, 0, sizeof(event));
+        event.type = IMU_TARE_EVENT_OPERATOR_CONFIRM;
+        return imu_tare_post(&event);
     }
 
     if (s_active == IMU_CMD_ID_NONE || s_confirmed ||
@@ -540,6 +557,30 @@ static bool post_tick(uint64_t ns)
         return imu_cal_post(&event);
     }
 
+    if (is_tare_family(s_active)) {
+        ImuTareEvent_t event;
+
+        if (!s_tare_initialized) {
+            s_stage_start_ns = ns;
+            s_results[s_active].startedNs = ns;
+            s_tare_initialized = imu_tare_init(s_active, s_plan.tareAxes,
+                                               s_plan.flightCalMask, ns);
+           if (!s_tare_initialized) {
+                finish_active(IMU_CMD_STATE_RECOVERY_FAILED,
+                              IMU_CMD_REASON_SESSION_UNUSABLE,
+                              true,
+                              &s_results[s_active].sub);
+                return false;
+            }
+        }
+
+        memset(&event, 0, sizeof(event));
+        event.type = IMU_TARE_EVENT_TICK;
+        event.monotonicNs = ns;
+        return imu_tare_post(&event);
+    }
+
+
     if (s_active == IMU_CMD_ID_NONE) {
         return true;
     }
@@ -586,13 +627,15 @@ static bool post_terminal(const ImuCmdStageTerminal_t *term_in)
     if (s_active == IMU_CMD_ID_CALIBRATION) {
         return false;
     }
+    if (is_tare_family(s_active)) {
+        return false;
+    }
     if (term_in->state == IMU_CMD_STATE_NOT_REQUESTED ||
         term_in->state == IMU_CMD_STATE_RUNNING) {
         return false;
     }
 
     term = *term_in;
-    apply_tare_rules(&term);
     s_results[s_active].sub = term.sub;
     if (term.identity == IMU_CMD_ID_PROBE && term.sub.probeMaskActualValid) {
         /* actual mask is stored in sub; requested already on the result */
@@ -671,6 +714,20 @@ void imu_cmd_service(void)
         return;
     }
 
+    if (is_tare_family(s_active)) {
+        if (!s_tare_initialized) {
+            return;
+        }
+
+        imu_tare_service();
+        if (!imu_tare_complete()) {
+            return;
+        }
+
+        adopt_tare_result();
+        return;
+    }
+
     if (s_active != IMU_CMD_ID_NONE) {
         return;
     }
@@ -730,6 +787,15 @@ bool imu_cmd_get_progress(ImuCmdProgress_t *out)
         }
         out->version = IMU_CMD_PROGRESS_VERSION;
         out->active = IMU_CMD_ID_CALIBRATION;
+        return true;
+    }
+
+    if (is_tare_family(s_active) && s_tare_initialized) {
+        if (!imu_tare_get_progress(out)) {
+            return false;
+        }
+        out->version = IMU_CMD_PROGRESS_VERSION;
+        out->active = s_active;
         return true;
     }
 

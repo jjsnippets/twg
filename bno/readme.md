@@ -107,6 +107,8 @@ bno/
 │   ├── imu_cmd.c/.h         host-only stage coordinator (not linked into bno_app)
 │   ├── imu_cal.c/.h         host-only guided-calibration state machine (not linked into bno_app)
 │   ├── imu_cal_adapter.c/.h    session-backed request translator (not linked into bno_app)
+│   ├── imu_tare.c/.h        host-only tare-family state machine (not linked into bno_app)
+│   ├── imu_tare_adapter.c/.h   session-backed tare request translator (not linked into bno_app)
 │   ├── app_rt_policy.h      StartRT warn-vs-fatal policy (main-owned)
 │   ├── main.c               standalone bno_app loop/example
 │   ├── app_contract.h       leftover ImuSample_t version 3 (unused by bno_app)
@@ -175,12 +177,12 @@ production-restoration status, and terminal progress. It does not reduce that
 result to the old stub terminal representation.
 
 `IMU_CMD_EVENT_STAGE_TERMINAL` remains the host seam for DCD-clear, tare,
-tare-clear, tare-check, check, and probe. It is rejected while a real
-calibration stage is active, so an injected terminal cannot bypass
-calibration's restoration path. `q` remains ignored during settle and
-acquisition. Tare-now versus persist, and partial tare-clear, remain distinct
-sub-results. Generic coordinator coverage is in `tests/test_imu_cmd.c`;
-calibration composition coverage is in `tests/test_imu_cmd_cal.c`.
+check, and probe. It is rejected while a real calibration or tare-family
+stage is active, so an injected terminal cannot bypass restoration. `q`
+remains ignored during settle and acquisition. Tare-now versus persist, and
+active versus saved clear, remain distinct sub-results. Generic coordinator
+coverage is in `tests/test_imu_cmd.c`; calibration composition is in
+`tests/test_imu_cmd_cal.c`; tare composition is in `tests/test_imu_cmd_tare.c`.
 
 `app/imu_cal.c` is the host-only guided-calibration state machine used by the
 composed calibration stage. It does not own the SH-2 session, sleep, print,
@@ -317,6 +319,66 @@ The adapter is not a scheduler or command coordinator. `imu_cmd`, CLI,
 `main`, production settle/operational transitions, R9/CSV/logger,
 tare/check/probe, and `twg/integration` remain unchanged until a later
 contract review.
+
+### Phase 6 tare contract
+
+`app/imu_tare.c` is the host-only machine for `TARE`, `TARE_CLEAR`, and
+`TARE_CHECK`. It does not call `imu_session_*` or `sh2_*`, and it does not
+sleep, print, read stdin, or call `exit`. `imu_cmd` owns first-tick init,
+tick/`q`/confirm forwarding, `imu_tare_service()`, progress mirroring, and
+full-result adoption. Only `imu_tare_adapter` translates the five tare
+requests into `imu_session_*` calls. `bno_app` does not link or call any of
+these modules.
+
+Mandatory persistence: a successful normal tare is Z persist or full-axis
+persist. There is no RAM-only path. Tare-now and persist stay independent
+sub-results. Tare-now success plus persist failure is overall
+`FAILED` / `TARE_PERSIST_FAILED`, warning required, then continue if
+production restore succeeds.
+
+Axes: Z maps to `SH2_TARE_Z`; full maps to X|Y|Z. Both use the rotation-vector
+basis. Timing is tick-driven: 2 s settle after configure, then tare-now,
+persist, then 500 ms verification. Verification succeeds only when a valid
+rotation-vector fact arrives in the post-tare-now epoch. It does not apply a
+near-zero attitude threshold.
+
+Clear: `--tare-imu --clear` succeeds only if both active and saved clear
+ub-results succeed. The current session backend observes one
+`sh2_clearTare()` result and maps success to both sub-results succeeded, or
+failure to both failed. It cannot observe a partial clear. Mixed
+active/saved outcomes remain representable on the machine (`T05` in
+`tests/test_imu_tare.c`) so the contract is not collapsed.
+
+`q` before the first session mutation cancels with `NOT_ATTEMPTED`
+sub-results and no epoch change (`E08` / `N03` / `K02`). After configure has
+executed, `q` restores production before the cancelled result becomes
+terminal. `PROCESS_STOP` is coordinator-owned: the stage is
+`ABANDONED` / `PROCESS_STOP`, the plan stops, and the owner must not pump
+the adapter. Tare-check has no confirm and no deadline; `q` ends it as
+`CANCELLED` / `OPERATOR_Q` without a warning, after restore.
+
+uccessful restore reapplies the 100 Hz production report set and the
+immutable flight mask, increments epoch once, returns `CONFIGURING`, and is
+not recovery. Restore failure is `RECOVERY_FAILED` and inhibits acquisition.
+
+Owner-loop turn (do not reorder, do not add a second `imu_cmd_service()`):
+
+1. `imu_session_service()`
+2. Pump the adapter for the one active initialized composed command
+   (`CALIBRATION` → `imu_cal_adapter_pump()`, tare family →
+   `imu_tare_adapter_pump()`, otherwise none). Never pump both in one turn.
+3. Post the current `TICK` to `imu_cmd`
+4. Post at most one operator event
+5. `imu_cmd_service()` exactly once
+
+A request created in step 5 is pumped on step 2 of the next turn. Adapter
+`false` becomes `IMU_CMD_EVENT_SESSION_UNRESTORABLE`.
+
+Host IDs: T01–T05 in `tests/test_imu_tare.c`; E07/E08 and ST* in
+`tests/test_session_tare.c`; U01–U12 in `tests/test_imu_tare_adapter.c`;
+N01–N18 in `tests/test_imu_cmd_tare.c` (K02/K04/E07/E08 are traced there).
+These are host tests. They do not prove SPI hardware parity. `bno_orient`
+remains the exclusive-session regression oracle until a later parity phase.
 
 ### Continuous acquisition
 
@@ -523,6 +585,11 @@ that mismatch measurable later; `bno_app` still does not compute a publisher
 | `test_session_cal` | Calibration configure, DCD save, planned reopen, production restore, epoch/recovery accounting | Publisher freshness or CLI |
 | `test_imu_cal_adapter` | One-request-per-pump translation of the four `imu_cal` requests through `imu_session` | CLI, `main`, `imu_cmd` dispatch, hardware |
 | `test_imu_cmd_cal` | Host-only `imu_cmd` → `imu_cal` → `imu_cal_adapter` → `imu_session` composition, including successful calibration, `q` restoration, and unrecoverable adapter routing | SPI hardware, CLI, `main`, `bno_app` wiring, tare/check/probe, CSV |
+| `test_imu_tare` | Host-only tare/clear/check machine, T01–T05, settle/verify ticks | Hardware, CLI, `imu_session` execution |
+| `test_session_tare` | Configure/tare-now/persist/clear/restore epoch and state, E07/E08 | Publisher freshness or CLI |
+| `test_imu_tare_adapter` | One-request-per-pump translation of the five `imu_tare` requests | CLI, `main`, hardware |
+| `test_imu_cmd_tare` | Composed tare family, stub rejection, owner-loop order, N-family | SPI hardware, CLI, `main`, `bno_app` wiring, CSV |
+
 
 Build commands from `bno/`:
 
@@ -532,7 +599,8 @@ make tools      # app, calibration, orientation, validation, encoder bring-up
 make tests      # diagnostic binaries
 make test       # host: quad_decode, session_r1_epoch, realtime_start,
                 # rt_fallback_policy, imu_cmd, session_cal, imu_cal,
-                # imu_cal_adapter, imu_cmd_cal, scheduling audit
+                # imu_cal_adapter, imu_cmd_cal, session_tare, imu_tare,
+                # imu_tare_adapter, imu_cmd_tare, scheduling audit
 make clean      # remove build/ and bin/
 ```
 
@@ -552,12 +620,12 @@ Phase 5.2 completed host-only composition of `imu_cmd`, `imu_cal`, and
 production configure → 300 ms settle → 10 s print and does not link or call
 `imu_cmd`, `imu_cal`, or `imu_cal_adapter`.
 
-Phase 5 is complete. The next implementation phase is Phase 6 tare migration,
-which must begin with its own clarification and contract review. Unified CLI,
-stdin prompts, `main`-loop changes, `bno_app` wiring, check/probe machines,
-R9/CSV, and `twg/integration` remain later work. `bno_cal` and `bno_orient`
-remain exclusive-session regression oracles until hardware parity is
-demonstrated.
+Phase 6 completed host-only composition of the tare family through
+`imu_cmd` → `imu_tare` → `imu_tare_adapter` → `imu_session`. `bno_app`, CLI,
+and `main` remain unwired. The next implementation phase is Phase 7
+check/probe migration, not CLI, CSV, or `twg/integration`. `bno_cal` and
+`bno_orient` remain exclusive-session regression oracles. Host tests do not
+claim SPI hardware parity.
 
 Before the BNO reader is integrated with pressure acquisition, networking,
 video, or a GUI, the process-level publisher must still derive consumer-relative

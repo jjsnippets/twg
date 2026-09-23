@@ -10,18 +10,24 @@
  *
  * Plan version 2 adds flightCalMask as immutable flight/production
  * calibration policy. Default plans leave it 0x00. Calibration remains
- * a planned identity in this header; composition into imu_cal is a
- * later Phase 5.2 step. This header must not include imu_cal.
+ * composed through imu_cal. TARE, TARE_CLEAR, and TARE_CHECK are
+ * composed through imu_tare. STAGE_TERMINAL is rejected while those
+ * real stages are active. This header must not include imu_cal or
+ * imu_tare.
  *
- * bno_app does not link this module in Phase 5.2.
+ * R7/R8 versions 3 add tare-family progress on ImuCmdProgress_t.
+ * IMU_CMD_PLAN_VERSION remains 2; plan fields are unchanged.
+ * requiredAction stays in the common progress header.
+ *
+ * bno_app does not link this module in Phase 6.
  */
 
 #include <stdbool.h>
 #include <stdint.h>
 
 #define IMU_CMD_PLAN_VERSION           2u
-#define IMU_CMD_RESULT_VERSION         2u
-#define IMU_CMD_PROGRESS_VERSION       2u
+#define IMU_CMD_RESULT_VERSION         3u
+#define IMU_CMD_PROGRESS_VERSION       3u
 
 #define IMU_CMD_PROBE_DEADLINE_S       10u
 #define IMU_CMD_ACQUIRE_DEFAULT_S      10u
@@ -139,6 +145,46 @@ typedef struct {
 } ImuCmdCalProgress_t;
 
 typedef enum {
+    IMU_CMD_TARE_PHASE_NONE = 0,
+    IMU_CMD_TARE_PHASE_STARTUP,
+    IMU_CMD_TARE_PHASE_WAIT_CONFIRM,
+    IMU_CMD_TARE_PHASE_CONFIGURE,
+    IMU_CMD_TARE_PHASE_SETTLE,
+    IMU_CMD_TARE_PHASE_TARE_NOW,
+    IMU_CMD_TARE_PHASE_PERSIST,
+    IMU_CMD_TARE_PHASE_CLEAR,
+    IMU_CMD_TARE_PHASE_VERIFY,
+    IMU_CMD_TARE_PHASE_CHECK,
+    IMU_CMD_TARE_PHASE_RESTORE,
+    IMU_CMD_TARE_PHASE_COMPLETE
+} ImuCmdTarePhase_t;
+
+typedef struct {
+    ImuCmdIdentity_t identity;
+    ImuCmdTareAxes_t requestedAxes;
+    ImuCmdTarePhase_t phase;
+    uint64_t stateEntryNs;
+    uint64_t deadlineNs;
+    uint64_t remainingNs;
+    bool confirmationPending;
+    bool attitudeValid;
+    bool attitudeEpochMatched;
+    uint32_t rotationEpoch;
+    uint64_t rotationEventSequence;
+    uint64_t rotationHostDecodeNs;
+    float quatI;
+    float quatJ;
+    float quatK;
+    float quatReal;
+    float yawRad;
+    float pitchRad;
+    float rollRad;
+    float oriErrRad;
+    uint8_t rotationStatus;
+    bool verificationEvidence;
+} ImuCmdTareProgress_t;
+
+typedef enum {
     IMU_CMD_REQ_NONE = 0,
     IMU_CMD_REQ_RUN_COMMAND,
     IMU_CMD_REQ_SETTLE,
@@ -196,6 +242,7 @@ typedef struct {
     bool probeTimeValid;
     uint64_t probeRemainingNs;
     ImuCmdCalProgress_t cal;
+    ImuCmdTareProgress_t tare;
 } ImuCmdProgress_t;
 
 typedef struct {

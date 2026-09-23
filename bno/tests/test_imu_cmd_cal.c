@@ -599,8 +599,8 @@ static void test_m02_full_success_adopts_result_and_continues_to_tare(void)
     terminal.terminal.sub.tareNow = IMU_CMD_SUB_SUCCEEDED;
     terminal.terminal.sub.persist = IMU_CMD_SUB_SUCCEEDED;
 
-    check(imu_cmd_post(&terminal), "M02",
-          "unmigrated tare terminal remains accepted");
+    check(!imu_cmd_post(&terminal), "M02",
+          "composed tare rejects external terminal");
 }
 
 static void test_m03_operator_q_waits_for_restore_then_continues(void)

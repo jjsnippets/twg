@@ -15,7 +15,8 @@
 #
 # Targets:
 #   make                build bin/bno_app (default)
-#   make app            build bin/bno_app
+#   make app            build bin/bno_app (imu_session + main; no imu_cmd,
+#                       imu_cal, imu_tare, or adapters)
 #   make cal            build bin/bno_cal
 #   make orient         build bin/bno_orient
 #   make validate       build bin/bno_validate
@@ -25,7 +26,8 @@
 #   make test           host tests: quad_decode, session_r1_epoch,
 #                       realtime_start, rt_fallback_policy, imu_cmd,
 #                       session_cal, imu_cal, imu_cal_adapter, imu_cmd_cal,
-#                       scheduling audit
+#                       session_tare, imu_tare, imu_tare_adapter,
+#                       imu_cmd_tare, scheduling audit
 #   make all            build all tools and test binaries
 #   make clean          remove build/ and bin/
 #
@@ -93,9 +95,13 @@ TESTRTSTARTSRC      := $(RTDIR)/test_realtime_start.c
 TESTRTFALLBACKSRC   := $(TESTDIR)/test_rt_fallback_policy.c
 TESTCMDSRC          := $(TESTDIR)/test_imu_cmd.c
 TESTCMDCALSRC       := $(TESTDIR)/test_imu_cmd_cal.c
+TESTCMDTARESRC      := $(TESTDIR)/test_imu_cmd_tare.c
 TESTSESSIONCALSRC   := $(TESTDIR)/test_session_cal.c
+TESTTARESRC         := $(TESTDIR)/test_imu_tare.c
+TESTTAREADAPTERSRC  := $(TESTDIR)/test_imu_tare_adapter.c
 TESTCALSRC          := $(TESTDIR)/test_imu_cal.c
 TESTCALADAPTERSRC   := $(TESTDIR)/test_imu_cal_adapter.c
+TESTSESSIONTARESRC  := $(TESTDIR)/test_session_tare.c
 
 .PHONY: default all app cal orient validate bringup tools tests test clean
 
@@ -151,7 +157,9 @@ test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_realtime_start $(BINDIR)/test_rt_fallback_policy \
 	$(BINDIR)/test_imu_cmd $(BINDIR)/test_session_cal \
 	$(BINDIR)/test_imu_cal $(BINDIR)/test_imu_cal_adapter \
-	$(BINDIR)/test_imu_cmd_cal
+	$(BINDIR)/test_imu_cmd_cal $(BINDIR)/test_session_tare \
+	$(BINDIR)/test_imu_tare $(BINDIR)/test_imu_tare_adapter \
+	$(BINDIR)/test_imu_cmd_tare
 	$(BINDIR)/test_quad_decode
 	$(BINDIR)/test_session_r1_epoch
 	$(BINDIR)/test_realtime_start
@@ -161,6 +169,10 @@ test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_imu_cal
 	$(BINDIR)/test_imu_cal_adapter
 	$(BINDIR)/test_imu_cmd_cal
+	$(BINDIR)/test_session_tare
+	$(BINDIR)/test_imu_tare
+	$(BINDIR)/test_imu_tare_adapter
+	$(BINDIR)/test_imu_cmd_tare
 	bash $(TESTDIR)/audit_scheduling.sh
 
 $(BINDIR)/test_session_r1_epoch: $(TESTSESSIONSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
@@ -176,8 +188,23 @@ $(BINDIR)/test_realtime_start: $(TESTRTSTARTSRC) $(RTDIR)/realtime.c | $(BINDIR)
 $(BINDIR)/test_rt_fallback_policy: $(TESTRTFALLBACKSRC) | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
 
-$(BINDIR)/test_imu_cmd: $(TESTCMDSRC) $(APPDIR)/imu_cmd.c $(APPDIR)/imu_cal.c | $(BINDIR)
+$(BINDIR)/test_imu_cmd: $(TESTCMDSRC) $(APPDIR)/imu_cmd.c $(APPDIR)/imu_cal.c \
+	$(APPDIR)/imu_tare.c | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
+
+$(BINDIR)/test_session_tare: $(TESTSESSIONTARESRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+$(BINDIR)/test_imu_tare: $(TESTTARESRC) $(APPDIR)/imu_tare.c | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
+
+$(BINDIR)/test_imu_tare_adapter: $(TESTTAREADAPTERSRC) \
+	$(APPDIR)/imu_tare_adapter.c \
+	$(APPDIR)/imu_tare.c \
+	$(BUILDDIR)/app_imu_session.o \
+	$(SH2OBJS) \
+	$(APPHALOBJ) | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BINDIR)/test_session_cal: $(TESTSESSIONCALSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
@@ -197,6 +224,18 @@ $(BINDIR)/test_imu_cmd_cal: $(TESTCMDCALSRC) \
 	$(APPDIR)/imu_cmd.c \
 	$(APPDIR)/imu_cal.c \
 	$(APPDIR)/imu_cal_adapter.c \
+	$(APPDIR)/imu_tare.c \
+	$(BUILDDIR)/app_imu_session.o \
+	$(SH2OBJS) \
+	$(APPHALOBJ) | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+$(BINDIR)/test_imu_cmd_tare: $(TESTCMDTARESRC) \
+	$(APPDIR)/imu_cmd.c \
+	$(APPDIR)/imu_cal.c \
+	$(APPDIR)/imu_cal_adapter.c \
+	$(APPDIR)/imu_tare.c \
+	$(APPDIR)/imu_tare_adapter.c \
 	$(BUILDDIR)/app_imu_session.o \
 	$(SH2OBJS) \
 	$(APPHALOBJ) | $(BINDIR)
