@@ -20,6 +20,9 @@
 #define IMU_CHECK_MAG_INTERVAL_US  (1000000u / IMU_CHECK_MAG_RATE_HZ)
 #define IMU_CHECK_SLOW_INTERVAL_US (1000000u / IMU_CHECK_SLOW_RATE_HZ)
 
+/* Receipt evidence, not the latest-value ImuCheckFacts_t policy mailbox. */
+#define IMU_CHECK_DIAGNOSTICS_VERSION 1u
+
 /*
  * Calibration-only mailbox. Not part of production R2.
  * Accuracies are report STATUS bits 0-3. rvErrRad is the RV payload
@@ -49,6 +52,28 @@ typedef enum {
     IMU_SESSION_CHECK_MODE_CHECK = 1,
     IMU_SESSION_CHECK_MODE_PROBE
 } ImuSessionCheckMode_t;
+
+typedef struct {
+    /* Successful expected decodes since this process/session test reset. */
+    uint64_t processDecodeCount;
+   /* Successful expected decodes in the eligible CHECK/PROBE epoch. */
+    uint64_t epochDecodeCount;
+    /* First/latest captured nonzero host-decode time in that epoch. */
+    bool hostTimesValid;
+    uint64_t firstHostDecodeNs;
+    uint64_t latestHostDecodeNs;
+} ImuCheckReportDiagnostic_t;
+
+typedef struct {
+    uint32_t version;
+    uint32_t configurationEpoch;
+    bool eligible;
+    ImuSessionCheckMode_t mode; /* Meaningful only when eligible. */
+    ImuCheckReportDiagnostic_t mag;
+    ImuCheckReportDiagnostic_t accel;
+    ImuCheckReportDiagnostic_t gyro;
+    ImuCheckReportDiagnostic_t rv;
+} ImuCheckDiagnostics_t;
 
 /*
  * The call's return value is success. A readable-but-different mask makes
@@ -184,6 +209,14 @@ bool imu_session_configure_check(ImuSessionCheckMode_t mode, uint8_t mask,
 
 /* Copy the separate check mailbox; never reinterpret production R2 as it. */
 bool imu_session_get_check_facts(ImuCheckFacts_t *out);
+
+/*
+ * Copy separate CHECK/PROBE receipt diagnostics. False if out is NULL or
+ * no session mailbox exists. Not R2, R4, R7/R8, or publisher freshness.
+ * An ineligible snapshot retains process totals but not prior-epoch
+ * counts or timestamps.
+ */
+bool imu_session_get_check_diagnostics(ImuCheckDiagnostics_t *out);
 
 /*
  * Enables the calibration report set and applies sh2_setCalConfig(calMask).

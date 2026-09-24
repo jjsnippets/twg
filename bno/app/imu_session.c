@@ -43,6 +43,7 @@ static uint32_t s_dcdFlashDeleteAttempts;
 static uint32_t s_dcdClearResetAttempts;
 static ImuTareFacts_t s_tareFacts;
 static ImuCheckFacts_t s_checkFacts;
+static ImuCheckDiagnostics_t s_checkDiagnostics;
 static bool s_testConfigureCheckOk = true;
 static bool s_testCheckReadbackAvailable = true;
 static uint8_t s_testCheckReadbackMask;
@@ -130,6 +131,41 @@ static void clear_check_facts(void)
     s_checkFacts.configurationEpoch = sEpoch;
 }
 
+static void clear_check_diagnostics(void)
+{
+    uint64_t magTotal = s_checkDiagnostics.mag.processDecodeCount;
+    uint64_t accelTotal = s_checkDiagnostics.accel.processDecodeCount;
+    uint64_t gyroTotal = s_checkDiagnostics.gyro.processDecodeCount;
+    uint64_t rvTotal = s_checkDiagnostics.rv.processDecodeCount;
+
+    memset(&s_checkDiagnostics, 0, sizeof(s_checkDiagnostics));
+    s_checkDiagnostics.version = IMU_CHECK_DIAGNOSTICS_VERSION;
+    s_checkDiagnostics.configurationEpoch = sEpoch;
+    s_checkDiagnostics.mag.processDecodeCount = magTotal;
+    s_checkDiagnostics.accel.processDecodeCount = accelTotal;
+    s_checkDiagnostics.gyro.processDecodeCount = gyroTotal;
+    s_checkDiagnostics.rv.processDecodeCount = rvTotal;
+}
+
+static void note_check_decode(ImuCheckReportDiagnostic_t *report,
+                              uint64_t hostNs)
+{
+    if (report == NULL || !s_checkDiagnostics.eligible ||
+        s_checkDiagnostics.configurationEpoch != sEpoch) {
+        return;
+    }
+
+    ++report->processDecodeCount;
+    ++report->epochDecodeCount;
+    if (hostNs != 0ull) {
+        if (!report->hostTimesValid) {
+            report->firstHostDecodeNs = hostNs;
+            report->hostTimesValid = true;
+        }
+        report->latestHostDecodeNs = hostNs;
+    }
+}
+
 static void increment_epoch(void)
 {
     sEpoch += 1u;
@@ -137,11 +173,13 @@ static void increment_epoch(void)
     clear_cal_facts();
     clear_tare_facts();
     clear_check_facts();
+    clear_check_diagnostics();
     sync_header();
 }
 
 static void enter_faulted(void)
 {
+    clear_check_diagnostics();
     sState = IMU_READER_STATE_FAULTED;
     sync_header();
 }
@@ -388,11 +426,13 @@ static void adopt_check_facts_from_event(const sh2_SensorValue_t *value,
         s_checkFacts.haveAccel = true;
         s_checkFacts.accelHostDecodeNs = hostNs;
         s_checkFacts.accelStatus = value->status;
+        note_check_decode(&s_checkDiagnostics.accel, hostNs);
         break;
     case SH2_GYROSCOPE_CALIBRATED:
         s_checkFacts.haveGyro = true;
         s_checkFacts.gyroHostDecodeNs = hostNs;
         s_checkFacts.gyroStatus = value->status;
+        note_check_decode(&s_checkDiagnostics.gyro, hostNs);
         break;
     case SH2_MAGNETIC_FIELD_CALIBRATED:
         s_checkFacts.haveMag = true;
@@ -401,12 +441,14 @@ static void adopt_check_facts_from_event(const sh2_SensorValue_t *value,
         s_checkFacts.magXuT = value->un.magneticField.x;
         s_checkFacts.magYuT = value->un.magneticField.y;
         s_checkFacts.magZuT = value->un.magneticField.z;
+        note_check_decode(&s_checkDiagnostics.mag, hostNs);
         break;
     case SH2_ROTATION_VECTOR:
         s_checkFacts.haveRv = true;
         s_checkFacts.rvHostDecodeNs = hostNs;
         s_checkFacts.rvStatus = value->status;
         s_checkFacts.rvErrRad = value->un.rotationVector.accuracy;
+        note_check_decode(&s_checkDiagnostics.rv, hostNs);
         break;
     default:
         return;
@@ -819,6 +861,8 @@ bool imu_session_configure_check(ImuSessionCheckMode_t mode, uint8_t mask,
     increment_epoch();
     sHardwareConfigured = true;
     sState = target;
+    s_checkDiagnostics.eligible = true;
+    s_checkDiagnostics.mode = mode;
     sync_header();
     *out = observed;
 
@@ -833,6 +877,15 @@ bool imu_session_get_check_facts(ImuCheckFacts_t *out)
         return false;
     }
     *out = s_checkFacts;
+    return true;
+}
+
+bool imu_session_get_check_diagnostics(ImuCheckDiagnostics_t *out)
+{
+    if (out == NULL || !sHasMailbox) {
+        return false;
+    }
+    *out = s_checkDiagnostics;
     return true;
 }
 
@@ -942,6 +995,7 @@ void imu_session_close(void)
     sState = IMU_READER_STATE_CLOSED;
     sEpoch = IMU_EPOCH_NONE;
     clear_validity();
+    clear_check_diagnostics();
     sync_header();
 }
 
@@ -988,9 +1042,12 @@ void imu_session_test_reset(void)
     s_lastTareBasis = 0u;
     s_haveLastTareNow = false;
     s_tareEventSeq = 0ull;
+    /* This is a fresh host process fixture, unlike an epoch transition. */
+    memset(&s_checkDiagnostics, 0, sizeof(s_checkDiagnostics));
     zero_mailbox();
     clear_tare_facts();
     clear_check_facts();
+    clear_check_diagnostics();
     sHasMailbox = false;
     sSnapshot.readerState = IMU_READER_STATE_CLOSED;
 }
@@ -1024,11 +1081,13 @@ void imu_session_test_inject_check_report(ImuSessionTestReportId_t report,
         s_checkFacts.haveAccel = true;
         s_checkFacts.accelHostDecodeNs = hostDecodeNs;
         s_checkFacts.accelStatus = status;
+        note_check_decode(&s_checkDiagnostics.accel, hostDecodeNs);
         break;
     case IMU_SESSION_TEST_REPORT_GYRO:
         s_checkFacts.haveGyro = true;
         s_checkFacts.gyroHostDecodeNs = hostDecodeNs;
         s_checkFacts.gyroStatus = status;
+        note_check_decode(&s_checkDiagnostics.gyro, hostDecodeNs);
         break;
     case IMU_SESSION_TEST_REPORT_MAG:
         s_checkFacts.haveMag = true;
@@ -1037,12 +1096,14 @@ void imu_session_test_inject_check_report(ImuSessionTestReportId_t report,
         s_checkFacts.magXuT = magX;
         s_checkFacts.magYuT = magY;
         s_checkFacts.magZuT = magZ;
+        note_check_decode(&s_checkDiagnostics.mag, hostDecodeNs);
         break;
     case IMU_SESSION_TEST_REPORT_RV:
         s_checkFacts.haveRv = true;
         s_checkFacts.rvHostDecodeNs = hostDecodeNs;
         s_checkFacts.rvStatus = status;
         s_checkFacts.rvErrRad = rvErrRad;
+        note_check_decode(&s_checkDiagnostics.rv, hostDecodeNs);
         break;
     default:
         return;

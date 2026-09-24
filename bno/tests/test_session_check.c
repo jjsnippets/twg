@@ -56,6 +56,16 @@ static void report_is(ImuSessionTestReportId_t id, uint32_t interval,
           c.batchIntervalUs == 0u, caseId, "interval and zero batch");
 }
 
+static ImuCheckDiagnostics_t diagnostics(const char *id)
+{
+    ImuCheckDiagnostics_t d;
+
+    memset(&d, 0, sizeof(d));
+    check(imu_session_get_check_diagnostics(&d),
+          id, "copy diagnostics");
+    return d;
+}
+
 static void test_sc01_exact_report_configuration(void)
 {
     check(IMU_CHECK_MAG_RATE_HZ == 50u &&
@@ -271,6 +281,201 @@ static void test_sc12_hard_configuration_failure_is_truthful(void)
           "SC12", "faulted session cannot claim restore");
 }
 
+static void test_sc13_counts_are_independent_and_not_r2(void)
+{
+    ImuCheckDiagnostics_t d;
+    ImuSampleSnapshot_t before;
+
+    enter(IMU_SESSION_CHECK_MODE_CHECK, 0u, "SC13");
+    before = snap();
+    d = diagnostics("SC13");
+    check(d.version == IMU_CHECK_DIAGNOSTICS_VERSION &&
+          d.eligible && d.mode == IMU_SESSION_CHECK_MODE_CHECK &&
+          d.configurationEpoch == before.configurationEpoch,
+          "SC13", "eligible check epoch");
+    check(d.mag.epochDecodeCount == 0u &&
+          d.accel.epochDecodeCount == 0u &&
+          d.gyro.epochDecodeCount == 0u &&
+          d.rv.epochDecodeCount == 0u,
+          "SC13", "clean initial counts");
+
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_MAG,
+                                          2u, 100ull, 0, 1, 2, 3);
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_MAG,
+                                          3u, 200ull, 0, 4, 5, 6);
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_ACCEL,
+                                          2u, 110ull, 0, 0, 0, 0);
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_GYRO,
+                                          0u, 120ull, 0, 0, 0, 0);
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_RV,
+                                          1u, 130ull, 0.25f, 0, 0, 0);
+    d = diagnostics("SC13");
+
+    check(d.mag.epochDecodeCount == 2u &&
+          d.mag.processDecodeCount == 2u &&
+          d.mag.hostTimesValid &&
+          d.mag.firstHostDecodeNs == 100ull &&
+          d.mag.latestHostDecodeNs == 200ull,
+          "SC13", "two independent mag receipts and span");
+    check(d.accel.epochDecodeCount == 1u &&
+          d.gyro.epochDecodeCount == 1u &&
+          d.rv.epochDecodeCount == 1u &&
+          d.accel.firstHostDecodeNs == 110ull &&
+          d.gyro.firstHostDecodeNs == 120ull &&
+          d.rv.firstHostDecodeNs == 130ull,
+          "SC13", "other types each count once");
+    check(snap().validMask == before.validMask &&
+          snap().processDecodeCount == before.processDecodeCount,
+          "SC13", "diagnostic reports did not enter production R2");
+    check(facts().magStatus == 3u && facts().magHostDecodeNs == 200ull,
+          "SC13", "latest-value facts remain separate");
+}
+
+static void test_sc14_unsupported_and_bulk_facts_do_not_count(void)
+{
+    ImuCheckDiagnostics_t d;
+    ImuCheckFacts_t injected;
+
+    enter(IMU_SESSION_CHECK_MODE_PROBE, 0x05u, "SC14");
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_LINEAR,
+                                          3u, 101ull, 0, 0, 0, 0);
+    d = diagnostics("SC14");
+    check(d.eligible && d.mode == IMU_SESSION_CHECK_MODE_PROBE,
+          "SC14", "probe distinguished from check");
+    check(d.mag.epochDecodeCount == 0u &&
+          d.accel.epochDecodeCount == 0u &&
+          d.gyro.epochDecodeCount == 0u &&
+          d.rv.epochDecodeCount == 0u,
+          "SC14", "unexpected linear report not counted");
+
+    memset(&injected, 0, sizeof(injected));
+    injected.version = 0u; /* Deliberately malformed facts snapshot. */
+    injected.valid = true;
+    injected.haveMag = true;
+    imu_session_test_inject_check_facts(&injected);
+    d = diagnostics("SC14");
+    check(d.mag.epochDecodeCount == 0u &&
+          d.mag.processDecodeCount == 0u,
+          "SC14", "bulk policy-facts injection did not invent a decode");
+
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_MAG,
+                                          1u, 0ull, 0, 1, 2, 3);
+    d = diagnostics("SC14");
+    check(d.mag.epochDecodeCount == 1u &&
+          d.mag.processDecodeCount == 1u &&
+          !d.mag.hostTimesValid &&
+          d.mag.firstHostDecodeNs == 0ull &&
+          d.mag.latestHostDecodeNs == 0ull,
+          "SC14", "decode counted; missing host time not invented");
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_MAG,
+                                          2u, 150ull, 0, 1, 2, 3);
+    d = diagnostics("SC14");
+    check(d.mag.epochDecodeCount == 2u &&
+          d.mag.hostTimesValid &&
+          d.mag.firstHostDecodeNs == 150ull &&
+          d.mag.latestHostDecodeNs == 150ull,
+          "SC14", "first actually captured time");
+}
+
+static void test_sc15_restore_and_reentry_keep_process_totals(void)
+{
+    ImuCheckDiagnostics_t d;
+    uint32_t originalEpoch;
+
+    enter(IMU_SESSION_CHECK_MODE_CHECK, 0u, "SC15");
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_ACCEL,
+                                          2u, 100ull, 0, 0, 0, 0);
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_MAG,
+                                          2u, 200ull, 0, 1, 2, 3);
+    originalEpoch = diagnostics("SC15").configurationEpoch;
+
+    check(imu_session_restore_production(0u),
+          "SC15", "restore production");
+    d = diagnostics("SC15");
+    check(!d.eligible &&
+          d.configurationEpoch == originalEpoch + 1u &&
+          d.mag.epochDecodeCount == 0u &&
+          d.accel.epochDecodeCount == 0u &&
+          !d.mag.hostTimesValid &&
+          d.mag.firstHostDecodeNs == 0ull &&
+          d.mag.latestHostDecodeNs == 0ull &&
+          d.mag.processDecodeCount == 1u &&
+          d.accel.processDecodeCount == 1u,
+          "SC15", "epoch evidence cleared; process totals retained");
+
+    /* The restored session is CONFIGURING, so a new PROBE is legal. */
+    {
+        ImuSessionCheckConfigResult_t configured;
+        memset(&configured, 0, sizeof(configured));
+        check(imu_session_configure_check(IMU_SESSION_CHECK_MODE_PROBE,
+                                          0x05u, &configured),
+              "SC15", "enter new probe epoch");
+    }
+    d = diagnostics("SC15");
+    check(d.eligible &&
+          d.mode == IMU_SESSION_CHECK_MODE_PROBE &&
+          d.configurationEpoch == originalEpoch + 2u &&
+          d.mag.epochDecodeCount == 0u &&
+          d.mag.processDecodeCount == 1u,
+          "SC15", "new mode starts clean local evidence");
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_MAG,
+                                          3u, 300ull, 0, 4, 5, 6);
+    d = diagnostics("SC15");
+    check(d.mag.epochDecodeCount == 1u &&
+          d.mag.processDecodeCount == 2u &&
+          d.mag.firstHostDecodeNs == 300ull,
+          "SC15", "new epoch receipt, process count continues");
+}
+
+static void test_sc16_reset_and_close_invalidate_local_evidence(void)
+{
+    ImuCheckDiagnostics_t d;
+
+    enter(IMU_SESSION_CHECK_MODE_CHECK, 0u, "SC16");
+    imu_session_test_inject_check_report(IMU_SESSION_TEST_REPORT_MAG,
+                                          2u, 100ull, 0, 1, 2, 3);
+    imu_session_test_inject_reset();
+    d = diagnostics("SC16");
+    check(!d.eligible && d.mag.epochDecodeCount == 0u &&
+          d.mag.processDecodeCount == 1u &&
+          d.mag.firstHostDecodeNs == 0ull &&
+          d.configurationEpoch == snap().configurationEpoch,
+          "SC16", "reset invalidates prior epoch");
+
+    imu_session_close();
+    d = diagnostics("SC16");
+    check(!d.eligible &&
+          d.configurationEpoch == IMU_EPOCH_NONE &&
+          d.mag.epochDecodeCount == 0u &&
+          d.mag.processDecodeCount == 1u,
+          "SC16", "close cannot expose stale check epoch");
+}
+
+static void test_sc17_config_failure_and_requested_rates_unchanged(void)
+{
+    ImuSessionCheckConfigResult_t configured;
+    ImuCheckDiagnostics_t d;
+
+    open_configuring("SC17");
+    imu_session_test_set_configure_check_result(false);
+    memset(&configured, 0, sizeof(configured));
+    check(!imu_session_configure_check(IMU_SESSION_CHECK_MODE_PROBE,
+                                       0x05u, &configured),
+          "SC17", "hard configuration fails");
+    d = diagnostics("SC17");
+    check(!d.eligible &&
+          d.mag.epochDecodeCount == 0u &&
+          d.mag.processDecodeCount == 0u,
+          "SC17", "no claimed diagnostic entry");
+
+    enter(IMU_SESSION_CHECK_MODE_CHECK, 0u, "SC17");
+    report_is(IMU_SESSION_TEST_REPORT_MAG, 20000u, "SC17");
+    report_is(IMU_SESSION_TEST_REPORT_ACCEL, 100000u, "SC17");
+    report_is(IMU_SESSION_TEST_REPORT_GYRO, 100000u, "SC17");
+    report_is(IMU_SESSION_TEST_REPORT_RV, 100000u, "SC17");
+    report_is(IMU_SESSION_TEST_REPORT_LINEAR, 0u, "SC17");
+}
+
 int main(void)
 {
     test_sc01_exact_report_configuration();
@@ -285,6 +490,12 @@ int main(void)
     test_sc10_restore_probe_matches_check();
     test_sc11_illegal_states_and_inputs();
     test_sc12_hard_configuration_failure_is_truthful();
+    test_sc13_counts_are_independent_and_not_r2();
+    test_sc14_unsupported_and_bulk_facts_do_not_count();
+    test_sc15_restore_and_reentry_keep_process_totals();
+    test_sc16_reset_and_close_invalidate_local_evidence();
+    test_sc17_config_failure_and_requested_rates_unchanged();
+
     if (failures != 0) {
         fprintf(stderr, "test_session_check: %d failure(s)\n", failures);
         return 1;
