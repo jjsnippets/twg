@@ -172,6 +172,18 @@ static bool plan_legal(const ImuCmdPlan_t *plan, ImuCmdReason_t *reason)
         *reason = IMU_CMD_REASON_ILLEGAL_PLAN;
         return false;
     }
+    if ((plan->slot1 != IMU_CMD_ID_DCD_CLEAR &&
+         plan->confirmDcdClear) ||
+        (plan->slot2 != IMU_CMD_ID_TARE &&
+         (plan->tareAxes != IMU_CMD_TARE_AXES_NONE ||
+          plan->persistTare || plan->confirmTare)) ||
+        (plan->slot2 != IMU_CMD_ID_TARE_CLEAR &&
+         plan->confirmTareClear) ||
+        (plan->slot3 != IMU_CMD_ID_PROBE &&
+         plan->probeMaskPresent)) {
+        *reason = IMU_CMD_REASON_ILLEGAL_PLAN;
+        return false;
+    }
     *reason = IMU_CMD_REASON_NONE;
     return true;
 }

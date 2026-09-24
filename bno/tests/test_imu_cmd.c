@@ -258,6 +258,26 @@ static void test_g01_illegal_plans_rejected(void)
     imu_cmd_plan_acquire_default(&plan);
     plan.acquisitionDurationS = 0u;
     check(!imu_cmd_init(&plan), "G04", "duration 0");
+
+    imu_cmd_plan_clear(&plan);
+    plan.confirmDcdClear = true;
+    check(!imu_cmd_init(&plan), "G08", "orphan DCD confirmation");
+
+    imu_cmd_plan_clear(&plan);
+    plan.slot2 = IMU_CMD_ID_TARE_CHECK;
+    plan.persistTare = true;
+   check(!imu_cmd_init(&plan), "G09", "orphan tare persistence");
+
+    imu_cmd_plan_clear(&plan);
+    plan.slot2 = IMU_CMD_ID_TARE_CLEAR;
+    plan.confirmTare = true;
+   check(!imu_cmd_init(&plan), "G10", "wrong tare confirmation");
+
+    imu_cmd_plan_clear(&plan);
+    plan.slot3 = IMU_CMD_ID_CHECK;
+    plan.probeMaskPresent = true;
+    plan.probeMask = 0x05u;
+    check(!imu_cmd_init(&plan), "G11", "present mask on CHECK");
 }
 
 static void test_g05_process_stop_preserves_prior(void)
