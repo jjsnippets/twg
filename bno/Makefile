@@ -95,6 +95,7 @@ TESTRTSTARTSRC      := $(RTDIR)/test_realtime_start.c
 TESTRTFALLBACKSRC   := $(TESTDIR)/test_rt_fallback_policy.c
 TESTCMDSRC          := $(TESTDIR)/test_imu_cmd.c
 TESTCLISRC          := $(TESTDIR)/test_imu_cli.c
+TESTCONSOLESRC      := $(TESTDIR)/test_imu_console.c
 TESTCHECKSRC        := $(TESTDIR)/test_imu_check.c
 TESTCMDCALSRC       := $(TESTDIR)/test_imu_cmd_cal.c
 TESTCMDTARESRC      := $(TESTDIR)/test_imu_cmd_tare.c
@@ -166,7 +167,8 @@ test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_imu_tare $(BINDIR)/test_imu_tare_adapter \
 	$(BINDIR)/test_imu_cmd_tare $(BINDIR)/test_imu_check \
 	$(BINDIR)/test_session_check $(BINDIR)/test_imu_check_adapter \
-	$(BINDIR)/test_imu_cmd_check $(BINDIR)/test_imu_cli
+	$(BINDIR)/test_imu_cmd_check $(BINDIR)/test_imu_cli \
+	$(BINDIR)/test_imu_console
 	$(BINDIR)/test_quad_decode
 	$(BINDIR)/test_session_r1_epoch
 	$(BINDIR)/test_realtime_start
@@ -185,6 +187,7 @@ test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_imu_check_adapter
 	$(BINDIR)/test_imu_cmd_check
 	$(BINDIR)/test_imu_cli
+	$(BINDIR)/test_imu_console
 	bash $(TESTDIR)/audit_scheduling.sh
 
 $(BINDIR)/test_session_r1_epoch: $(TESTSESSIONSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
@@ -208,6 +211,10 @@ $(BINDIR)/test_imu_cli: $(TESTCLISRC) $(APPDIR)/imu_cli.c \
 	$(APPDIR)/imu_cmd.c $(APPDIR)/imu_cal.c \
 	$(APPDIR)/imu_tare.c $(APPDIR)/imu_check.c | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
+
+$(BINDIR)/test_imu_console: $(TESTCONSOLESRC) \
+	$(APPDIR)/imu_console.c | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BINDIR)/test_session_tare: $(TESTSESSIONTARESRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)

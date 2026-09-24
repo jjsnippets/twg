@@ -15,6 +15,11 @@ CAL_C="${BNO_DIR}/app/imu_cal.c"
 CAL_H="${BNO_DIR}/app/imu_cal.h"
 CAL_ADAPTER_C="${BNO_DIR}/app/imu_cal_adapter.c"
 CAL_ADAPTER_H="${BNO_DIR}/app/imu_cal_adapter.h"
+CLI_C="${BNO_DIR}/app/imu_cli.c"
+CLI_H="${BNO_DIR}/app/imu_cli.h"
+CONSOLE_C="${BNO_DIR}/app/imu_console.c"
+CONSOLE_H="${BNO_DIR}/app/imu_console.h"
+MAIN_C="${BNO_DIR}/app/main.c"
 HAL_C="${BNO_DIR}/app/sh2_hal_rpi.c"
 RT_C="${REPO_DIR}/rt/realtime.c"
 
@@ -52,6 +57,19 @@ scan_calls "$CAL_C" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
 scan_calls "$CAL_H" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
 scan_calls "$CAL_ADAPTER_C" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
 scan_calls "$CAL_ADAPTER_H" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
+scan_calls "$CLI_C" StartRT RT_SleepUntil usleep nanosleep sleep exit \
+    printf fprintf fgets getchar read
+scan_calls "$CLI_H" StartRT RT_SleepUntil usleep nanosleep sleep exit \
+    printf fprintf fgets getchar read
+# poll/read and bounded worker waiting are allowed here; scheduling,
+# process exit, and coordinator/session ownership are not.
+scan_calls "$CONSOLE_C" StartRT RT_SleepUntil usleep nanosleep sleep exit \
+    imu_cmd_service imu_session_service
+scan_calls "$CONSOLE_H" StartRT RT_SleepUntil usleep nanosleep sleep exit \
+    imu_cmd_service imu_session_service
+# The existing main has no owner-side blocking stdin read; Step 8.5 must
+# retain this property when the console adapter is wired.
+scan_calls "$MAIN_C" fgets getchar getline scanf read
 scan_calls "$RT_C" exit
 scan_calls "$HAL_C" StartRT RT_SleepUntil exit
 
