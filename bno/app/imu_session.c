@@ -18,6 +18,7 @@ extern sh2_Hal_t *sh2_hal_rpi_init(void);
 #define SENSOR_RATE_HZ      100U
 #define SENSOR_INTERVAL_US  (1000000U / SENSOR_RATE_HZ)
 #define GROUP_COUNT         3
+#define FRS_RECORD_DCD      0x1F1Fu
 
 static sh2_Hal_t *sHal;
 static ImuSampleSnapshot_t sSnapshot;
@@ -36,6 +37,10 @@ static uint8_t s_calMask;
 static bool s_calFactsValid;
 static bool s_testSaveDcdOk = true;
 static bool s_testReopenOk = true;
+static bool s_testDcdFlashDeleteOk = true;
+static bool s_testDcdClearResetOk = true;
+static uint32_t s_dcdFlashDeleteAttempts;
+static uint32_t s_dcdClearResetAttempts;
 static ImuTareFacts_t s_tareFacts;
 static ImuCheckFacts_t s_checkFacts;
 static bool s_testConfigureCheckOk = true;
@@ -412,7 +417,7 @@ static void adopt_check_facts_from_event(const sh2_SensorValue_t *value,
 static bool reopen_hardware(void)
 {
     if (!sHal) {
-        return true;
+        return s_testReopenOk;
     }
 
     sh2_close();
@@ -961,6 +966,10 @@ void imu_session_test_reset(void)
     s_calFactsValid = false;
     s_testSaveDcdOk = true;
     s_testReopenOk = true;
+    s_testDcdFlashDeleteOk = true;
+    s_testDcdClearResetOk = true;
+    s_dcdFlashDeleteAttempts = 0u;
+    s_dcdClearResetAttempts = 0u;
     s_testProductionOk = true;
     s_recoveryObserved = false;
     s_recoveryAttempts = 0u;
@@ -1135,6 +1144,40 @@ bool imu_session_save_dcd(void)
     return sh2_saveDcdNow() == SH2_OK;
 }
 
+bool imu_session_clear_dcd(void)
+{
+    uint32_t dummy = 0u;
+
+    if (sState != IMU_READER_STATE_CONFIGURING) {
+        return false;
+    }
+
+    ++s_dcdFlashDeleteAttempts;
+    if (sHal) {
+        if (sh2_setFrs(FRS_RECORD_DCD, &dummy, 0) != SH2_OK) {
+            return false;
+        }
+    } else if (!s_testDcdFlashDeleteOk) {
+        return false;
+    }
+
+    ++s_dcdClearResetAttempts;
+    if (sHal) {
+        if (sh2_clearDcdAndReset() != SH2_OK) {
+            return false;
+       }
+    } else if (!s_testDcdClearResetOk) {
+        return false;
+    }
+
+    /*
+     * The command has no ordinary response and resets the chip. Reopen
+     * using the existing owner/recovery path, never imu_session_open().
+     * If SH2_RESET already took this epoch, begin_recovery coalesces it.
+     */
+    return imu_session_begin_recovery();
+}
+
 bool imu_session_begin_verification_reopen(void)
 {
     bool ok;
@@ -1180,6 +1223,23 @@ void imu_session_test_inject_cal_facts(const ImuCalFacts_t *facts)
 void imu_session_test_set_save_dcd_result(bool success)
 {
     s_testSaveDcdOk = success;
+}
+
+void imu_session_test_set_clear_dcd_results(bool flashDeleteOk,
+                                            bool clearResetOk)
+{
+    s_testDcdFlashDeleteOk = flashDeleteOk;
+    s_testDcdClearResetOk = clearResetOk;
+}
+
+uint32_t imu_session_test_dcd_flash_delete_attempts(void)
+{
+    return s_dcdFlashDeleteAttempts;
+}
+
+uint32_t imu_session_test_dcd_clear_reset_attempts(void)
+{
+    return s_dcdClearResetAttempts;
 }
 
 void imu_session_test_set_reopen_result(bool success)

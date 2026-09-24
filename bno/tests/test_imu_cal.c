@@ -137,6 +137,15 @@ static ImuCmdProgress_t progress(void)
     return p;
 }
 
+static ImuCalEvent_t clear_session_result(ImuCalRequestType_t type,
+                                          bool success, bool usable,
+                                          uint32_t before, uint32_t after)
+{
+   ImuCalEvent_t e = make_session(type, success, before, after);
+    e.session.sessionUsable = usable;
+    return e;
+}
+
 static void test_c01_init_emits_configure(void)
 {
     ImuCalPendingRequest_t req;
@@ -608,6 +617,130 @@ static void test_c21_verify_gate_fail_restores(void)
     check(r.restoredProduction, "C21", "restored");
 }
 
+static void test_c22_clear_prompt_q_has_no_request_or_epoch(void)
+{
+    ImuCalEvent_t e;
+    ImuCmdProgress_t p;
+    ImuCmdResult_t r;
+
+    check(imu_cal_init_dcd_clear(0x05u, T0), "C22", "init clear");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          "C22", "nothing sent before confirm");
+    check(imu_cal_get_progress(&p), "C22", "progress");
+    check(p.active == IMU_CMD_ID_DCD_CLEAR, "C22", "clear identity");
+    check(p.requiredAction == IMU_CMD_ACTION_CONFIRM,
+          "C22", "confirmation required");
+
+    e = make_event(IMU_CAL_EVENT_OPERATOR_Q);
+    check(imu_cal_post(&e), "C22", "q at prompt");
+    check(imu_cal_complete(), "C22", "cancel terminal");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          "C22", "still no request");
+    check(imu_cal_get_result(&r), "C22", "result");
+    check(r.identity == IMU_CMD_ID_DCD_CLEAR, "C22", "result identity");
+    check(r.state == IMU_CMD_STATE_CANCELLED &&
+          r.reason == IMU_CMD_REASON_OPERATOR_Q, "C22", "cancelled by q");
+    check(r.epochBefore == 0u && r.epochAfter == 0u,
+          "C22", "no fabricated epoch evidence");
+    check(!r.restoredProduction && !r.dcdSaved && !r.verified,
+          "C22", "no fabricated operation evidence");
+}
+
+static void test_c23_clear_confirm_once_restores_after_success(void)
+{
+    ImuCalEvent_t e;
+    ImuCmdResult_t r;
+
+    check(imu_cal_init_dcd_clear(0x05u, T0), "C23", "init clear");
+    e = make_event(IMU_CAL_EVENT_OPERATOR_CONFIRM);
+    check(imu_cal_post(&e), "C23", "confirm");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          "C23", "one clear request");
+    check(!imu_cal_post(&e), "C23", "duplicate confirm rejected");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          "C23", "pending request unchanged");
+
+    e = clear_session_result(IMU_CAL_REQ_CLEAR_DCD, true, true, 1u, 2u);
+    check(imu_cal_post(&e), "C23", "accepted clear result");
+    check(!imu_cal_complete(), "C23", "not terminal before restore");
+    check(imu_cal_pending_request().type ==
+          IMU_CAL_REQ_RESTORE_PRODUCTION, "C23", "restore requested");
+    check(imu_cal_pending_request().calMask == 0x05u,
+          "C23", "immutable flight mask");
+
+    e = clear_session_result(IMU_CAL_REQ_RESTORE_PRODUCTION,
+                             true, true, 2u, 2u);
+    check(imu_cal_post(&e), "C23", "restore result");
+    check(imu_cal_get_result(&r), "C23", "result");
+    check(r.state == IMU_CMD_STATE_SUCCEEDED &&
+          r.reason == IMU_CMD_REASON_OK, "C23", "ordinary success");
+    check(r.epochBefore == 1u && r.epochAfter == 2u,
+          "C23", "before/after evidence retained");
+    check(r.restoredProduction, "C23", "restoration recorded");
+    check(!r.dcdSaved && !r.verified,
+          "C23", "not mislabelled as DCD save/verify");
+}
+
+static void test_c24_clear_failure_restores_before_failed_result(void)
+{
+    ImuCalEvent_t e;
+    ImuCmdResult_t r;
+
+    check(imu_cal_init_dcd_clear(0u, T0), "C24", "init");
+    e = make_event(IMU_CAL_EVENT_OPERATOR_CONFIRM);
+    check(imu_cal_post(&e), "C24", "confirm");
+    e = clear_session_result(IMU_CAL_REQ_CLEAR_DCD, false, true, 1u, 1u);
+    check(imu_cal_post(&e), "C24", "clear failed but usable");
+    check(!imu_cal_complete(), "C24", "wait for restoration");
+    check(imu_cal_pending_request().type ==
+          IMU_CAL_REQ_RESTORE_PRODUCTION, "C24", "restore pending");
+
+    e = clear_session_result(IMU_CAL_REQ_RESTORE_PRODUCTION,
+                             true, true, 1u, 1u);
+    check(imu_cal_post(&e), "C24", "restore");
+    check(imu_cal_get_result(&r), "C24", "result");
+    check(r.state == IMU_CMD_STATE_FAILED &&
+          r.reason == IMU_CMD_REASON_DCD_CLEAR_FAILED,
+          "C24", "ordinary clear failure");
+    check(r.warningRequired && r.restoredProduction,
+          "C24", "warning and restore");
+    check(r.epochBefore == 1u && r.epochAfter == 1u,
+          "C24", "no fictitious reset epoch");
+}
+
+static void test_c25_unusable_or_failed_restore_stops(void)
+{
+    ImuCalEvent_t e;
+    ImuCmdResult_t r;
+
+    check(imu_cal_init_dcd_clear(0u, T0), "C25", "init unusable");
+    e = make_event(IMU_CAL_EVENT_OPERATOR_CONFIRM);
+    check(imu_cal_post(&e), "C25", "confirm unusable");
+    e = clear_session_result(IMU_CAL_REQ_CLEAR_DCD, false, false, 1u, 2u);
+    check(imu_cal_post(&e), "C25", "failed reopen");
+    check(imu_cal_get_result(&r), "C25", "unusable result");
+    check(r.state == IMU_CMD_STATE_RECOVERY_FAILED &&
+          r.reason == IMU_CMD_REASON_SESSION_UNUSABLE,
+          "C25", "unusable terminal");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          "C25", "no restore from unusable session");
+    check(!r.restoredProduction, "C25", "no false restore");
+
+    check(imu_cal_init_dcd_clear(0u, T0), "C25", "reinit restore failure");
+    e = make_event(IMU_CAL_EVENT_OPERATOR_CONFIRM);
+    check(imu_cal_post(&e), "C25", "confirm restore failure");
+    e = clear_session_result(IMU_CAL_REQ_CLEAR_DCD, true, true, 1u, 2u);
+    check(imu_cal_post(&e), "C25", "clear accepted");
+    e = clear_session_result(IMU_CAL_REQ_RESTORE_PRODUCTION,
+                             false, false, 2u, 2u);
+    check(imu_cal_post(&e), "C25", "restore failed");
+    check(imu_cal_get_result(&r), "C25", "restore-failure result");
+    check(r.state == IMU_CMD_STATE_RECOVERY_FAILED &&
+          r.reason == IMU_CMD_REASON_SESSION_UNUSABLE,
+          "C25", "restore failure stops");
+    check(!r.restoredProduction, "C25", "restore not claimed");
+}
+
 int main(void)
 {
     test_c01_init_emits_configure();
@@ -631,6 +764,11 @@ int main(void)
     test_c19_hold_degrade_then_exhaust();
     test_c20_reopen_fail_is_recovery();
     test_c21_verify_gate_fail_restores();
+    test_c22_clear_prompt_q_has_no_request_or_epoch();
+    test_c23_clear_confirm_once_restores_after_success();
+    test_c24_clear_failure_restores_before_failed_result();
+    test_c25_unusable_or_failed_restore_stops();
+
     if (g_fail != 0) {
         fprintf(stderr, "test_imu_cal: %d failures\n", g_fail);
         return 1;

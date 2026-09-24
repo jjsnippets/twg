@@ -10,10 +10,10 @@
 /*
  * Phase 4 / 5.2 / 6.1 generic coordinator oracles: family K plus T
  * sub-results and G plan/stop/version checks. Calibration and the tare
- * family are real stages; STAGE_TERMINAL remains only for DCD-clear,
- * check, or probe. Tare T01-T05 and K02 live in test_imu_tare.c /
- * test_imu_cmd_tare.c; real check/probe behavior lives in
- * test_imu_cmd_check.c.
+ * family and DCD-clear are real stages; STAGE_TERMINAL cannot finish
+ * them. DCD-clear failures/recovery live in test_imu_cmd_cal.c.
+ * Tare T01-T05 and K02 live in test_imu_tare.c /
+ * test_imu_cmd_tare.c; check/probe live in test_imu_cmd_check.c.
  * No SPI, no session, no sudo.
  */
 
@@ -83,20 +83,6 @@ static ImuCmdEvent_t make_tick(uint64_t ns)
     ImuCmdEvent_t e = make_event(IMU_CMD_EVENT_TICK);
 
     e.monotonicNs = ns;
-    return e;
-}
-
-static ImuCmdEvent_t make_terminal(ImuCmdIdentity_t id,
-                                   ImuCmdResultState_t state,
-                                   ImuCmdReason_t reason,
-                                   bool warning)
-{
-    ImuCmdEvent_t e = make_event(IMU_CMD_EVENT_STAGE_TERMINAL);
-
-    e.terminal.identity = id;
-    e.terminal.state = state;
-    e.terminal.reason = reason;
-    e.terminal.warningRequired = warning;
     return e;
 }
 
@@ -194,66 +180,6 @@ static void test_k01_default_plan_skips_commands_and_acquires(void)
     check(!imu_cmd_warning_required(), "K01", "no warning");
 }
 
-static void test_k03_dcd_clear_fail_still_runs_tare(void)
-{
-    ImuCmdPlan_t plan;
-    ImuCmdEvent_t e;
-
-    imu_cmd_plan_clear(&plan);
-    plan.slot1 = IMU_CMD_ID_DCD_CLEAR;
-    plan.slot2 = IMU_CMD_ID_TARE;
-    plan.tareAxes = IMU_CMD_TARE_AXES_Z;
-    plan.persistTare = true;
-    check(imu_cmd_init(&plan), "K03", "init");
-
-    imu_cmd_service();
-    check(active_id() == IMU_CMD_ID_DCD_CLEAR, "K03", "dcd clear running");
-    e = make_terminal(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_FAILED,
-                      IMU_CMD_REASON_DCD_CLEAR_FAILED, true);
-    check(imu_cmd_post(&e), "K03", "dcd clear fail");
-    check_state(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_FAILED, "K03",
-                "dcd clear failed");
-    check_reason(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_REASON_DCD_CLEAR_FAILED,
-                 "K03", "dcd_clear_failed");
-    check(imu_cmd_warning_required(), "K03", "warning");
-
-    imu_cmd_service();
-    check(active_id() == IMU_CMD_ID_TARE, "K03", "tare still runs");
-    check(!imu_cmd_do_not_acquire(), "K03", "session usable");
-}
-
-static void test_k04_dcd_recovery_failed_stops_plan(void)
-{
-    ImuCmdPlan_t plan;
-    ImuCmdEvent_t e;
-
-    imu_cmd_plan_clear(&plan);
-    plan.slot1 = IMU_CMD_ID_DCD_CLEAR;
-    plan.slot2 = IMU_CMD_ID_TARE;
-    plan.tareAxes = IMU_CMD_TARE_AXES_Z;
-    plan.persistTare = true;
-    check(imu_cmd_init(&plan), "K04", "init");
-
-    imu_cmd_service();
-    e = make_terminal(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_RECOVERY_FAILED,
-                      IMU_CMD_REASON_SESSION_UNUSABLE, true);
-    check(imu_cmd_post(&e), "K04", "recovery_failed");
-    check_state(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_RECOVERY_FAILED,
-                "K04", "dcd recovery_failed");
-    check(imu_cmd_do_not_acquire(), "K04", "do not acquire");
-    check(imu_cmd_plan_complete(), "K04", "stopped");
-
-    imu_cmd_service();
-    check(active_id() == IMU_CMD_ID_NONE, "K04", "no next stage");
-    check_state(IMU_CMD_ID_TARE, IMU_CMD_STATE_NOT_REQUESTED, "K04",
-                "tare not started");
-    check_state(IMU_CMD_ID_SETTLE, IMU_CMD_STATE_NOT_REQUESTED, "K04",
-                "no settle");
-    check_state(IMU_CMD_ID_ACQUISITION, IMU_CMD_STATE_NOT_REQUESTED, "K04",
-                "no acquire");
-    check(imu_cmd_request() == IMU_CMD_REQ_STOP_PLAN, "K04", "stop plan");
-}
-
 static void test_k06_process_stop_abandons_dcd_clear(void)
 {
     ImuCmdPlan_t plan;
@@ -340,22 +266,18 @@ static void test_g05_process_stop_preserves_prior(void)
     ImuCmdEvent_t e;
 
     imu_cmd_plan_clear(&plan);
-    plan.slot1 = IMU_CMD_ID_DCD_CLEAR;
     check(imu_cmd_init(&plan), "G05", "init");
     imu_cmd_service();
-    e = make_terminal(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_SUCCEEDED,
-                      IMU_CMD_REASON_OK, false);
-    check(imu_cmd_post(&e), "G05", "dcd clear ok");
-    imu_cmd_service();
+    check(active_id() == IMU_CMD_ID_SETTLE, "G05", "settle active");
     e = make_event(IMU_CMD_EVENT_SETTLE_DONE);
     check(imu_cmd_post(&e), "G05", "settle");
     imu_cmd_service();
     check(active_id() == IMU_CMD_ID_ACQUISITION, "G05", "acquire");
     e = make_event(IMU_CMD_EVENT_PROCESS_STOP);
     check(imu_cmd_post(&e), "G05", "stop");
-    check_state(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_STATE_SUCCEEDED, "G05",
-                "dcd clear not rewritten");
-    check_reason(IMU_CMD_ID_DCD_CLEAR, IMU_CMD_REASON_OK, "G05", "still ok");
+    check_state(IMU_CMD_ID_SETTLE, IMU_CMD_STATE_SUCCEEDED, "G05",
+                "prior settle not rewritten");
+    check_reason(IMU_CMD_ID_SETTLE, IMU_CMD_REASON_OK, "G05", "still ok");
     check_state(IMU_CMD_ID_ACQUISITION, IMU_CMD_STATE_ABANDONED, "G05",
                 "acquire abandoned");
     check(imu_cmd_process_stop_seen(), "G05", "stop seen");
@@ -406,8 +328,6 @@ static void test_g07_stale_result_and_progress_versions_are_not_current(void)
 int main(void)
 {
     test_k01_default_plan_skips_commands_and_acquires();
-    test_k03_dcd_clear_fail_still_runs_tare();
-    test_k04_dcd_recovery_failed_stops_plan();
     test_k06_process_stop_abandons_dcd_clear();
     test_k07_acquisition_ignores_operator_q();
     test_g01_illegal_plans_rejected();

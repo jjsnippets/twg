@@ -247,6 +247,22 @@ static void drive_e2e_to_save(uint64_t *now_ns, const char *id)
           id, "save request pending");
 }
 
+static void start_clear_adapter(const char *id)
+{
+    ImuCalEvent_t event;
+
+    imu_session_test_reset();
+    check(imu_session_test_open(true), id, "open");
+    check(imu_cal_init_dcd_clear(0u, T0), id, "init clear machine");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          id, "no request before confirm");
+    memset(&event, 0, sizeof(event));
+    event.type = IMU_CAL_EVENT_OPERATOR_CONFIRM;
+    check(imu_cal_post(&event), id, "confirm");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          id, "clear pending");
+}
+
 static void test_a01_configure_calibration_maps_request(void)
 {
     ImuCalPendingRequest_t request;
@@ -586,6 +602,81 @@ static void test_a09_facts_forwarded_without_request(void)
     check(progress.cal.magXuT == 11.0f, "A09", "mag X forwarded");
 }
 
+static void test_a10_clear_one_request_per_pump(void)
+{
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+    ImuCmdResult_t result;
+
+    start_clear_adapter("A10");
+    before = snapshot();
+    check(imu_cal_adapter_pump(), "A10", "clear pump");
+    after = snapshot();
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u &&
+          imu_session_test_dcd_clear_reset_attempts() == 1u,
+          "A10", "one delete/reset sequence");
+    check(after.configurationEpoch == before.configurationEpoch + 1u,
+          "A10", "reset epoch once");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "A10", "restoration still pending after first pump");
+    check(!imu_cal_complete(), "A10", "not terminal yet");
+
+    check(imu_cal_adapter_pump(), "A10", "restore pump");
+    check(imu_cal_complete(), "A10", "terminal after restore");
+    check(imu_cal_get_result(&result), "A10", "result");
+    check(result.state == IMU_CMD_STATE_SUCCEEDED &&
+          result.restoredProduction, "A10", "success with restore");
+    check(imu_cal_adapter_pump(), "A10", "NONE pump");
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u,
+          "A10", "no duplicate clear");
+}
+
+static void test_a11_failed_clear_posts_ordinary_result(void)
+{
+    ImuCmdResult_t result;
+
+    start_clear_adapter("A11");
+    imu_session_test_set_clear_dcd_results(false, true);
+    check(imu_cal_adapter_pump(), "A11", "failed clear posted");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "A11", "restoration requested");
+    check(imu_cal_adapter_pump(), "A11", "restore posted");
+    check(imu_cal_get_result(&result), "A11", "result");
+    check(result.state == IMU_CMD_STATE_FAILED &&
+          result.reason == IMU_CMD_REASON_DCD_CLEAR_FAILED,
+          "A11", "ordinary failed clear");
+    check(result.warningRequired && result.restoredProduction,
+          "A11", "warn and restore");
+}
+
+static void test_a12_failed_reopen_posts_unusable_result(void)
+{
+    ImuCmdResult_t result;
+
+    start_clear_adapter("A12");
+    imu_session_test_set_reopen_result(false);
+    check(imu_cal_adapter_pump(), "A12", "failed reopen posted");
+    check(imu_cal_complete(), "A12", "terminal");
+    check(imu_cal_get_result(&result), "A12", "result");
+    check(result.state == IMU_CMD_STATE_RECOVERY_FAILED &&
+          result.reason == IMU_CMD_REASON_SESSION_UNUSABLE,
+          "A12", "unusable, not ordinary failure");
+    check(!result.restoredProduction, "A12", "no invented restore");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          "A12", "no retry from faulted session");
+}
+
+static void test_a13_missing_session_evidence_is_adapter_failure(void)
+{
+    start_clear_adapter("A13");
+    imu_session_test_reset();
+    check(!imu_cal_adapter_pump(), "A13", "snapshot unavailable");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          "A13", "unexecuted request remains pending");
+    check(imu_session_test_dcd_flash_delete_attempts() == 0u,
+          "A13", "no destructive call");
+}
+
 int main(void)
 {
     test_a01_configure_calibration_maps_request();
@@ -597,6 +688,10 @@ int main(void)
     test_a07_save_retry_host_flow();
     test_a08_reopen_failure_host_flow();
     test_a09_facts_forwarded_without_request();
+    test_a10_clear_one_request_per_pump();
+    test_a11_failed_clear_posts_ordinary_result();
+    test_a12_failed_reopen_posts_unusable_result();
+    test_a13_missing_session_evidence_is_adapter_failure();
 
     if (gfail != 0) {
         fprintf(stderr, "test_imu_cal_adapter: %d failures\n", gfail);

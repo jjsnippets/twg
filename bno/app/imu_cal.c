@@ -4,6 +4,8 @@
 
 typedef enum {
     IMU_CAL_ST_IDLE = 0,
+    IMU_CAL_ST_CLEAR_CONFIRM,
+    IMU_CAL_ST_WAIT_CLEAR,
     IMU_CAL_ST_WAIT_CONFIG,
     IMU_CAL_ST_ACCEL_PROMPT,
     IMU_CAL_ST_ACCEL_WINDOW,
@@ -27,6 +29,7 @@ typedef enum {
 } ImuCalState_t;
 
 static bool s_inited;
+static bool s_clearMode;
 static ImuCalState_t s_state;
 static uint8_t s_flightMask;
 static uint64_t s_nowNs;
@@ -210,6 +213,7 @@ static void begin_verify_reopen(void)
 bool imu_cal_init(uint8_t flightCalMask, uint64_t nowNs)
 {
     s_inited = true;
+    s_clearMode = false;
     s_flightMask = flightCalMask;
     s_nowNs = nowNs;
     s_stateEntryNs = nowNs;
@@ -234,6 +238,32 @@ bool imu_cal_init(uint8_t flightCalMask, uint64_t nowNs)
     return true;
 }
 
+bool imu_cal_init_dcd_clear(uint8_t flightCalMask, uint64_t nowNs)
+{
+    s_inited = true;
+    s_clearMode = true;
+    s_flightMask = flightCalMask;
+    s_nowNs = nowNs;
+    s_stateEntryNs = nowNs;
+    s_deadlineNs = 0ull;
+    s_goodSinceNs = 0ull;
+    s_dcdSaved = false;
+    s_verified = false;
+    s_termReason = IMU_CMD_REASON_NONE;
+    s_termWarning = false;
+    memset(&s_facts, 0, sizeof(s_facts));
+    clear_pending();
+    reset_result();
+    reset_progress();
+    s_result.identity = IMU_CMD_ID_DCD_CLEAR;
+    s_result.startedNs = nowNs;
+    s_progress.active = IMU_CMD_ID_DCD_CLEAR;
+    s_progress.cal.phase = IMU_CMD_CAL_PHASE_NONE;
+    s_progress.requiredAction = IMU_CMD_ACTION_CONFIRM;
+    s_state = IMU_CAL_ST_CLEAR_CONFIRM;
+    return true;
+}
+
 static bool post_tick(uint64_t ns)
 {
     s_nowNs = ns;
@@ -242,10 +272,24 @@ static bool post_tick(uint64_t ns)
 
 static bool post_q(void)
 {
+    if (s_clearMode) {
+        if (s_state == IMU_CAL_ST_CLEAR_CONFIRM ||
+            s_state == IMU_CAL_ST_WAIT_CLEAR) {
+            /*
+            * A still-pending clear has not reached the adapter. Drop it;
+             * do not claim a reset, restoration, or configuration epoch.
+             */
+            finish(IMU_CMD_STATE_CANCELLED, IMU_CMD_REASON_OPERATOR_Q,
+                   true, false);
+        }
+        return true;
+    }
+
     if (s_state == IMU_CAL_ST_IDLE || s_state == IMU_CAL_ST_DONE ||
         s_state == IMU_CAL_ST_WAIT_RESTORE) {
         return true;
     }
+
     begin_restore(IMU_CMD_STATE_CANCELLED, IMU_CMD_REASON_OPERATOR_Q, true);
     return true;
 }
@@ -253,6 +297,12 @@ static bool post_q(void)
 static bool post_confirm(void)
 {
     switch (s_state) {
+        case IMU_CAL_ST_CLEAR_CONFIRM:
+            s_progress.requiredAction = IMU_CMD_ACTION_NONE;
+            s_state = IMU_CAL_ST_WAIT_CLEAR;
+            s_stateEntryNs = s_nowNs;
+            set_pending(IMU_CAL_REQ_CLEAR_DCD, 0u);
+            return true;
     case IMU_CAL_ST_ACCEL_PROMPT:
         enter_state(IMU_CAL_ST_ACCEL_WINDOW, IMU_CMD_CAL_PHASE_ACCEL,
                     IMU_CAL_ACCEL_FACE_WINDOW_NS,
@@ -289,6 +339,20 @@ static bool post_session(const ImuCalSessionResult_t *sr)
         s_result.epochBefore = sr->epochBefore;
     }
     s_result.epochAfter = sr->epochAfter;
+
+    if (s_state == IMU_CAL_ST_WAIT_CLEAR) {
+        if (!sr->sessionUsable) {
+            finish(IMU_CMD_STATE_RECOVERY_FAILED,
+                   IMU_CMD_REASON_SESSION_UNUSABLE, true, false);
+            return true;
+        }
+        begin_restore(sr->success ? IMU_CMD_STATE_SUCCEEDED
+                                  : IMU_CMD_STATE_FAILED,
+                      sr->success ? IMU_CMD_REASON_OK
+                                  : IMU_CMD_REASON_DCD_CLEAR_FAILED,
+                      !sr->success);
+        return true;
+    }
 
     if (s_state == IMU_CAL_ST_WAIT_CONFIG) {
         if (!sr->success) {
@@ -348,6 +412,11 @@ static bool post_session(const ImuCalSessionResult_t *sr)
     }
     if (s_state == IMU_CAL_ST_WAIT_RESTORE) {
         if (!sr->success) {
+            if (s_clearMode) {
+                finish(IMU_CMD_STATE_RECOVERY_FAILED,
+                       IMU_CMD_REASON_SESSION_UNUSABLE, true, false);
+                return true;
+            }
             finish(IMU_CMD_STATE_RECOVERY_FAILED, IMU_CMD_REASON_CAL_RESTORE_FAILED,
                    true, false);
             return true;
@@ -503,7 +572,8 @@ void imu_cal_service(void)
 
 bool imu_cal_feed_facts(const ImuCalFacts_t *facts)
 {
-    if (!s_inited || facts == NULL || s_state == IMU_CAL_ST_DONE) {
+    if (!s_inited || s_clearMode || facts == NULL ||
+        s_state == IMU_CAL_ST_DONE) {
         return false;
     }
     s_facts = *facts;

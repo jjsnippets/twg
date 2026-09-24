@@ -28,7 +28,8 @@ typedef enum {
     IMU_CAL_REQ_CONFIGURE_CALIBRATION,
     IMU_CAL_REQ_SAVE_DCD,
     IMU_CAL_REQ_VERIFY_REOPEN,
-    IMU_CAL_REQ_RESTORE_PRODUCTION
+    IMU_CAL_REQ_RESTORE_PRODUCTION,
+    IMU_CAL_REQ_CLEAR_DCD
 } ImuCalRequestType_t;
 
 typedef struct {
@@ -39,6 +40,8 @@ typedef struct {
 typedef struct {
     ImuCalRequestType_t type;
     bool success;
+    /* False only if the action left the sole session non-actionable. */
+    bool sessionUsable;
     uint8_t policyMask;
     uint32_t epochBefore;
     uint32_t epochAfter;
@@ -58,6 +61,8 @@ typedef struct {
 } ImuCalEvent_t;
 
 bool imu_cal_init(uint8_t flightCalMask, uint64_t nowNs);
+/* Destructive calibration-family alternative; emits no request until confirm. */
+bool imu_cal_init_dcd_clear(uint8_t flightCalMask, uint64_t nowNs);
 bool imu_cal_post(const ImuCalEvent_t *event);
 void imu_cal_service(void);
 bool imu_cal_feed_facts(const ImuCalFacts_t *facts);

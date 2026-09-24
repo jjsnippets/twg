@@ -363,6 +363,53 @@ static ImuCmdPlan_t cal_then_tare_plan(uint8_t flight_mask)
     return plan;
 }
 
+static void start_dcd_clear(bool with_tare, const char *id)
+{
+    ImuCmdPlan_t plan;
+    ImuCmdEvent_t event;
+    ImuCmdProgress_t progress;
+
+    imu_session_test_reset();
+    check(imu_session_test_open(true), id, "open sole test session");
+    imu_cmd_plan_clear(&plan);
+    plan.slot1 = IMU_CMD_ID_DCD_CLEAR;
+    if (with_tare) {
+        plan.slot2 = IMU_CMD_ID_TARE;
+        plan.tareAxes = IMU_CMD_TARE_AXES_Z;
+        plan.persistTare = true;
+    }
+    check(imu_cmd_init(&plan), id, "init plan");
+    imu_cmd_service();
+    check(imu_cmd_get_progress(&progress), id, "read pending clear");
+    check(progress.active == IMU_CMD_ID_DCD_CLEAR, id, "clear selected");
+
+    event = make_tick(T0);
+    check(imu_cmd_post(&event), id, "first tick initializes clear");
+    imu_cmd_service();
+    check(imu_cmd_get_progress(&progress), id, "read clear prompt");
+    check(progress.requiredAction == IMU_CMD_ACTION_CONFIRM,
+          id, "confirmation required");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          id, "no clear before confirmation");
+}
+
+static void confirm_dcd_clear(const char *id)
+{
+    ImuCmdEvent_t event = make_event(IMU_CMD_EVENT_OPERATOR_CONFIRM);
+
+    check(imu_cmd_post(&event), id, "confirm clear");
+    imu_cmd_service();
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          id, "one clear request pending");
+}
+
+static void pump_dcd_clear(const char *id)
+{
+    imu_session_service();
+    check(imu_cal_adapter_pump(), id, "pump one session request");
+    imu_cmd_service();
+}
+
 /*
  * M01:
  * - selecting calibration does not initialize imu_cal or start its clock;
@@ -898,6 +945,154 @@ static void test_m08_adapter_hard_failure_is_unrestorable(void)
           "tare not started");
 }
 
+static void test_m09_dcd_clear_requires_confirmation_and_restores(void)
+{
+    ImuCmdEvent_t event;
+    ImuCmdResult_t result;
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+
+    start_dcd_clear(false, "M09");
+    before = snapshot_of("M09");
+    event = make_event(IMU_CMD_EVENT_STAGE_TERMINAL);
+    event.terminal.identity = IMU_CMD_ID_DCD_CLEAR;
+    event.terminal.state = IMU_CMD_STATE_SUCCEEDED;
+    event.terminal.reason = IMU_CMD_REASON_OK;
+    check(!imu_cmd_post(&event), "M09", "external terminal rejected");
+
+    confirm_dcd_clear("M09");
+    event = make_event(IMU_CMD_EVENT_OPERATOR_CONFIRM);
+    check(!imu_cmd_post(&event), "M09", "duplicate confirm rejected");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          "M09", "still one pending request");
+
+    pump_dcd_clear("M09");
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u,
+          "M09", "one flash-delete attempt");
+    check(imu_session_test_dcd_clear_reset_attempts() == 1u,
+          "M09", "one reset-command attempt");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "M09", "restore requested after accepted clear");
+    check(result_of(IMU_CMD_ID_DCD_CLEAR, "M09").state ==
+              IMU_CMD_STATE_RUNNING, "M09", "no early terminal");
+
+    pump_dcd_clear("M09");
+    after = snapshot_of("M09");
+    result = result_of(IMU_CMD_ID_DCD_CLEAR, "M09");
+    check(result.state == IMU_CMD_STATE_SUCCEEDED, "M09", "succeeded");
+    check(result.reason == IMU_CMD_REASON_OK, "M09", "OK");
+    check(result.restoredProduction, "M09", "restoration observed");
+    check(!result.dcdSaved && !result.verified,
+          "M09", "clear did not masquerade as DCD save/verification");
+    check(result.epochBefore == before.configurationEpoch,
+          "M09", "real starting epoch");
+    check(result.epochAfter == after.configurationEpoch,
+          "M09", "real ending epoch");
+    check(after.configurationEpoch == before.configurationEpoch + 1u,
+          "M09", "reset/reopen took one epoch");
+    check(!imu_cmd_do_not_acquire(), "M09", "plan may continue");
+}
+
+static void test_m10_dcd_clear_failure_restores_and_advances(void)
+{
+    ImuCmdResult_t result;
+
+    start_dcd_clear(true, "M10");
+    confirm_dcd_clear("M10");
+    imu_session_test_set_clear_dcd_results(false, true);
+    pump_dcd_clear("M10");
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u,
+          "M10", "delete attempted");
+    check(imu_session_test_dcd_clear_reset_attempts() == 0u,
+          "M10", "reset not issued after failed delete");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "M10", "failed clear requests restoration");
+
+    pump_dcd_clear("M10");
+    result = result_of(IMU_CMD_ID_DCD_CLEAR, "M10");
+    check(result.state == IMU_CMD_STATE_FAILED, "M10", "ordinary failure");
+    check(result.reason == IMU_CMD_REASON_DCD_CLEAR_FAILED,
+          "M10", "clear failure reason");
+    check(result.warningRequired && imu_cmd_warning_required(),
+          "M10", "warning retained");
+    check(result.restoredProduction, "M10", "production restored");
+    check(!imu_cmd_do_not_acquire(), "M10", "may continue");
+    imu_cmd_service();
+    check(progress_of("M10").active == IMU_CMD_ID_TARE,
+          "M10", "tare follows ordinary failure");
+}
+
+static void test_m11_dcd_clear_reopen_failure_stops_plan(void)
+{
+    ImuCmdResult_t result;
+
+    start_dcd_clear(true, "M11");
+    confirm_dcd_clear("M11");
+    imu_session_test_set_reopen_result(false);
+    pump_dcd_clear("M11");
+    result = result_of(IMU_CMD_ID_DCD_CLEAR, "M11");
+    check(result.state == IMU_CMD_STATE_RECOVERY_FAILED,
+          "M11", "reopen failure");
+    check(result.reason == IMU_CMD_REASON_SESSION_UNUSABLE,
+          "M11", "session unusable");
+    check(!result.restoredProduction, "M11", "no false restore");
+    check(imu_cmd_do_not_acquire() && imu_cmd_plan_complete(),
+          "M11", "plan stopped");
+    check(imu_cmd_request() == IMU_CMD_REQ_STOP_PLAN,
+          "M11", "stop requested");
+    check(result_of(IMU_CMD_ID_TARE, "M11").state ==
+              IMU_CMD_STATE_NOT_REQUESTED, "M11", "tare not started");
+}
+
+static void test_m12_dcd_clear_q_before_mutation(void)
+{
+    ImuCmdEvent_t event;
+    ImuCmdResult_t result;
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+
+    start_dcd_clear(false, "M12");
+    before = snapshot_of("M12");
+    event = make_event(IMU_CMD_EVENT_OPERATOR_Q);
+    check(imu_cmd_post(&event), "M12", "q");
+    imu_cmd_service();
+    after = snapshot_of("M12");
+    result = result_of(IMU_CMD_ID_DCD_CLEAR, "M12");
+    check(result.state == IMU_CMD_STATE_CANCELLED, "M12", "cancelled");
+    check(result.reason == IMU_CMD_REASON_OPERATOR_Q, "M12", "q reason");
+    check(before.configurationEpoch == after.configurationEpoch,
+          "M12", "no mutation epoch");
+    check(imu_session_test_dcd_flash_delete_attempts() == 0u &&
+          imu_session_test_dcd_clear_reset_attempts() == 0u,
+          "M12", "no destructive action");
+    check(!result.restoredProduction, "M12", "no invented restoration");
+}
+
+static void test_m13_dcd_clear_stop_prevents_later_pump(void)
+{
+    ImuCmdEvent_t event;
+    ImuCmdResult_t result;
+
+    start_dcd_clear(false, "M13");
+    confirm_dcd_clear("M13");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          "M13", "request pending when stop arrives");
+    event = make_event(IMU_CMD_EVENT_PROCESS_STOP);
+    check(imu_cmd_post(&event), "M13", "adopt stop");
+    imu_cmd_service();
+
+    /* The stopped owner does not call pump_dcd_clear() here. */
+    result = result_of(IMU_CMD_ID_DCD_CLEAR, "M13");
+    check(result.state == IMU_CMD_STATE_ABANDONED &&
+          result.reason == IMU_CMD_REASON_PROCESS_STOP,
+          "M13", "process stop is not q");
+    check(imu_cmd_process_stop_seen() && imu_cmd_do_not_acquire(),
+          "M13", "stopped and cannot acquire");
+    check(imu_session_test_dcd_flash_delete_attempts() == 0u &&
+          imu_session_test_dcd_clear_reset_attempts() == 0u,
+          "M13", "no post-stop clear execution");
+}
+
 int main(void)
 {
     test_m01_first_tick_initializes_and_next_turn_pumps_configure();
@@ -908,6 +1103,11 @@ int main(void)
     test_m06_progress_mirrors_and_confirm_routes_through_cmd();
     test_m07_process_stop_abandons_without_later_pump();
     test_m08_adapter_hard_failure_is_unrestorable();
+    test_m09_dcd_clear_requires_confirmation_and_restores();
+    test_m10_dcd_clear_failure_restores_and_advances();
+    test_m11_dcd_clear_reopen_failure_stops_plan();
+    test_m12_dcd_clear_q_before_mutation();
+    test_m13_dcd_clear_stop_prevents_later_pump();
 
     if (g_fail != 0) {
         fprintf(stderr, "test_imu_cmd_cal: %d failure(s)\n", g_fail);

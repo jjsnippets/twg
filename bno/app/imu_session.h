@@ -202,6 +202,15 @@ bool imu_session_get_cal_policy(uint8_t *outMask);
 bool imu_session_save_dcd(void);
 
 /*
+ * CONFIGURING only. Delete DCD FRS record 0x1F1F, issue Clear DCD and
+ * Reset, then recover/reopen through this sole session owner.
+ * False may leave CONFIGURING (request failed before reset) or FAULTED
+ * (accepted reset could not be reopened); callers must inspect state.
+ * A reset/recovery event takes exactly one configuration epoch.
+ */
+bool imu_session_clear_dcd(void);
+
+/*
  * Planned calibration verification reopen.
  * Must not pass through CLOSED. Increments epoch once, clears validity,
  * returns CONFIGURING. A successful planned reopen is not recovery and
@@ -312,6 +321,10 @@ void imu_session_test_inject_reset(void);
 bool imu_session_test_force_state(ImuReaderState_t state);
 void imu_session_test_inject_cal_facts(const ImuCalFacts_t *facts);
 void imu_session_test_set_save_dcd_result(bool success);
+void imu_session_test_set_clear_dcd_results(bool flashDeleteOk,
+                                            bool clearResetOk);
+uint32_t imu_session_test_dcd_flash_delete_attempts(void);
+uint32_t imu_session_test_dcd_clear_reset_attempts(void);
 void imu_session_test_set_reopen_result(bool success);
 void imu_session_test_inject_tare_facts(const ImuTareFacts_t *facts);
 void imu_session_test_set_configure_tare_result(bool success);

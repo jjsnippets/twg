@@ -22,6 +22,15 @@ static bool forward_cal_facts(void)
 {
     ImuCalFacts_t facts;
 
+    ImuCmdProgress_t progress;
+
+    if (!imu_cal_get_progress(&progress)) {
+        return false;
+    }
+    if (progress.active == IMU_CMD_ID_DCD_CLEAR) {
+        return true;
+    }
+
     if (!imu_session_get_cal_facts(&facts)) {
         return true;
     }
@@ -46,6 +55,9 @@ static bool execute_request(const ImuCalPendingRequest_t *request,
     result->type = request->type;
 
     switch (request->type) {
+    case IMU_CAL_REQ_CLEAR_DCD:
+        result->success = imu_session_clear_dcd();
+        return true;
     case IMU_CAL_REQ_CONFIGURE_CALIBRATION:
         result->success =
             imu_session_configure_calibration(request->calMask);
@@ -86,6 +98,10 @@ bool imu_cal_adapter_pump(void)
     uint32_t epochBefore;
     uint32_t epochAfter;
 
+    if (imu_cal_complete()) {
+        return imu_cal_pending_request().type == IMU_CAL_REQ_NONE;
+    }
+
     if (!forward_cal_facts()) {
         return false;
     }
@@ -108,6 +124,19 @@ bool imu_cal_adapter_pump(void)
     }
     result.epochBefore = epochBefore;
     result.epochAfter = epochAfter;
+
+    {
+        ImuSampleSnapshot_t snapshot;
+
+        if (!imu_session_get_snapshot(&snapshot)) {
+            return false;
+        }
+        result.sessionUsable =
+            snapshot.readerState != IMU_READER_STATE_FAULTED &&
+            snapshot.readerState != IMU_READER_STATE_CLOSED &&
+            snapshot.readerState != IMU_READER_STATE_OPENING &&
+            snapshot.readerState != IMU_READER_STATE_RECOVERING;
+    }
 
     memset(&event, 0, sizeof(event));
     event.type = IMU_CAL_EVENT_SESSION_RESULT;
