@@ -20,6 +20,9 @@ CLI_H="${BNO_DIR}/app/imu_cli.h"
 CONSOLE_C="${BNO_DIR}/app/imu_console.c"
 CONSOLE_H="${BNO_DIR}/app/imu_console.h"
 MAIN_C="${BNO_DIR}/app/main.c"
+CAL_ADAPTER_C="${BNO_DIR}/app/imu_cal_adapter.c"
+TARE_ADAPTER_C="${BNO_DIR}/app/imu_tare_adapter.c"
+CHECK_ADAPTER_C="${BNO_DIR}/app/imu_check_adapter.c"
 HAL_C="${BNO_DIR}/app/sh2_hal_rpi.c"
 RT_C="${REPO_DIR}/rt/realtime.c"
 
@@ -70,6 +73,20 @@ scan_calls "$CONSOLE_H" StartRT RT_SleepUntil usleep nanosleep sleep exit \
 # The existing main has no owner-side blocking stdin read; Step 8.5 must
 # retain this property when the console adapter is wired.
 scan_calls "$MAIN_C" fgets getchar getline scanf read
+scan_calls "$CAL_ADAPTER_C" StartRT RT_SleepUntil
+scan_calls "$TARE_ADAPTER_C" StartRT RT_SleepUntil
+scan_calls "$CHECK_ADAPTER_C" StartRT RT_SleepUntil
+
+# Production code has one visible scheduler owner and one normal-turn
+# absolute-sleep call site, both in main.c.
+if [ -f "$MAIN_C" ]; then
+    sleep_sites=$(grep -Ec \
+        '(^|[^[:alnum:]_])RT_SleepUntil[[:space:]]*\(' "$MAIN_C" || true)
+    if [ "$sleep_sites" -ne 1 ]; then
+        echo "FAIL $(relpath "$MAIN_C"): expected one RT_SleepUntil call site"
+        fail=$((fail + 1))
+    fi
+fi
 scan_calls "$RT_C" exit
 scan_calls "$HAL_C" StartRT RT_SleepUntil exit
 

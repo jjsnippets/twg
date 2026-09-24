@@ -15,8 +15,7 @@
 #
 # Targets:
 #   make                build bin/bno_app (default)
-#   make app            build bin/bno_app (imu_session + main; no imu_cmd,
-#                       imu_cal, imu_tare, or adapters)
+#   make app            build the unified session-backed bno_app
 #   make cal            build bin/bno_cal
 #   make orient         build bin/bno_orient
 #   make validate       build bin/bno_validate
@@ -62,7 +61,18 @@ APPHALOBJ := $(BUILDDIR)/app_sh2_hal_rpi.o
 RTOBJ     := $(BUILDDIR)/rt_realtime.o
 
 # App objects
-APPOBJS := $(BUILDDIR)/app_imu_session.o $(BUILDDIR)/app_main.o
+APPOBJS := \
+	$(BUILDDIR)/app_main.o \
+	$(BUILDDIR)/app_imu_session.o \
+	$(BUILDDIR)/app_imu_cmd.o \
+	$(BUILDDIR)/app_imu_cal.o \
+	$(BUILDDIR)/app_imu_cal_adapter.o \
+	$(BUILDDIR)/app_imu_tare.o \
+	$(BUILDDIR)/app_imu_tare_adapter.o \
+	$(BUILDDIR)/app_imu_check.o \
+	$(BUILDDIR)/app_imu_check_adapter.o \
+	$(BUILDDIR)/app_imu_cli.o \
+	$(BUILDDIR)/app_imu_console.o
 
 # Calibration objects
 CALOBJS := $(BUILDDIR)/cal_cal_sensor.o $(BUILDDIR)/cal_cal_main.o
@@ -96,6 +106,7 @@ TESTRTFALLBACKSRC   := $(TESTDIR)/test_rt_fallback_policy.c
 TESTCMDSRC          := $(TESTDIR)/test_imu_cmd.c
 TESTCLISRC          := $(TESTDIR)/test_imu_cli.c
 TESTCONSOLESRC      := $(TESTDIR)/test_imu_console.c
+TESTAPPLOOPSRC      := $(TESTDIR)/test_app_owner_loop.c
 TESTCHECKSRC        := $(TESTDIR)/test_imu_check.c
 TESTCMDCALSRC       := $(TESTDIR)/test_imu_cmd_cal.c
 TESTCMDTARESRC      := $(TESTDIR)/test_imu_cmd_tare.c
@@ -168,7 +179,7 @@ test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_imu_cmd_tare $(BINDIR)/test_imu_check \
 	$(BINDIR)/test_session_check $(BINDIR)/test_imu_check_adapter \
 	$(BINDIR)/test_imu_cmd_check $(BINDIR)/test_imu_cli \
-	$(BINDIR)/test_imu_console
+	$(BINDIR)/test_imu_console $(BINDIR)/test_app_owner_loop
 	$(BINDIR)/test_quad_decode
 	$(BINDIR)/test_session_r1_epoch
 	$(BINDIR)/test_realtime_start
@@ -188,6 +199,7 @@ test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_imu_cmd_check
 	$(BINDIR)/test_imu_cli
 	$(BINDIR)/test_imu_console
+	$(BINDIR)/test_app_owner_loop
 	bash $(TESTDIR)/audit_scheduling.sh
 
 $(BINDIR)/test_session_r1_epoch: $(TESTSESSIONSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
@@ -215,6 +227,10 @@ $(BINDIR)/test_imu_cli: $(TESTCLISRC) $(APPDIR)/imu_cli.c \
 $(BINDIR)/test_imu_console: $(TESTCONSOLESRC) \
 	$(APPDIR)/imu_console.c | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
+
+$(BINDIR)/test_app_owner_loop: $(TESTAPPLOOPSRC) \
+    $(APPDIR)/main.c | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(TESTAPPLOOPSRC)
 
 $(BINDIR)/test_session_tare: $(TESTSESSIONTARESRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
