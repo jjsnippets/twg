@@ -220,8 +220,12 @@ ImuCliStatus_t imu_cli_parse(int argc, char *const argv[],
         bool cal = (seen & SEEN_CAL) != 0u;
         bool tare = (seen & SEEN_TARE) != 0u;
 
-        /* Decision A: neither and both are illegal, in any argv order. */
-        if (cal == tare) {
+        /*
+         * Amendment: one --clear applies to each requested family.
+         * No family is illegal; both select two ordered clear stages.
+         * Repeated --clear remains rejected by the duplicate-flag check.
+         */
+        if (!cal && !tare) {
             return fail(out, IMU_CLI_ERROR_ILLEGAL_COMBINATION,
                         clearIndex);
         }

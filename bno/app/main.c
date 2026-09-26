@@ -448,11 +448,36 @@ static bool render_outputs(void *opaque, uint64_t nowNs)
         const ImuSampleSnapshot_t *s = &app->latestSample;
 
         if (printf("acquisition epoch=%" PRIu32
-                   " validMask=0x%02x observations=%" PRIu64
-                   " yaw=%.3f pitch=%.3f roll=%.3f\n",
+                   " validMask=0x%02x observations=%" PRIu64,
                    s->configurationEpoch, s->validMask,
-                   app->observedFrames, s->yaw, s->pitch,
-                   s->roll) < 0) {
+                   app->observedFrames) < 0) {
+            return false;
+        }
+        if (s->validMask & IMU_GROUP_BIT_ROTATION) {
+            if (printf(" yaw=%.3f pitch=%.3f roll=%.3f",
+                       s->yaw, s->pitch, s->roll) < 0) {
+                return false;
+            }
+        } else if (fputs(" orientation=not_seen", stdout) == EOF) {
+            return false;
+        }
+        if (s->validMask & IMU_GROUP_BIT_ACCEL) {
+            if (printf(" ax=%.3f ay=%.3f az=%.3f",
+                       s->ax, s->ay, s->az) < 0) {
+                return false;
+            }
+        } else if (fputs(" linear_accel=not_seen", stdout) == EOF) {
+            return false;
+        }
+        if (s->validMask & IMU_GROUP_BIT_GYRO) {
+            if (printf(" gx=%.3f gy=%.3f gz=%.3f",
+                       s->gx, s->gy, s->gz) < 0) {
+                return false;
+            }
+        } else if (fputs(" calibrated_gyro=not_seen", stdout) == EOF) {
+            return false;
+        }
+        if (putchar('\n') == EOF) {
             return false;
         }
         app->lastAcquisitionPrintNs = nowNs;

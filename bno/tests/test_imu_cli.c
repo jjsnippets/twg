@@ -79,6 +79,14 @@ static void test_accepted_forms(void)
     char *full[] = {"bno_app", "--tare-imu", "--full"};
     char *tcheck[] = {"bno_app", "--tare-imu", "--check"};
     char *tclear[] = {"bno_app", "--tare-imu", "--clear"};
+    char *bothClear[] = {"bno_app", "--cal-imu",
+                         "--tare-imu", "--clear"};
+    char *bothClearReordered[] = {"bno_app", "--clear",
+                                  "--tare-imu", "--cal-imu",
+                                  "--duration", "1"};
+    char *bothClearProbe[] = {"bno_app", "--cal-imu",
+                              "--tare-imu", "--clear",
+                              "--check-imu", "--mask", "0x00"};
     char *checkOnly[] = {"bno_app", "--check-imu"};
     char *probeZero[] = {"bno_app", "--check-imu", "--mask", "0"};
     char *probeHexZero[] = {"bno_app", "--check-imu", "--mask", "0x00"};
@@ -109,6 +117,12 @@ static void test_accepted_forms(void)
               IMU_CMD_ID_TARE_CHECK, IMU_CMD_ID_NONE, false, 0u, 10u);
     expect_ok("CLI07", 3, tclear, IMU_CMD_ID_NONE,
               IMU_CMD_ID_TARE_CLEAR, IMU_CMD_ID_NONE, false, 0u, 10u);
+    expect_ok("CLI23", 4, bothClear, IMU_CMD_ID_DCD_CLEAR,
+              IMU_CMD_ID_TARE_CLEAR, IMU_CMD_ID_NONE, false, 0u, 10u);
+    expect_ok("CLI24", 6, bothClearReordered, IMU_CMD_ID_DCD_CLEAR,
+              IMU_CMD_ID_TARE_CLEAR, IMU_CMD_ID_NONE, false, 0u, 1u);
+    expect_ok("CLI25", 7, bothClearProbe, IMU_CMD_ID_DCD_CLEAR,
+              IMU_CMD_ID_TARE_CLEAR, IMU_CMD_ID_PROBE, true, 0u, 10u);
     expect_ok("CLI08", 2, checkOnly, IMU_CMD_ID_NONE, IMU_CMD_ID_NONE,
               IMU_CMD_ID_CHECK, false, 0u, 10u);
     expect_ok("CLI09", 4, probeZero, IMU_CMD_ID_NONE, IMU_CMD_ID_NONE,
@@ -136,6 +150,14 @@ static void test_accepted_forms(void)
     check(PARSE(tclear, p) == IMU_CLI_STATUS_OK &&
           p.plan.confirmTareClear && !p.plan.confirmDcdClear,
           "CLI19", "tare-clear confirmation belongs to slot 2");
+    check(PARSE(bothClear, p) == IMU_CLI_STATUS_OK &&
+          p.plan.confirmDcdClear &&
+          p.plan.confirmTareClear &&
+          !p.plan.confirmTare &&
+          !p.plan.persistTare &&
+          p.plan.tareAxes == IMU_CMD_TARE_AXES_NONE,
+          "CLI26", "both clears need separate confirmations;"
+                   " no guided calibration or tare-now");
     check(PARSE(tare, p) == IMU_CLI_STATUS_OK &&
           p.plan.tareAxes == IMU_CMD_TARE_AXES_Z &&
           p.plan.persistTare && p.plan.confirmTare,
@@ -160,8 +182,12 @@ static void test_invalid_forms(void)
                              "--mask", "2"};
     char *duplicateClear[] = {"bno_app", "--cal-imu", "--clear", "--clear"};
     char *orphanClear[] = {"bno_app", "--clear"};
-    char *ambiguousClear[] = {"bno_app", "--cal-imu", "--tare-imu",
-                              "--clear"};
+    char *repeatedBothClear[] = {"bno_app", "--cal-imu",
+                                 "--clear", "--tare-imu", "--clear"};
+    char *bothClearFull[] = {"bno_app", "--cal-imu",
+                             "--tare-imu", "--clear", "--full"};
+    char *bothClearCheck[] = {"bno_app", "--cal-imu",
+                              "--tare-imu", "--clear", "--check"};
     char *orphanFull[] = {"bno_app", "--full"};
     char *orphanTcheck[] = {"bno_app", "--check"};
     char *orphanMask[] = {"bno_app", "--mask", "0"};
@@ -187,8 +213,12 @@ static void test_invalid_forms(void)
                  IMU_CLI_ERROR_REPEATED_OPTION, 3);
     expect_error("CLI38", 2, orphanClear,
                  IMU_CLI_ERROR_ILLEGAL_COMBINATION, 1);
-    expect_error("CLI39", 4, ambiguousClear,
-                 IMU_CLI_ERROR_ILLEGAL_COMBINATION, 3);
+    expect_error("CLI39", 5, repeatedBothClear,
+                 IMU_CLI_ERROR_REPEATED_OPTION, 4);
+    expect_error("CLI48", 5, bothClearFull,
+                 IMU_CLI_ERROR_ILLEGAL_COMBINATION, 4);
+    expect_error("CLI49", 5, bothClearCheck,
+                 IMU_CLI_ERROR_ILLEGAL_COMBINATION, 4);
     expect_error("CLI40", 2, orphanFull,
                  IMU_CLI_ERROR_ILLEGAL_COMBINATION, 1);
     expect_error("CLI41", 2, orphanTcheck,
