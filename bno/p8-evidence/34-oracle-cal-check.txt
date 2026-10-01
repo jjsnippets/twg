@@ -1,0 +1,48 @@
+Script started on 2026-10-01 12:21:26+08:00 [COMMAND="date --iso-8601=seconds; sudo bno/bin/bno_cal --check; rc=$?; date --iso-8601=seconds; echo app_exit=$rc; exit "$rc"" TERM="xterm" TTY="/dev/pts/0" COLUMNS="112" LINES="56"]
+2026-10-01T12:21:26+08:00
+bno_cal --check: opening session (read-only inspection)...
+ME dynamic calibration config: accel off, gyro off, mag off (mask 0x00)
+note: the gyro accuracy bit reads 0 while gyro dynamic cal is off (observed on this unit); it is not part of the verdict.
+monitoring accuracy live (press Ctrl+C to terminate)...
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 0.00 rad  mag=(   0.00    0.00    0.00) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.25   78.56   19.12) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.00   77.56   17.88) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -7.94   77.00   18.38) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -9.56   78.06   18.25) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.44   78.00   19.00) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.69   78.31   19.44) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.12   76.56   18.19) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.62   78.38   19.06) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -9.00   78.88   18.19) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -7.88   77.94   18.62) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.50   77.12   18.69) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.56   77.44   17.06) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.19   77.81   18.25) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -9.00   77.94   17.94) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.38   76.75   19.00) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -7.81   78.25   19.50) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.50   77.19   18.75) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.56   79.38   19.06) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.69   78.06   18.31) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.88   77.06   18.62) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -9.06   78.50   17.38) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.25   77.75   18.56) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.31   76.81   18.62) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.12   78.19   19.06) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -9.62   78.62   17.69) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -9.12   77.19   19.38) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.00   76.19   18.12) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -9.06   77.88   18.25) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.31   77.75   18.88) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -9.81   77.44   18.38) uT
+  [acc 2  gyr 0  mag 0  rv 0]  rv_err= 3.14 rad  mag=(  -8.62   76.94   19.69) uT
+^C
+  accelerometer accuracy: 2 (medium (2))
+  gyroscope accuracy:     0 (unreliable (0))  [reads 0 while gyro dynamic cal is off - observed on this unit; not gated]
+  magnetometer accuracy:  0 (unreliable (0))
+  rotation vector:        accuracy 0 (unreliable (0)), heading error est. 3.14 rad
+RESULT: NOT CALIBRATED - run bno_cal (exit 3)
+2026-10-01T12:21:43+08:00
+app_exit=3
+
+Script done on 2026-10-01 12:21:43+08:00 [COMMAND_EXIT_CODE="3"]

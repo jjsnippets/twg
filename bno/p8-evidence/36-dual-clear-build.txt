@@ -1,0 +1,8 @@
+2026-10-01T12:34:09+08:00
+twg1
+9dfd53f1-60b9-47cc-a8fb-148285dc1ddd
+6146.22 24298.98
+62d9d70c215adcdbdb1992b960dd46825e94fb1e
+?? bno/p8-evidence/36-dual-clear-build.txt
+89d22d6f107bd766ab47b0a977956299d32c918658d67df21853a5482684e524  bno/bin/bno_app
+Authorization: one combined DCD-clear then tare-clear validation; two fresh CLEAR confirmations; leave device cleared; no automatic recalibration or tare.

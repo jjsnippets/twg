@@ -1,0 +1,41 @@
+Script started on 2026-10-01 12:21:51+08:00 [COMMAND="date --iso-8601=seconds; sudo bno/bin/bno_orient --check; rc=$?; date --iso-8601=seconds; echo app_exit=$rc; exit "$rc"" TERM="xterm" TTY="/dev/pts/0" COLUMNS="112" LINES="56"]
+2026-10-01T12:21:51+08:00
+bno_orient --check: opening session (read-only inspection)...
+monitoring rotation vector live (press Ctrl+C to terminate)...
+  q=[ 0.992,-0.122, 0.011,-0.038] yaw   -4.47 pitch   0.68 roll -14.03 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.011,-0.038] yaw   -4.47 pitch   0.71 roll -14.06 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.011,-0.038] yaw   -4.47 pitch   0.77 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.011,-0.038] yaw   -4.47 pitch   0.77 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.78 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.79 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.80 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.80 roll -14.10 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.46 pitch   0.82 roll -14.11 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.46 pitch   0.82 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.46 pitch   0.82 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.82 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.46 pitch   0.82 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.81 roll -14.10 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.46 pitch   0.81 roll -14.10 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.80 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.79 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.80 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.46 pitch   0.81 roll -14.10 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.81 roll -14.11 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.81 roll -14.11 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.81 roll -14.11 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.79 roll -14.11 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.79 roll -14.10 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.80 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.82 roll -14.11 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.47 pitch   0.81 roll -14.10 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.46 pitch   0.82 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.46 pitch   0.82 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.46 pitch   0.82 roll -14.09 deg [rv acc 3]  
+  q=[ 0.992,-0.122, 0.012,-0.038] yaw   -4.46 pitch   0.82 roll -14.09 deg [rv acc 3]  
+^C
+attitude: q=[0.9917, -0.1223, 0.0117, -0.0377]  yaw -4.46  pitch 0.80  roll -14.09 deg  (rv accuracy 3, High)
+2026-10-01T12:22:07+08:00
+app_exit=0
+
+Script done on 2026-10-01 12:22:07+08:00 [COMMAND_EXIT_CODE="0"]

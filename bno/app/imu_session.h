@@ -20,6 +20,9 @@
 #define IMU_CHECK_MAG_INTERVAL_US  (1000000u / IMU_CHECK_MAG_RATE_HZ)
 #define IMU_CHECK_SLOW_INTERVAL_US (1000000u / IMU_CHECK_SLOW_RATE_HZ)
 
+/* Receipt evidence, not the latest-value ImuCheckFacts_t policy mailbox. */
+#define IMU_CHECK_DIAGNOSTICS_VERSION 1u
+
 /*
  * Calibration-only mailbox. Not part of production R2.
  * Accuracies are report STATUS bits 0-3. rvErrRad is the RV payload
@@ -49,6 +52,28 @@ typedef enum {
     IMU_SESSION_CHECK_MODE_CHECK = 1,
     IMU_SESSION_CHECK_MODE_PROBE
 } ImuSessionCheckMode_t;
+
+typedef struct {
+    /* Successful expected decodes since this process/session test reset. */
+    uint64_t processDecodeCount;
+   /* Successful expected decodes in the eligible CHECK/PROBE epoch. */
+    uint64_t epochDecodeCount;
+    /* First/latest captured nonzero host-decode time in that epoch. */
+    bool hostTimesValid;
+    uint64_t firstHostDecodeNs;
+    uint64_t latestHostDecodeNs;
+} ImuCheckReportDiagnostic_t;
+
+typedef struct {
+    uint32_t version;
+    uint32_t configurationEpoch;
+    bool eligible;
+    ImuSessionCheckMode_t mode; /* Meaningful only when eligible. */
+    ImuCheckReportDiagnostic_t mag;
+    ImuCheckReportDiagnostic_t accel;
+    ImuCheckReportDiagnostic_t gyro;
+    ImuCheckReportDiagnostic_t rv;
+} ImuCheckDiagnostics_t;
 
 /*
  * The call's return value is success. A readable-but-different mask makes
@@ -186,6 +211,14 @@ bool imu_session_configure_check(ImuSessionCheckMode_t mode, uint8_t mask,
 bool imu_session_get_check_facts(ImuCheckFacts_t *out);
 
 /*
+ * Copy separate CHECK/PROBE receipt diagnostics. False if out is NULL or
+ * no session mailbox exists. Not R2, R4, R7/R8, or publisher freshness.
+ * An ineligible snapshot retains process totals but not prior-epoch
+ * counts or timestamps.
+ */
+bool imu_session_get_check_diagnostics(ImuCheckDiagnostics_t *out);
+
+/*
  * Enables the calibration report set and applies sh2_setCalConfig(calMask).
  * Legal from CONFIGURING. Increments epoch (report set + policy change),
  * clears validMask, enters CALIBRATION. Does not open a second session.
@@ -202,6 +235,15 @@ bool imu_session_get_cal_policy(uint8_t *outMask);
 bool imu_session_save_dcd(void);
 
 /*
+ * CONFIGURING only. Delete DCD FRS record 0x1F1F, issue Clear DCD and
+ * Reset, then recover/reopen through this sole session owner.
+ * False may leave CONFIGURING (request failed before reset) or FAULTED
+ * (accepted reset could not be reopened); callers must inspect state.
+ * A reset/recovery event takes exactly one configuration epoch.
+ */
+bool imu_session_clear_dcd(void);
+
+/*
  * Planned calibration verification reopen.
  * Must not pass through CLOSED. Increments epoch once, clears validity,
  * returns CONFIGURING. A successful planned reopen is not recovery and
@@ -209,6 +251,15 @@ bool imu_session_save_dcd(void);
  * If reopen fails, normal recovery/fault accounting begins.
  */
 bool imu_session_begin_verification_reopen(void);
+
+/*
+ * Same-session daily-calibration verification transition.
+ * Legal only from CALIBRATION. Applies the verification calibration policy
+ * without closing/reopening the SH-2 session, starts exactly one new
+ * configuration epoch, clears current-epoch facts/validity, and remains in
+ * CALIBRATION. A true result is not persistence or reset evidence.
+ */
+bool imu_session_reconfigure_calibration(uint8_t calMask);
 
 /* Copy the calibration mailbox. False if out is NULL or never constructed. */
 bool imu_session_get_cal_facts(ImuCalFacts_t *out);
@@ -312,6 +363,10 @@ void imu_session_test_inject_reset(void);
 bool imu_session_test_force_state(ImuReaderState_t state);
 void imu_session_test_inject_cal_facts(const ImuCalFacts_t *facts);
 void imu_session_test_set_save_dcd_result(bool success);
+void imu_session_test_set_clear_dcd_results(bool flashDeleteOk,
+                                            bool clearResetOk);
+uint32_t imu_session_test_dcd_flash_delete_attempts(void);
+uint32_t imu_session_test_dcd_clear_reset_attempts(void);
 void imu_session_test_set_reopen_result(bool success);
 void imu_session_test_inject_tare_facts(const ImuTareFacts_t *facts);
 void imu_session_test_set_configure_tare_result(bool success);

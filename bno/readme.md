@@ -766,3 +766,212 @@ acquisition. The top-level integration executable must remain the sole
 scheduler and continue servicing SH-2 at 1 kHz.
 
 Implementation continues on the `bno-integrate` branch rather than `main`.
+
+## Phase 8 integrated executable
+
+`bin/bno_app` is the Phase 8 integrated BNO085 executable. It owns one
+active `imu_session`, one visible 1 kHz owner loop, process signals, and
+the application-facing console adapter. Reusable machines, adapters, the
+CLI parser, and the session do not own process termination or real-time
+scheduling.
+
+Phase 8 console output is human-facing diagnostic output only. It is not a
+CSV, R9 publication record, freshness claim, or archival metadata format.
+
+### Build
+
+From the repository root:
+
+```bash
+make -C bno clean
+make -C bno test
+make -C bno app
+```
+
+The executable requires the configured BNO085 SPI/GPIO environment and
+appropriate device/scheduling privileges when running against hardware.
+Do not run `bno_app`, `bno_cal`, `bno_orient`, or validation tools
+concurrently against the same BNO085.
+
+### Command line
+
+```text
+bno_app
+bno_app --cal-imu
+bno_app --cal-imu --clear
+bno_app --tare-imu
+bno_app --tare-imu --full
+bno_app --tare-imu --check
+bno_app --tare-imu --clear
+bno_app --cal-imu --tare-imu --clear
+bno_app --check-imu
+bno_app --check-imu --mask MASK
+bno_app [valid operation flags] --duration SECONDS
+bno_app --help
+```
+
+The parser accepts no aliases, abbreviations, positional arguments, combined
+short options, or repeated flags. `--help` is exclusive and returns success
+without starting the console worker, opening SPI/GPIO, or starting the
+session.
+
+| Form | Meaning |
+|---|---|
+| No operation flags | Production configuration, 300 ms settle, then acquisition |
+| `--cal-imu` | Guided daily/session-scoped calibration |
+| `--cal-imu --clear` | Destructive DCD clear only |
+| `--tare-imu` | Z-axis tare and persistent tare save |
+| `--tare-imu --full` | Full XYZ tare and persistent tare save |
+| `--tare-imu --check` | Tare-family live attitude check |
+| `--tare-imu --clear` | Destructive active-and-saved tare clear |
+| `--cal-imu --tare-imu --clear` | DCD clear first, then tare clear |
+| `--check-imu` | Continuous calibration readiness check with effective mask `0x00` |
+| `--check-imu --mask MASK` | Timed 10-second probe; mask presence, including `0x00`, selects probe |
+| `--duration SECONDS` | Final acquisition window only; range 1 through 3600 |
+
+`--clear` applies to every requested clear-capable family. Repeating
+`--clear` is an error. Clear cannot be combined with `--full` or
+tare-family `--check`.
+
+`--mask` accepts decimal or `0x`/`0X` hexadecimal values from 0 through
+255. Signs, whitespace payloads, trailing junk, and values above eight bits
+are rejected. `--duration` is decimal only; an optional leading `+` is
+accepted, while hex, zero, negative values, decimals, suffixes, and values
+above 3600 are rejected.
+
+### Ordered execution
+
+Regardless of argument order, the coordinator uses this fixed plan order:
+
+```text
+calibration family
+→ tare family
+→ check or probe family
+→ production restoration/configuration
+→ 300 ms settle
+→ acquisition
+```
+
+Ordinary command failure, stage-local `q`, timed probe completion, and
+restorable destructive-command failure produce an R7 result and may continue
+the plan. `RECOVERY_FAILED / SESSION_UNUSABLE` inhibits acquisition.
+`SIGINT` and `SIGTERM` are process stop, not `q`; a stop is adopted before
+any later adapter pump.
+
+### Calibration policy
+
+Guided calibration is a daily/session-scoped workflow:
+
+```text
+dynamic calibration mask 0x07
+→ best-effort DCD save
+→ same-session verification with mask 0x00
+→ production restore
+→ 300 ms settle
+→ acquisition
+```
+
+The ordinary integrated calibration path does not deliberately reset, close,
+or reopen the BNO085 between guided calibration and verification. A successful
+calibration R7 means same-session verification passed and production was
+restored.
+
+`dcdSaved=1` truthfully reports an observed DCD-save success, but does not
+claim that calibration was verified across reset, process restart, or power
+loss. Daily operation requires calibration again after reset/restart/power
+cycle, regardless of any DCD that may remain in device storage.
+
+If DCD save fails after its bounded retries, the calibration result remains an
+ordinary warning/failure. The same-session verification and production restore
+may still run; if both succeed, later requested stages and acquisition remain
+eligible. This is a best-effort device-copy policy, not a persistence
+acceptance policy.
+
+### Destructive commands
+
+`--cal-imu --clear`, `--tare-imu --clear`, and the combined two-clear form
+are destructive. Each clear stage requires a separate fresh, exact:
+
+```text
+CLEAR
+```
+
+followed by Enter. Input typed ahead of a destructive stage is discarded at
+the stage boundary; a `CLEAR` intended for DCD clear cannot authorize later
+tare clear. Use `q` followed by Enter to cancel a currently active
+cancellable stage. Destructive clear success followed by acquisition produces
+post-clear diagnostic data only; valid reports or `validMask` do not establish
+calibrated or correctly tared flight readiness.
+
+Physical clear, guided calibration, persistent tare, and tare clear require
+separate operator authorization before execution.
+
+### Console behavior
+
+The console input worker runs as `SCHED_OTHER`. It reads complete canonical
+lines, sends normalized events to a bounded nonblocking handoff, and never
+calls command, adapter, or session actions directly. The 1 kHz owner thread
+dequeues at most one input event per turn and never performs blocking stdin
+input.
+
+| Terminal input | Accepted only when |
+|---|---|
+| `q` + Enter | An active cancellable command requests a stage-local cancel |
+| `CLEAR` + Enter | DCD-clear or tare-clear confirmation is currently pending |
+| `y` + Enter | Normal aligned tare confirmation is currently pending |
+| Enter | The displayed calibration face/gyro/mag/verify prompt requests it |
+| Any other line | Ignored; it cannot become confirmation |
+| EOF | Stops the input worker only; it is not process stop |
+
+R8 is the latest live command snapshot. The top-level owner renders it every
+500 ms and on material prompt/phase changes. R7 is a separate terminal result
+rendered once per completed identity. A timed probe remains
+`TIMED_OUT / PROBE_DEADLINE` even if its historical `gateReached` value is
+true; the final current verdict and sticky history are displayed separately.
+
+During acquisition, the owner observes one production snapshot at the 10 ms
+gate and prints a concise terminal status approximately every 500 ms. The
+line can show:
+
+```text
+epoch, validMask, observation count,
+yaw/pitch/roll,
+linear acceleration ax/ay/az,
+calibrated gyro gx/gy/gz
+```
+
+`not_seen` is printed for a production group that has not yet become valid in
+the current configuration epoch. A nonzero `validMask` means a group was
+decoded in the current epoch; it is not a freshness, synchronization, or
+calibration-quality claim.
+
+### Check and probe
+
+CHECK and PROBE configure calibrated magnetic field at 50 Hz plus
+accelerometer, calibrated gyroscope, and rotation vector at 10 Hz. Batch
+interval is zero; linear acceleration is disabled in those diagnostic modes.
+
+The check/probe R8 fields distinguish:
+
+- requested/effective/actual calibration masks;
+- whether actual mask readback is available;
+- current-epoch report receipt facts;
+- accelerometer, gyro, magnetometer, and rotation-vector statuses;
+- current `gatePassingNow`;
+- sticky `gateReached`;
+- timed-probe deadline and remaining time.
+
+The readiness gate uses current-epoch accelerometer and calibrated magnetic
+field statuses at least 2. Gyro and rotation-vector status are diagnostic.
+Do not interpret `haveMag`/`haveRv` as cadence proof: they establish receipt
+at least once in the current epoch, not report rate or per-frame freshness.
+
+### Phase 8 limitations
+
+Phase 8 does not implement CSV output, companion metadata, R9 freshness,
+logger threads, archival records, or combined IMU/pressure integration.
+
+`bno/phase8-integration-results.md` and `bno/p8-evidence/`, when created in
+later acceptance work, are temporary Phase 8 artifacts. Phase 12/13 is
+expected to consolidate durable information into this README and remove those
+temporary artifacts.

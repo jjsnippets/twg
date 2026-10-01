@@ -235,6 +235,138 @@ static void test_s12_restore_illegal_states(void)
           "S12", "restore from OPERATIONAL");
 }
 
+static void test_s13_clear_rejects_illegal_states(void)
+{
+    imu_session_test_reset();
+    check(!imu_session_clear_dcd(), "S13", "closed rejected");
+    check(imu_session_test_dcd_flash_delete_attempts() == 0u,
+          "S13", "closed did not touch flash");
+
+    open_configuring("S13");
+    check(imu_session_configure_production(0u),
+          "S13", "configure production");
+    check(imu_session_begin_settle(), "S13", "settle");
+    check(imu_session_mark_operational(), "S13", "operational");
+    check(!imu_session_clear_dcd(), "S13", "operational rejected");
+    check(imu_session_test_dcd_flash_delete_attempts() == 0u,
+          "S13", "operational did not touch flash");
+}
+
+static void test_s14_clear_uses_one_owner_and_one_epoch(void)
+{
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+
+    open_configuring("S14");
+    before = snap();
+    check(imu_session_clear_dcd(), "S14", "delete/reset/reopen");
+    after = snap();
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u,
+          "S14", "delete attempted once");
+    check(imu_session_test_dcd_clear_reset_attempts() == 1u,
+          "S14", "reset attempted once");
+    check(after.readerState == IMU_READER_STATE_CONFIGURING,
+          "S14", "same session owner returns configuring");
+    check(after.configurationEpoch == before.configurationEpoch + 1u,
+          "S14", "one real recovery epoch");
+    check(after.validMask == 0u, "S14", "validity cleared");
+}
+
+static void test_s15_clear_failure_does_not_claim_reset(void)
+{
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+
+    open_configuring("S15");
+    before = snap();
+    imu_session_test_set_clear_dcd_results(false, true);
+    check(!imu_session_clear_dcd(), "S15", "flash delete fails");
+    after = snap();
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u,
+          "S15", "delete attempted");
+    check(imu_session_test_dcd_clear_reset_attempts() == 0u,
+          "S15", "reset not issued");
+    check(after.configurationEpoch == before.configurationEpoch,
+          "S15", "no reset epoch");
+    check(after.readerState == IMU_READER_STATE_CONFIGURING,
+          "S15", "still actionable");
+
+    imu_session_test_reset();
+    open_configuring("S15");
+    before = snap();
+    imu_session_test_set_clear_dcd_results(true, false);
+    check(!imu_session_clear_dcd(), "S15", "reset command fails");
+    after = snap();
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u &&
+          imu_session_test_dcd_clear_reset_attempts() == 1u,
+          "S15", "delete then reset attempted in order");
+    check(after.configurationEpoch == before.configurationEpoch,
+          "S15", "no accepted reset/reopen epoch");
+    check(after.readerState == IMU_READER_STATE_CONFIGURING,
+          "S15", "restoration can be attempted");
+}
+
+static void test_s16_clear_reopen_failure_is_unusable(void)
+{
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+
+    open_configuring("S16");
+    before = snap();
+    imu_session_test_set_reopen_result(false);
+    check(!imu_session_clear_dcd(), "S16", "reopen fails");
+    after = snap();
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u &&
+          imu_session_test_dcd_clear_reset_attempts() == 1u,
+          "S16", "both clear calls preceded failed reopen");
+    check(after.readerState == IMU_READER_STATE_FAULTED,
+          "S16", "session faulted");
+    check(after.configurationEpoch == before.configurationEpoch + 1u,
+          "S16", "one recovery epoch, not zero or two");
+    check(!imu_session_restore_production(0u),
+          "S16", "cannot claim production restoration");
+}
+
+static void test_s17_same_session_verify_reconfigures_once(void)
+{
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+    uint8_t mask = 0xffu;
+
+    open_configuring("S17");
+    check(imu_session_configure_calibration(0x07u),
+          "S17", "enter calibration");
+    before = snap();
+    check(imu_session_reconfigure_calibration(0x00u),
+          "S17", "same-session verify policy");
+    after = snap();
+    check(after.readerState == IMU_READER_STATE_CALIBRATION,
+          "S17", "remains calibration");
+    check(after.configurationEpoch == before.configurationEpoch + 1u,
+          "S17", "one policy epoch");
+    check(after.validMask == 0u, "S17", "validity cleared");
+    check(!imu_session_test_recovery_observed() &&
+          imu_session_test_recovery_attempt_count() == 0u,
+          "S17", "not reset or recovery");
+    check(imu_session_get_cal_policy(&mask) && mask == 0x00u,
+          "S17", "verification policy is all-off");
+}
+
+static void test_s18_same_session_verify_rejects_wrong_state(void)
+{
+    imu_session_test_reset();
+    check(!imu_session_reconfigure_calibration(0x00u),
+          "S18", "closed rejected");
+    open_configuring("S18");
+    check(!imu_session_reconfigure_calibration(0x00u),
+          "S18", "configuring rejected");
+    check(imu_session_configure_production(0x00u),
+          "S18", "production configured");
+    check(imu_session_begin_settle(), "S18", "settling");
+    check(!imu_session_reconfigure_calibration(0x00u),
+          "S18", "settling rejected");
+}
+
 int main(void)
 {
     test_s01_configure_cal_increments_epoch();
@@ -249,6 +381,13 @@ int main(void)
     test_s10_restore_after_verify_reopen();
     test_s11_restore_failure_faults_without_epoch();
     test_s12_restore_illegal_states();
+    test_s13_clear_rejects_illegal_states();
+    test_s14_clear_uses_one_owner_and_one_epoch();
+    test_s15_clear_failure_does_not_claim_reset();
+    test_s16_clear_reopen_failure_is_unusable();
+    test_s17_same_session_verify_reconfigures_once();
+    test_s18_same_session_verify_rejects_wrong_state();
+
     if (g_fail != 0) {
         fprintf(stderr, "test_session_cal: %d failures\n", g_fail);
         return 1;

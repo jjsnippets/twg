@@ -172,6 +172,18 @@ static bool plan_legal(const ImuCmdPlan_t *plan, ImuCmdReason_t *reason)
         *reason = IMU_CMD_REASON_ILLEGAL_PLAN;
         return false;
     }
+    if ((plan->slot1 != IMU_CMD_ID_DCD_CLEAR &&
+         plan->confirmDcdClear) ||
+        (plan->slot2 != IMU_CMD_ID_TARE &&
+         (plan->tareAxes != IMU_CMD_TARE_AXES_NONE ||
+          plan->persistTare || plan->confirmTare)) ||
+        (plan->slot2 != IMU_CMD_ID_TARE_CLEAR &&
+         plan->confirmTareClear) ||
+        (plan->slot3 != IMU_CMD_ID_PROBE &&
+         plan->probeMaskPresent)) {
+        *reason = IMU_CMD_REASON_ILLEGAL_PLAN;
+        return false;
+    }
     *reason = IMU_CMD_REASON_NONE;
     return true;
 }
@@ -286,7 +298,8 @@ static void finish_active(ImuCmdResultState_t state, ImuCmdReason_t reason,
     ImuCmdResult_t *r;
     ImuCmdIdentity_t id = s_active;
 
-    if (id == IMU_CMD_ID_NONE) {
+    if (id <= IMU_CMD_ID_NONE ||
+        (unsigned)id >= (unsigned)IMU_CMD_ID_COUNT) {
         return;
     }
 
@@ -345,22 +358,24 @@ static void adopt_calibration_result(void)
 {
     ImuCmdResult_t result;
 
-    if (s_active != IMU_CMD_ID_CALIBRATION || !s_cal_initialized) {
+    if ((s_active != IMU_CMD_ID_CALIBRATION &&
+         s_active != IMU_CMD_ID_DCD_CLEAR) ||
+        !s_cal_initialized) {
         return;
     }
 
     if (!imu_cal_get_result(&result) ||
         result.version != IMU_CMD_RESULT_VERSION ||
-        result.identity != IMU_CMD_ID_CALIBRATION ||
+        result.identity != s_active ||
         !is_terminal_state(result.state)) {
         finish_active(IMU_CMD_STATE_RECOVERY_FAILED,
-                      IMU_CMD_REASON_CAL_SESSION_UNUSABLE,
+                      IMU_CMD_REASON_SESSION_UNUSABLE,
                       true,
-                      &s_results[IMU_CMD_ID_CALIBRATION].sub);
+                      &s_results[s_active].sub);
         return;
     }
 
-    s_results[IMU_CMD_ID_CALIBRATION] = result;
+    s_results[s_active] = result;
     complete_active_bookkeeping();
 }
 
@@ -473,7 +488,8 @@ static bool post_q(void)
 {
     ImuCmdSubResults_t sub;
 
-    if (s_active == IMU_CMD_ID_CALIBRATION) {
+    if (s_active == IMU_CMD_ID_CALIBRATION ||
+        s_active == IMU_CMD_ID_DCD_CLEAR) {
         ImuCalEvent_t event;
 
         if (!s_cal_initialized) {
@@ -511,6 +527,9 @@ static bool post_q(void)
         s_active == IMU_CMD_ID_ACQUISITION) {
         return true;
     }
+    if ((unsigned)s_active >= (unsigned)IMU_CMD_ID_COUNT) {
+        return false;
+    }
 
     sub = s_results[s_active].sub;
     finish_active(IMU_CMD_STATE_CANCELLED, IMU_CMD_REASON_OPERATOR_Q,
@@ -520,7 +539,8 @@ static bool post_q(void)
 
 static bool post_confirm(void)
 {
-    if (s_active == IMU_CMD_ID_CALIBRATION) {
+    if (s_active == IMU_CMD_ID_CALIBRATION ||
+        s_active == IMU_CMD_ID_DCD_CLEAR) {
         ImuCalEvent_t event;
 
         if (!s_cal_initialized) {
@@ -576,18 +596,24 @@ static bool post_tick(uint64_t ns)
 
     s_last_ns = ns;
 
-    if (s_active == IMU_CMD_ID_CALIBRATION) {
+    if (s_active == IMU_CMD_ID_CALIBRATION ||
+        s_active == IMU_CMD_ID_DCD_CLEAR) {
         ImuCalEvent_t event;
 
         if (!s_cal_initialized) {
             s_stage_start_ns = ns;
             s_results[s_active].startedNs = ns;
-            s_cal_initialized = imu_cal_init(s_plan.flightCalMask, ns);
+            s_cal_initialized =
+                (s_active == IMU_CMD_ID_DCD_CLEAR)
+                    ? imu_cal_init_dcd_clear(s_plan.flightCalMask, ns)
+                    : imu_cal_init(s_plan.flightCalMask, ns);
             if (!s_cal_initialized) {
                 finish_active(IMU_CMD_STATE_RECOVERY_FAILED,
-                              IMU_CMD_REASON_CAL_SESSION_UNUSABLE,
+                              s_active == IMU_CMD_ID_CALIBRATION
+                                  ? IMU_CMD_REASON_CAL_SESSION_UNUSABLE
+                                  : IMU_CMD_REASON_SESSION_UNUSABLE,
                               true,
-                              &s_results[IMU_CMD_ID_CALIBRATION].sub);
+                              &s_results[s_active].sub);
             }
             return s_cal_initialized;
         }
@@ -675,7 +701,8 @@ static bool post_terminal(const ImuCmdStageTerminal_t *term_in)
     if (s_active == IMU_CMD_ID_NONE || term_in->identity != s_active) {
         return false;
     }
-    if (s_active == IMU_CMD_ID_CALIBRATION) {
+    if (s_active == IMU_CMD_ID_CALIBRATION ||
+        s_active == IMU_CMD_ID_DCD_CLEAR) {
         return false;
     }
     if (is_tare_family(s_active)) {
@@ -751,7 +778,8 @@ void imu_cmd_service(void)
         return;
     }
 
-    if (s_active == IMU_CMD_ID_CALIBRATION) {
+    if (s_active == IMU_CMD_ID_CALIBRATION ||
+        s_active == IMU_CMD_ID_DCD_CLEAR) {
         if (!s_cal_initialized) {
             return;
         }
@@ -841,12 +869,13 @@ bool imu_cmd_get_progress(ImuCmdProgress_t *out)
         return false;
     }
 
-    if (s_active == IMU_CMD_ID_CALIBRATION && s_cal_initialized) {
+    if ((s_active == IMU_CMD_ID_CALIBRATION ||
+         s_active == IMU_CMD_ID_DCD_CLEAR) && s_cal_initialized) {
         if (!imu_cal_get_progress(out)) {
             return false;
         }
         out->version = IMU_CMD_PROGRESS_VERSION;
-        out->active = IMU_CMD_ID_CALIBRATION;
+        out->active = s_active;
         return true;
     }
 

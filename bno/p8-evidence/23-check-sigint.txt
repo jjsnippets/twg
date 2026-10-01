@@ -1,0 +1,25 @@
+Script started on 2026-09-30 18:11:11+08:00 [COMMAND="date --iso-8601=seconds; sudo bno/bin/bno_app --check-imu --duration 2; rc=$?; date --iso-8601=seconds; echo app_exit=$rc; exit "$rc"" TERM="xterm" TTY="/dev/pts/0" COLUMNS="86" LINES="56"]
+2026-09-30T18:11:11+08:00
+R8 version=4 identity=CHECK action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=0 requestedMask=0x00 effectiveMask=0x00 actualMaskValid=1 actualMask=0x00 factsEpoch=0 factsEpochMatched=0 deadlineValid=0 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 haveAccel=0 accelStatus=0 haveGyro=0 gyroStatus=0 haveMag=0 magStatus=0 haveRv=0 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=CHECK action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=0 requestedMask=0x00 effectiveMask=0x00 actualMaskValid=1 actualMask=0x00 factsEpoch=2 factsEpochMatched=1 deadlineValid=0 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=0 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=CHECK action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=0 requestedMask=0x00 effectiveMask=0x00 actualMaskValid=1 actualMask=0x00 factsEpoch=2 factsEpochMatched=1 deadlineValid=0 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=0 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=CHECK action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=0 requestedMask=0x00 effectiveMask=0x00 actualMaskValid=1 actualMask=0x00 factsEpoch=2 factsEpochMatched=1 deadlineValid=0 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=CHECK action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=0 requestedMask=0x00 effectiveMask=0x00 actualMaskValid=1 actualMask=0x00 factsEpoch=2 factsEpochMatched=1 deadlineValid=0 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=CHECK action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=0 requestedMask=0x00 effectiveMask=0x00 actualMaskValid=1 actualMask=0x00 factsEpoch=2 factsEpochMatched=1 deadlineValid=0 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=CHECK action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=0 requestedMask=0x00 effectiveMask=0x00 actualMaskValid=1 actualMask=0x00 factsEpoch=2 factsEpochMatched=1 deadlineValid=0 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=CHECK action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=0 requestedMask=0x00 effectiveMask=0x00 actualMaskValid=1 actualMask=0x00 factsEpoch=2 factsEpochMatched=1 deadlineValid=0 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+^CR7 version=4 identity=CHECK state=ABANDONED reason=PROCESS_STOP reasonCode=24 warningRequired=0 doNotAcquire=1 startedNs=7055102943919 endedNs=7058891049203 epochBefore=0 epochAfter=0 restoredProduction=0 dcdSaved=0 verified=0
+check requestedMaskValid=0 requestedMask=0x00 actualMaskValid=0 actualMask=0x00 gatePassingNow=0 gateReached=0 probeTimedOut=0 operatorEndedEarly=0 probeReachedGate=0
+main: shutdown status=0 observations=0 skippedDeadlines=6
+2026-09-30T18:11:16+08:00
+app_exit=0
+
+Script done on 2026-09-30 18:11:16+08:00 [COMMAND_EXIT_CODE="0"]

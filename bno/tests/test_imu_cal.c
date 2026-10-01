@@ -137,6 +137,37 @@ static ImuCmdProgress_t progress(void)
     return p;
 }
 
+static ImuCalEvent_t clear_session_result(ImuCalRequestType_t type,
+                                          bool success, bool usable,
+                                          uint32_t before, uint32_t after)
+{
+   ImuCalEvent_t e = make_session(type, success, before, after);
+    e.session.sessionUsable = usable;
+    return e;
+}
+
+static void drive_next_mag_attempt_to_save(uint64_t *nowNs,
+                                           const char *id)
+{
+    ImuCalEvent_t e;
+
+    e = make_event(IMU_CAL_EVENT_OPERATOR_CONFIRM);
+    check(imu_cal_post(&e), id, "confirm mag prompt");
+    imu_cal_service();
+
+    *nowNs += IMU_CAL_MAG_MOTION_NS;
+    tick_and_service(*nowNs);
+    sustain_good(nowNs);
+
+    *nowNs += IMU_CAL_HOLD_WINDOW_NS;
+    tick_and_service(*nowNs);
+    feed_accurate();
+    sustain_good(nowNs);
+
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_SAVE_DCD,
+          id, "next outer attempt reaches save");
+}
+
 static void test_c01_init_emits_configure(void)
 {
     ImuCalPendingRequest_t req;
@@ -426,28 +457,28 @@ static void test_c15_save_reopen_verify_success(void)
 
     e = make_session(IMU_CAL_REQ_SAVE_DCD, true, 2u, 2u);
     check(imu_cal_post(&e), "C15", "save ok");
-    check(imu_cal_pending_request().type == IMU_CAL_REQ_VERIFY_REOPEN,
-          "C15", "reopen request");
-    e = make_session(IMU_CAL_REQ_VERIFY_REOPEN, true, 2u, 3u);
-    check(imu_cal_post(&e), "C15", "reopen ok");
-    check(imu_cal_pending_request().type == IMU_CAL_REQ_CONFIGURE_CALIBRATION,
-          "C15", "verify config request");
-    check(imu_cal_pending_request().calMask == 0u, "C15", "verify mask zero");
-    e = make_session(IMU_CAL_REQ_CONFIGURE_CALIBRATION, true, 3u, 4u);
-    check(imu_cal_post(&e), "C15", "verify config ok");
+    check(imu_cal_pending_request().type ==
+          IMU_CAL_REQ_VERIFY_SAME_SESSION,
+          "C15", "same-session verification request");
+    check(imu_cal_pending_request().calMask == 0u,
+          "C15", "verification mask zero");
+    e = make_session(IMU_CAL_REQ_VERIFY_SAME_SESSION, true, 2u, 3u);
+    check(imu_cal_post(&e), "C15", "same-session policy applied");
     confirm_and_service();
     now += IMU_CAL_VERIFY_MOTION_NS;
     tick_and_service(now);
     sustain_good(&now);
     check(imu_cal_pending_request().type == IMU_CAL_REQ_RESTORE_PRODUCTION,
           "C15", "restore request");
-    e = make_session(IMU_CAL_REQ_RESTORE_PRODUCTION, true, 4u, 5u);
+    e = make_session(IMU_CAL_REQ_RESTORE_PRODUCTION, true, 3u, 4u);
     check(imu_cal_post(&e), "C15", "restore ok");
     check(imu_cal_get_result(&r), "C15", "result");
     check(r.state == IMU_CMD_STATE_SUCCEEDED, "C15", "succeeded");
     check(r.dcdSaved, "C15", "saved");
     check(r.verified, "C15", "verified");
     check(r.restoredProduction, "C15", "restored");
+    check(r.epochBefore == 1u && r.epochAfter == 4u,
+          "C15", "same-session configuration epochs");
 }
 
 static void test_c16_q_during_motion_restores(void)
@@ -484,17 +515,18 @@ static void test_c17_save_retry_then_success(void)
           "C17", "save retry");
     e = make_session(IMU_CAL_REQ_SAVE_DCD, true, 2u, 2u);
     check(imu_cal_post(&e), "C17", "save ok");
-    check(imu_cal_pending_request().type == IMU_CAL_REQ_VERIFY_REOPEN,
-          "C17", "reopen after retry");
-    e = make_session(IMU_CAL_REQ_VERIFY_REOPEN, true, 2u, 3u);
-    check(imu_cal_post(&e), "C17", "reopen");
-    e = make_session(IMU_CAL_REQ_CONFIGURE_CALIBRATION, true, 3u, 4u);
-    check(imu_cal_post(&e), "C17", "verify config");
+    check(imu_cal_pending_request().type ==
+              IMU_CAL_REQ_VERIFY_SAME_SESSION,
+          "C17", "same-session verify after retry");
+    check(imu_cal_pending_request().calMask == 0u,
+          "C17", "same-session verification mask zero");
+    e = make_session(IMU_CAL_REQ_VERIFY_SAME_SESSION, true, 2u, 3u);
+    check(imu_cal_post(&e), "C17", "same-session verify configure");
     confirm_and_service();
     now += IMU_CAL_VERIFY_MOTION_NS;
     tick_and_service(now);
     sustain_good(&now);
-    e = make_session(IMU_CAL_REQ_RESTORE_PRODUCTION, true, 4u, 5u);
+    e = make_session(IMU_CAL_REQ_RESTORE_PRODUCTION, true, 3u, 4u);
     check(imu_cal_post(&e), "C17", "restore");
     check(imu_cal_get_result(&r), "C17", "result");
     check(r.state == IMU_CMD_STATE_SUCCEEDED, "C17", "succeeded");
@@ -555,7 +587,7 @@ static void test_c19_hold_degrade_then_exhaust(void)
     check(!r.dcdSaved, "C19", "not saved");
 }
 
-static void test_c20_reopen_fail_is_recovery(void)
+static void test_c20_same_session_verify_config_fail_restores(void)
 {
     uint64_t now = T0;
     ImuCalEvent_t e;
@@ -564,16 +596,23 @@ static void test_c20_reopen_fail_is_recovery(void)
     drive_to_save(&now);
     e = make_session(IMU_CAL_REQ_SAVE_DCD, true, 2u, 2u);
     check(imu_cal_post(&e), "C20", "save ok");
-    e = make_session(IMU_CAL_REQ_VERIFY_REOPEN, false, 2u, 2u);
-    check(imu_cal_post(&e), "C20", "reopen fail");
-    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
-          "C20", "no restore after unusable session");
+    check(imu_cal_pending_request().type ==
+              IMU_CAL_REQ_VERIFY_SAME_SESSION,
+          "C20", "same-session verify pending");
+    e = make_session(IMU_CAL_REQ_VERIFY_SAME_SESSION, false, 2u, 2u);
+    check(imu_cal_post(&e), "C20", "same-session verify config fail");
+    check(imu_cal_pending_request().type ==
+              IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "C20", "restore requested after policy failure");
+    e = make_session(IMU_CAL_REQ_RESTORE_PRODUCTION, true, 2u, 3u);
+    check(imu_cal_post(&e), "C20", "restore succeeds");
     check(imu_cal_get_result(&r), "C20", "result");
-    check(r.state == IMU_CMD_STATE_RECOVERY_FAILED, "C20", "recoveryfailed");
-    check(r.reason == IMU_CMD_REASON_CAL_REOPEN_FAILED, "C20", "reopen failed");
+    check(r.state == IMU_CMD_STATE_FAILED, "C20", "ordinary failed result");
+    check(r.reason == IMU_CMD_REASON_CAL_VERIFY_CONFIG_FAILED,
+          "C20", "same-session config failed");
     check(r.dcdSaved, "C20", "save already happened");
     check(!r.verified, "C20", "not verified");
-    check(!r.restoredProduction, "C20", "not restored");
+    check(r.restoredProduction, "C20", "restored");
 }
 
 static void test_c21_verify_gate_fail_restores(void)
@@ -585,10 +624,8 @@ static void test_c21_verify_gate_fail_restores(void)
     drive_to_save(&now);
     e = make_session(IMU_CAL_REQ_SAVE_DCD, true, 2u, 2u);
     check(imu_cal_post(&e), "C21", "save");
-    e = make_session(IMU_CAL_REQ_VERIFY_REOPEN, true, 2u, 3u);
-    check(imu_cal_post(&e), "C21", "reopen");
-    e = make_session(IMU_CAL_REQ_CONFIGURE_CALIBRATION, true, 3u, 4u);
-    check(imu_cal_post(&e), "C21", "verify config");
+    e = make_session(IMU_CAL_REQ_VERIFY_SAME_SESSION, true, 2u, 3u);
+    check(imu_cal_post(&e), "C21", "same-session verify config");
     confirm_and_service();
     now += IMU_CAL_VERIFY_MOTION_NS;
     tick_and_service(now);
@@ -598,7 +635,7 @@ static void test_c21_verify_gate_fail_restores(void)
     tick_and_service(now);
     check(imu_cal_pending_request().type == IMU_CAL_REQ_RESTORE_PRODUCTION,
           "C21", "restore");
-    e = make_session(IMU_CAL_REQ_RESTORE_PRODUCTION, true, 4u, 5u);
+    e = make_session(IMU_CAL_REQ_RESTORE_PRODUCTION, true, 3u, 4u);
     check(imu_cal_post(&e), "C21", "restore ok");
     check(imu_cal_get_result(&r), "C21", "result");
     check(r.state == IMU_CMD_STATE_FAILED, "C21", "failed");
@@ -606,6 +643,183 @@ static void test_c21_verify_gate_fail_restores(void)
     check(r.dcdSaved, "C21", "saved");
     check(!r.verified, "C21", "not verified");
     check(r.restoredProduction, "C21", "restored");
+}
+
+static void test_c22_clear_prompt_q_has_no_request_or_epoch(void)
+{
+    ImuCalEvent_t e;
+    ImuCmdProgress_t p;
+    ImuCmdResult_t r;
+
+    check(imu_cal_init_dcd_clear(0x05u, T0), "C22", "init clear");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          "C22", "nothing sent before confirm");
+    check(imu_cal_get_progress(&p), "C22", "progress");
+    check(p.active == IMU_CMD_ID_DCD_CLEAR, "C22", "clear identity");
+    check(p.requiredAction == IMU_CMD_ACTION_CONFIRM,
+          "C22", "confirmation required");
+
+    e = make_event(IMU_CAL_EVENT_OPERATOR_Q);
+    check(imu_cal_post(&e), "C22", "q at prompt");
+    check(imu_cal_complete(), "C22", "cancel terminal");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          "C22", "still no request");
+    check(imu_cal_get_result(&r), "C22", "result");
+    check(r.identity == IMU_CMD_ID_DCD_CLEAR, "C22", "result identity");
+    check(r.state == IMU_CMD_STATE_CANCELLED &&
+          r.reason == IMU_CMD_REASON_OPERATOR_Q, "C22", "cancelled by q");
+    check(r.epochBefore == 0u && r.epochAfter == 0u,
+          "C22", "no fabricated epoch evidence");
+    check(!r.restoredProduction && !r.dcdSaved && !r.verified,
+          "C22", "no fabricated operation evidence");
+}
+
+static void test_c23_clear_confirm_once_restores_after_success(void)
+{
+    ImuCalEvent_t e;
+    ImuCmdResult_t r;
+
+    check(imu_cal_init_dcd_clear(0x05u, T0), "C23", "init clear");
+    e = make_event(IMU_CAL_EVENT_OPERATOR_CONFIRM);
+    check(imu_cal_post(&e), "C23", "confirm");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          "C23", "one clear request");
+    check(!imu_cal_post(&e), "C23", "duplicate confirm rejected");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          "C23", "pending request unchanged");
+
+    e = clear_session_result(IMU_CAL_REQ_CLEAR_DCD, true, true, 1u, 2u);
+    check(imu_cal_post(&e), "C23", "accepted clear result");
+    check(!imu_cal_complete(), "C23", "not terminal before restore");
+    check(imu_cal_pending_request().type ==
+          IMU_CAL_REQ_RESTORE_PRODUCTION, "C23", "restore requested");
+    check(imu_cal_pending_request().calMask == 0x05u,
+          "C23", "immutable flight mask");
+
+    e = clear_session_result(IMU_CAL_REQ_RESTORE_PRODUCTION,
+                             true, true, 2u, 2u);
+    check(imu_cal_post(&e), "C23", "restore result");
+    check(imu_cal_get_result(&r), "C23", "result");
+    check(r.state == IMU_CMD_STATE_SUCCEEDED &&
+          r.reason == IMU_CMD_REASON_OK, "C23", "ordinary success");
+    check(r.epochBefore == 1u && r.epochAfter == 2u,
+          "C23", "before/after evidence retained");
+    check(r.restoredProduction, "C23", "restoration recorded");
+    check(!r.dcdSaved && !r.verified,
+          "C23", "not mislabelled as DCD save/verify");
+}
+
+static void test_c24_clear_failure_restores_before_failed_result(void)
+{
+    ImuCalEvent_t e;
+    ImuCmdResult_t r;
+
+    check(imu_cal_init_dcd_clear(0u, T0), "C24", "init");
+    e = make_event(IMU_CAL_EVENT_OPERATOR_CONFIRM);
+    check(imu_cal_post(&e), "C24", "confirm");
+    e = clear_session_result(IMU_CAL_REQ_CLEAR_DCD, false, true, 1u, 1u);
+    check(imu_cal_post(&e), "C24", "clear failed but usable");
+    check(!imu_cal_complete(), "C24", "wait for restoration");
+    check(imu_cal_pending_request().type ==
+          IMU_CAL_REQ_RESTORE_PRODUCTION, "C24", "restore pending");
+
+    e = clear_session_result(IMU_CAL_REQ_RESTORE_PRODUCTION,
+                             true, true, 1u, 1u);
+    check(imu_cal_post(&e), "C24", "restore");
+    check(imu_cal_get_result(&r), "C24", "result");
+    check(r.state == IMU_CMD_STATE_FAILED &&
+          r.reason == IMU_CMD_REASON_DCD_CLEAR_FAILED,
+          "C24", "ordinary clear failure");
+    check(r.warningRequired && r.restoredProduction,
+          "C24", "warning and restore");
+    check(r.epochBefore == 1u && r.epochAfter == 1u,
+          "C24", "no fictitious reset epoch");
+}
+
+static void test_c25_unusable_or_failed_restore_stops(void)
+{
+    ImuCalEvent_t e;
+    ImuCmdResult_t r;
+
+    check(imu_cal_init_dcd_clear(0u, T0), "C25", "init unusable");
+    e = make_event(IMU_CAL_EVENT_OPERATOR_CONFIRM);
+    check(imu_cal_post(&e), "C25", "confirm unusable");
+    e = clear_session_result(IMU_CAL_REQ_CLEAR_DCD, false, false, 1u, 2u);
+    check(imu_cal_post(&e), "C25", "failed reopen");
+    check(imu_cal_get_result(&r), "C25", "unusable result");
+    check(r.state == IMU_CMD_STATE_RECOVERY_FAILED &&
+          r.reason == IMU_CMD_REASON_SESSION_UNUSABLE,
+          "C25", "unusable terminal");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          "C25", "no restore from unusable session");
+    check(!r.restoredProduction, "C25", "no false restore");
+
+    check(imu_cal_init_dcd_clear(0u, T0), "C25", "reinit restore failure");
+    e = make_event(IMU_CAL_EVENT_OPERATOR_CONFIRM);
+    check(imu_cal_post(&e), "C25", "confirm restore failure");
+    e = clear_session_result(IMU_CAL_REQ_CLEAR_DCD, true, true, 1u, 2u);
+    check(imu_cal_post(&e), "C25", "clear accepted");
+    e = clear_session_result(IMU_CAL_REQ_RESTORE_PRODUCTION,
+                             false, false, 2u, 2u);
+    check(imu_cal_post(&e), "C25", "restore failed");
+    check(imu_cal_get_result(&r), "C25", "restore-failure result");
+    check(r.state == IMU_CMD_STATE_RECOVERY_FAILED &&
+          r.reason == IMU_CMD_REASON_SESSION_UNUSABLE,
+          "C25", "restore failure stops");
+    check(!r.restoredProduction, "C25", "restore not claimed");
+}
+
+static void test_c27_save_failure_can_verify_same_session(void)
+{
+    uint64_t now = T0;
+    ImuCalEvent_t e;
+    ImuCmdResult_t r;
+    unsigned attempt;
+
+    /*
+     * Reuse the existing helper that reaches the final save request, then
+     * consume its retry and final failed save exactly as the existing
+     * save-exhaustion test does.
+     */
+    drive_to_save(&now);
+
+    for (attempt = 1u; attempt <= IMU_CAL_MAX_SAVE_ATTEMPTS; ++attempt) {
+        e = make_session(IMU_CAL_REQ_SAVE_DCD, false, 2u, 2u);
+        check(imu_cal_post(&e), "C27", "first save failure");
+        now += IMU_CAL_SAVE_RETRY_HOLD_NS;
+        tick_and_service(now);
+        check(imu_cal_pending_request().type == IMU_CAL_REQ_SAVE_DCD,
+              "C27", "retry save pending");
+
+        e = make_session(IMU_CAL_REQ_SAVE_DCD, false, 2u, 2u);
+        check(imu_cal_post(&e), "C27", "retry save failure");
+
+        if (attempt < IMU_CAL_MAX_SAVE_ATTEMPTS) {
+            drive_next_mag_attempt_to_save(&now, "C27");
+        }
+    }
+
+    check(imu_cal_pending_request().type ==
+          IMU_CAL_REQ_VERIFY_SAME_SESSION,
+          "C27", "best-effort failure still verifies current session");
+    e = make_session(IMU_CAL_REQ_VERIFY_SAME_SESSION, true, 2u, 3u);
+    check(imu_cal_post(&e), "C27", "policy verification configured");
+    confirm_and_service();
+    now += IMU_CAL_VERIFY_MOTION_NS;
+    tick_and_service(now);
+    sustain_good(&now);
+    check(imu_cal_pending_request().type ==
+          IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "C27", "restore after successful same-session verification");
+    e = make_session(IMU_CAL_REQ_RESTORE_PRODUCTION, true, 3u, 4u);
+    check(imu_cal_post(&e), "C27", "restore");
+
+    check(imu_cal_get_result(&r), "C27", "result");
+    check(r.state == IMU_CMD_STATE_FAILED &&
+          r.reason == IMU_CMD_REASON_CAL_SAVE_FAILED &&
+          r.warningRequired && !r.dcdSaved &&
+          r.verified && r.restoredProduction,
+          "C27", "save failure is warning; session verification is truthful");
 }
 
 int main(void)
@@ -629,8 +843,14 @@ int main(void)
     test_c17_save_retry_then_success();
     test_c18_double_save_fail_starts_next_attempt();
     test_c19_hold_degrade_then_exhaust();
-    test_c20_reopen_fail_is_recovery();
+    test_c20_same_session_verify_config_fail_restores();
     test_c21_verify_gate_fail_restores();
+    test_c22_clear_prompt_q_has_no_request_or_epoch();
+    test_c23_clear_confirm_once_restores_after_success();
+    test_c24_clear_failure_restores_before_failed_result();
+    test_c25_unusable_or_failed_restore_stops();
+    test_c27_save_failure_can_verify_same_session();
+
     if (g_fail != 0) {
         fprintf(stderr, "test_imu_cal: %d failures\n", g_fail);
         return 1;

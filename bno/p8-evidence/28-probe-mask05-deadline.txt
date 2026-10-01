@@ -1,0 +1,62 @@
+Script started on 2026-09-30 19:10:24+08:00 [COMMAND="date --iso-8601=seconds; sudo bno/bin/bno_app --check-imu --mask 0x05 --duration 2; rc=$?; date --iso-8601=seconds; echo app_exit=$rc; exit "$rc"" TERM="xterm" TTY="/dev/pts/0" COLUMNS="86" LINES="56"]
+2026-09-30T19:10:24+08:00
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=0 factsEpochMatched=0 deadlineValid=1 deadlineNs=1229594841529 remainingNs=9992801603 sustainedGoodNs=0 haveAccel=0 accelStatus=0 haveGyro=0 gyroStatus=0 haveMag=0 magStatus=0 haveRv=0 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=9491804545 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=8990805413 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=8489805484 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=7989795251 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=7489791202 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=6988792327 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=6487795693 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=5987793105 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=5487792813 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=4986790511 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=4485782579 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=3984792460 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=3483792601 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=2982796203 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=2482793224 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=1982792466 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=1481795660 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=981792642 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=2 calPhase=0 tarePhase=0 checkPhase=3
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=481792604 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R8 version=4 identity=PROBE action=0 calPhase=0 tarePhase=0 checkPhase=4
+check requestedMaskValid=1 requestedMask=0x05 effectiveMask=0x05 actualMaskValid=1 actualMask=0x05 factsEpoch=2 factsEpochMatched=1 deadlineValid=1 deadlineNs=1229594841529 remainingNs=0 sustainedGoodNs=0 haveAccel=1 accelStatus=2 haveGyro=1 gyroStatus=0 haveMag=1 magStatus=1 haveRv=1 rvStatus=0 gatePassingNow=0 gateReached=0
+R7 version=4 identity=PROBE state=TIMED_OUT reason=PROBE_DEADLINE reasonCode=22 warningRequired=0 doNotAcquire=0 startedNs=1219594841529 endedNs=1229595047895 epochBefore=1 epochAfter=3 restoredProduction=1 dcdSaved=0 verified=0
+check requestedMaskValid=1 requestedMask=0x05 actualMaskValid=1 actualMask=0x05 gatePassingNow=0 gateReached=0 probeTimedOut=1 operatorEndedEarly=0 probeReachedGate=0
+checkReceipt version=1 mode=PROBE epoch=2 snapshot=retained_last_eligible clock=host_decode_ns
+checkReceipt report=mag requestedHz=50 epochDecodes=488 processDecodes=488 hostTimesValid=1 firstHostDecodeNs=1219868119997 latestHostDecodeNs=1229590267504
+checkReceipt report=accel requestedHz=10 epochDecodes=158 processDecodes=158 hostTimesValid=1 firstHostDecodeNs=1219850122208 latestHostDecodeNs=1229588267688
+checkReceipt report=gyro requestedHz=10 epochDecodes=97 processDecodes=97 hostTimesValid=1 firstHostDecodeNs=1219967119275 latestHostDecodeNs=1229547272817
+checkReceipt report=rv requestedHz=10 epochDecodes=97 processDecodes=97 hostTimesValid=1 firstHostDecodeNs=1219968132765 latestHostDecodeNs=1229548303157
+R7 version=4 identity=SETTLE state=SUCCEEDED reason=OK reasonCode=1 warningRequired=0 doNotAcquire=0 startedNs=1229604741938 endedNs=1229905732132 epochBefore=0 epochAfter=0 restoredProduction=0 dcdSaved=0 verified=0
+acquisition epoch=3 validMask=0x07 observations=1 yaw=1.139 pitch=-0.294 roll=0.102 ax=0.004 ay=0.000 az=-0.020 gx=0.000 gy=0.000 gz=0.000
+acquisition epoch=3 validMask=0x07 observations=51 yaw=1.139 pitch=-0.293 roll=0.102 ax=0.004 ay=-0.008 az=-0.020 gx=0.000 gy=0.000 gz=0.000
+acquisition epoch=3 validMask=0x07 observations=101 yaw=1.139 pitch=-0.293 roll=0.102 ax=-0.008 ay=-0.055 az=0.004 gx=0.000 gy=0.000 gz=0.000
+acquisition epoch=3 validMask=0x07 observations=151 yaw=1.139 pitch=-0.293 roll=0.102 ax=0.004 ay=0.000 az=-0.020 gx=0.000 gy=0.000 gz=0.000
+R7 version=4 identity=ACQUISITION state=SUCCEEDED reason=OK reasonCode=1 warningRequired=0 doNotAcquire=0 startedNs=1229906741955 endedNs=1231907731716 epochBefore=0 epochAfter=0 restoredProduction=0 dcdSaved=0 verified=0
+main: shutdown status=0 observations=200 skippedDeadlines=11
+2026-09-30T19:10:36+08:00
+app_exit=0
+
+Script done on 2026-09-30 19:10:36+08:00 [COMMAND_EXIT_CODE="0"]

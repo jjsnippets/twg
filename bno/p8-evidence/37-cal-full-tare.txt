@@ -1,0 +1,887 @@
+Script started on 2026-10-01 13:00:31+08:00 [COMMAND="date --iso-8601=seconds; sudo bno/bin/bno_app --cal-imu --tare-imu --full --duration 10; rc=$?; date --iso-8601=seconds; echo app_exit=$rc; exit "$rc"" TERM="xterm" TTY="/dev/pts/0" COLUMNS="112" LINES="56"]
+2026-10-01T13:00:31+08:00
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 1/6: place device flat, label side up.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7728979907775 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=0 gyroStatus=0 magStatus=0 rvStatus=0 gatePassingNow=0
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 1/6: place device flat, label side up.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7728979907775 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 1/6: place device flat, label side up.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7728979907775 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=1 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 1/6: place device flat, label side up.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7728979907775 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 1/6: place device flat, label side up.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7728979907775 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 1/6: place device flat, label side up.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7728979907775 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 1/6: place device flat, label side up.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7728979907775 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 1/6: place device flat, label side up.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7728979907775 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7732903805069 deadlineNs=7734903805069 remainingNs=1822986728 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7732903805069 deadlineNs=7734903805069 remainingNs=1322000406 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7732903805069 deadlineNs=7734903805069 remainingNs=821987300 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=1/6 accelRound=1 magRound=0 elapsedFromStateNs=7732903805069 deadlineNs=7734903805069 remainingNs=320987351 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 2/6: place device flat, label side down.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=2/6 accelRound=1 magRound=0 elapsedFromStateNs=7734903815103 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 2/6: place device flat, label side down.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=2/6 accelRound=1 magRound=0 elapsedFromStateNs=7734903815103 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 2/6: place device flat, label side down.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=2/6 accelRound=1 magRound=0 elapsedFromStateNs=7734903815103 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 2/6: place device flat, label side down.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=2/6 accelRound=1 magRound=0 elapsedFromStateNs=7734903815103 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 2/6: place device flat, label side down.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=2/6 accelRound=1 magRound=0 elapsedFromStateNs=7734903815103 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 2/6: place device flat, label side down.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=2/6 accelRound=1 magRound=0 elapsedFromStateNs=7734903815103 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=2/6 accelRound=1 magRound=0 elapsedFromStateNs=7737825840480 deadlineNs=7739825840480 remainingNs=1738022633 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=2/6 accelRound=1 magRound=0 elapsedFromStateNs=7737825840480 deadlineNs=7739825840480 remainingNs=1237025601 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=2/6 accelRound=1 magRound=0 elapsedFromStateNs=7737825840480 deadlineNs=7739825840480 remainingNs=737025415 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=2/6 accelRound=1 magRound=0 elapsedFromStateNs=7737825840480 deadlineNs=7739825840480 remainingNs=237025399 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=0 rvStatus=0 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 3/6: place device resting on its left edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7739826817751 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7747101813712 deadlineNs=7749101813712 remainingNs=1505994036 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7747101813712 deadlineNs=7749101813712 remainingNs=1004996454 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7747101813712 deadlineNs=7749101813712 remainingNs=504000656 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=3/6 accelRound=1 magRound=0 elapsedFromStateNs=7747101813712 deadlineNs=7749101813712 remainingNs=3997314 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 4/6: place device resting on its right edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7749102819911 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 4/6: place device resting on its right edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7749102819911 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 4/6: place device resting on its right edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7749102819911 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 4/6: place device resting on its right edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7749102819911 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 4/6: place device resting on its right edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7749102819911 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 4/6: place device resting on its right edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7749102819911 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 4/6: place device resting on its right edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7749102819911 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7752697825841 deadlineNs=7754697825841 remainingNs=1595011137 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7752697825841 deadlineNs=7754697825841 remainingNs=1095008370 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7752697825841 deadlineNs=7754697825841 remainingNs=594010623 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=4/6 accelRound=1 magRound=0 elapsedFromStateNs=7752697825841 deadlineNs=7754697825841 remainingNs=94007785 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 5/6: place device resting on its top edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=5/6 accelRound=1 magRound=0 elapsedFromStateNs=7754698814657 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 5/6: place device resting on its top edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=5/6 accelRound=1 magRound=0 elapsedFromStateNs=7754698814657 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 5/6: place device resting on its top edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=5/6 accelRound=1 magRound=0 elapsedFromStateNs=7754698814657 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 5/6: place device resting on its top edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=5/6 accelRound=1 magRound=0 elapsedFromStateNs=7754698814657 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 5/6: place device resting on its top edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=5/6 accelRound=1 magRound=0 elapsedFromStateNs=7754698814657 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 5/6: place device resting on its top edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=5/6 accelRound=1 magRound=0 elapsedFromStateNs=7754698814657 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=5/6 accelRound=1 magRound=0 elapsedFromStateNs=7757647835415 deadlineNs=7759647835415 remainingNs=1540020880 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=5/6 accelRound=1 magRound=0 elapsedFromStateNs=7757647835415 deadlineNs=7759647835415 remainingNs=1040017483 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=5/6 accelRound=1 magRound=0 elapsedFromStateNs=7757647835415 deadlineNs=7759647835415 remainingNs=539017163 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=5/6 accelRound=1 magRound=0 elapsedFromStateNs=7757647835415 deadlineNs=7759647835415 remainingNs=38020514 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 6/6: place device resting on its bottom edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7759648814635 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 6/6: place device resting on its bottom edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7759648814635 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=2 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 6/6: place device resting on its bottom edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7759648814635 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 6/6: place device resting on its bottom edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7759648814635 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 6/6: place device resting on its bottom edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7759648814635 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 6/6: place device resting on its bottom edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7759648814635 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: pose 6/6: place device resting on its bottom edge.
+[0m[1;36mPress Enter to start this face; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7759648814635 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7763456821819 deadlineNs=7765456821819 remainingNs=1843006993 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7763456821819 deadlineNs=7765456821819 remainingNs=1343002743 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7763456821819 deadlineNs=7765456821819 remainingNs=842007060 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7763456821819 deadlineNs=7765456821819 remainingNs=342007018 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7765457817654 deadlineNs=7775457817654 remainingNs=9843000354 sustainedGoodNs=155999835 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7765457817654 deadlineNs=7775457817654 remainingNs=9343000280 sustainedGoodNs=655999909 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7765457817654 deadlineNs=7775457817654 remainingNs=8842000438 sustainedGoodNs=1156999751 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7765457817654 deadlineNs=7775457817654 remainingNs=8341000483 sustainedGoodNs=1657999706 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7765457817654 deadlineNs=7775457817654 remainingNs=7841000234 sustainedGoodNs=2157999955 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=2 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep the indicated face still; timed accel window/gate active.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7765457817654 deadlineNs=7775457817654 remainingNs=7341000205 sustainedGoodNs=2657999984 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: place the device stationary.
+[0m[1;36mPress Enter to begin gyro rest; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7768459813831 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: place the device stationary.
+[0m[1;36mPress Enter to begin gyro rest; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7768459813831 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: place the device stationary.
+[0m[1;36mPress Enter to begin gyro rest; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7768459813831 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: place the device stationary.
+[0m[1;36mPress Enter to begin gyro rest; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7768459813831 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: place the device stationary.
+[0m[1;36mPress Enter to begin gyro rest; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7768459813831 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: place the device stationary.
+[0m[1;36mPress Enter to begin gyro rest; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7768459813831 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: place the device stationary.
+[0m[1;36mPress Enter to begin gyro rest; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7768459813831 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: place the device stationary.
+[0m[1;36mPress Enter to begin gyro rest; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7768459813831 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep stationary while gyro converges; wait for the gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7772364828076 deadlineNs=7787364828076 remainingNs=14900017129 sustainedGoodNs=99982871 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep stationary while gyro converges; wait for the gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7772364828076 deadlineNs=7787364828076 remainingNs=14400013643 sustainedGoodNs=599986357 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep stationary while gyro converges; wait for the gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7772364828076 deadlineNs=7787364828076 remainingNs=13900010497 sustainedGoodNs=1099989503 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep stationary while gyro converges; wait for the gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7772364828076 deadlineNs=7787364828076 remainingNs=13399012946 sustainedGoodNs=1600987054 accelStatus=3 gyroStatus=3 magStatus=0 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep stationary while gyro converges; wait for the gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7772364828076 deadlineNs=7787364828076 remainingNs=12898013809 sustainedGoodNs=2101986191 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=3 tarePhase=0 checkPhase=0
+[1;36mGUIDE: keep stationary while gyro converges; wait for the gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=0 elapsedFromStateNs=7772364828076 deadlineNs=7787364828076 remainingNs=12398013332 sustainedGoodNs=2601986668 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare full ~180-degree swings about roll, pitch, and yaw.
+[0m[1;36mPress Enter to begin swings; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7775365815079 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare full ~180-degree swings about roll, pitch, and yaw.
+[0m[1;36mPress Enter to begin swings; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7775365815079 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare full ~180-degree swings about roll, pitch, and yaw.
+[0m[1;36mPress Enter to begin swings; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7775365815079 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare full ~180-degree swings about roll, pitch, and yaw.
+[0m[1;36mPress Enter to begin swings; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7775365815079 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=0 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare full ~180-degree swings about roll, pitch, and yaw.
+[0m[1;36mPress Enter to begin swings; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7775365815079 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare full ~180-degree swings about roll, pitch, and yaw.
+[0m[1;36mPress Enter to begin swings; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7775365815079 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=7876012817 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=7375012901 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=6875012787 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=6375010279 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=5874012877 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=5374009727 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=4873012275 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=4373009796 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=3872010237 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=3371012453 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=2870011900 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=2369014472 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=1869009309 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=1368014294 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=1 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=868010284 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7778244827434 deadlineNs=7786244827434 remainingNs=367012163 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7786245817817 deadlineNs=7816245817817 remainingNs=29867003083 sustainedGoodNs=131996902 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7786245817817 deadlineNs=7816245817817 remainingNs=29366001949 sustainedGoodNs=632998036 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=1 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7786245817817 deadlineNs=7816245817817 remainingNs=28865996394 sustainedGoodNs=1133003591 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=1 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7786245817817 deadlineNs=7816245817817 remainingNs=28365996262 sustainedGoodNs=1633003723 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=1 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7786245817817 deadlineNs=7816245817817 remainingNs=27865002624 sustainedGoodNs=2133997361 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=1 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=4 tarePhase=0 checkPhase=0
+[1;36mGUIDE: continue roll/pitch/yaw swing patterns; wait for mag accuracy.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7786245817817 deadlineNs=7816245817817 remainingNs=27365001516 sustainedGoodNs=2633998469 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=1 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=10000000000 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=1 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=9499999360 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=1 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=8999002700 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=1 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=8498002791 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=1 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=7998002595 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=7498002318 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=6997002317 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=6496999712 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=0 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=5996000235 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=5495002232 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=0 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=4994999035 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=0 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=4494002723 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=3993999921 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=3493999389 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=0 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=2993005040 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=2492999699 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=1992004171 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=1492002855 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=991006018 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7789247817399 deadlineNs=7799247817399 remainingNs=490999689 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7799247829723 deadlineNs=7804247829723 remainingNs=4990015033 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=0 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7799247829723 deadlineNs=7804247829723 remainingNs=4490014710 sustainedGoodNs=496999482 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7799247829723 deadlineNs=7804247829723 remainingNs=3989014719 sustainedGoodNs=997999473 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7799247829723 deadlineNs=7804247829723 remainingNs=3488014405 sustainedGoodNs=1498999787 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7799247829723 deadlineNs=7804247829723 remainingNs=2988014286 sustainedGoodNs=1998999906 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7799247829723 deadlineNs=7804247829723 remainingNs=2487015442 sustainedGoodNs=2499998750 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=5 tarePhase=0 checkPhase=0
+[1;36mGUIDE: hold the device still for the DCD snapshot and accuracy gate.
+[0m[1;36mWait; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7799247829723 deadlineNs=7804247829723 remainingNs=1987014385 sustainedGoodNs=2999999807 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=6 tarePhase=0 checkPhase=0
+[1;36mGUIDE: saving DCD; wait for the session result.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7802261822687 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare gentle yaw motion for same-session verification after dynamic calibration is disabled.
+[0m[1;36mPress Enter to start; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7802261822687 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare gentle yaw motion for same-session verification after dynamic calibration is disabled.
+[0m[1;36mPress Enter to start; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7802262822961 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare gentle yaw motion for same-session verification after dynamic calibration is disabled.
+[0m[1;36mPress Enter to start; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7802262822961 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare gentle yaw motion for same-session verification after dynamic calibration is disabled.
+[0m[1;36mPress Enter to start; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7802262822961 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare gentle yaw motion for same-session verification after dynamic calibration is disabled.
+[0m[1;36mPress Enter to start; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7802262822961 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare gentle yaw motion for same-session verification after dynamic calibration is disabled.
+[0m[1;36mPress Enter to start; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7802262822961 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare gentle yaw motion for same-session verification after dynamic calibration is disabled.
+[0m[1;36mPress Enter to start; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7802262822961 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: prepare gentle yaw motion for same-session verification after dynamic calibration is disabled.
+[0m[1;36mPress Enter to start; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7802262822961 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=9694014068 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=9194011233 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=8693014691 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=8193011807 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=7692014254 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=7191014397 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=0 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=6691014088 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=6191012216 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=5690014306 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=5190011811 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=4689014129 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=4189011789 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=3689011610 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=3188012428 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=2687014278 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=2186019769 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=1686011048 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=2 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=1185017287 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=685009276 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7805962269341 deadlineNs=7815962269341 remainingNs=184016837 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7815963256029 deadlineNs=7835963256029 remainingNs=19685000373 sustainedGoodNs=314000666 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7815963256029 deadlineNs=7835963256029 remainingNs=19184000847 sustainedGoodNs=815000192 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7815963256029 deadlineNs=7835963256029 remainingNs=18684000036 sustainedGoodNs=1315001003 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7815963256029 deadlineNs=7835963256029 remainingNs=18183999107 sustainedGoodNs=1815001932 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7815963256029 deadlineNs=7835963256029 remainingNs=17683998357 sustainedGoodNs=2315002682 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=2 calPhase=8 tarePhase=0 checkPhase=0
+[1;36mGUIDE: complete the timed yaw-motion and rest verification gate.
+[0m[1;36mDo not press Enter now; q then Enter cancels.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7815963256029 deadlineNs=7835963256029 remainingNs=17183001179 sustainedGoodNs=2815999860 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R8 version=4 identity=CALIBRATION action=0 calPhase=9 tarePhase=0 checkPhase=0
+[1;36mGUIDE: restoring production reports; wait.
+[0mcal pose=6/6 accelRound=1 magRound=1 elapsedFromStateNs=7818964255373 deadlineNs=0 remainingNs=0 sustainedGoodNs=0 accelStatus=3 gyroStatus=3 magStatus=2 rvStatus=3 gatePassingNow=1
+R7 version=4 identity=CALIBRATION state=SUCCEEDED reason=OK reasonCode=1 warningRequired=0 doNotAcquire=0 startedNs=7728979907775 endedNs=7818964255373 epochBefore=1 epochAfter=4 restoredProduction=1 dcdSaved=1 verified=1
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+yR8 version=4 identity=TARE action=3 calPhase=0 tarePhase=2 checkPhase=0
+[1;36mGUIDE: align device with its reference attitude.
+[0m[1;36mType y then Enter to tare all axes and persist; q then Enter cancels.
+[0mtare axes=2 confirmPending=1 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+
+R8 version=4 identity=TARE action=0 calPhase=0 tarePhase=3 checkPhase=0
+[1;36mGUIDE: configuring tare reports; wait.
+[0mtare axes=2 confirmPending=0 attitudeValid=0 epochMatched=0 deadlineNs=0 remainingNs=0 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=2 calPhase=0 tarePhase=4 checkPhase=0
+[1;36mGUIDE: keep the aligned device still during tare settle.
+[0mtare axes=2 confirmPending=0 attitudeValid=0 epochMatched=0 deadlineNs=7831193613113 remainingNs=1999001502 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=2 calPhase=0 tarePhase=4 checkPhase=0
+[1;36mGUIDE: keep the aligned device still during tare settle.
+[0mtare axes=2 confirmPending=0 attitudeValid=1 epochMatched=1 deadlineNs=7831193613113 remainingNs=1498225772 yawRad=2.8661 pitchRad=0.0044 rollRad=-0.0009 verificationEvidence=0
+R8 version=4 identity=TARE action=2 calPhase=0 tarePhase=4 checkPhase=0
+[1;36mGUIDE: keep the aligned device still during tare settle.
+[0mtare axes=2 confirmPending=0 attitudeValid=1 epochMatched=1 deadlineNs=7831193613113 remainingNs=998223000 yawRad=2.8663 pitchRad=0.0044 rollRad=-0.0010 verificationEvidence=0
+R8 version=4 identity=TARE action=2 calPhase=0 tarePhase=4 checkPhase=0
+[1;36mGUIDE: keep the aligned device still during tare settle.
+[0mtare axes=2 confirmPending=0 attitudeValid=1 epochMatched=1 deadlineNs=7831193613113 remainingNs=497228019 yawRad=2.8673 pitchRad=0.0043 rollRad=-0.0012 verificationEvidence=0
+R8 version=4 identity=TARE action=0 calPhase=0 tarePhase=5 checkPhase=0
+[1;36mGUIDE: applying tare-now; wait.
+[0mtare axes=2 confirmPending=0 attitudeValid=1 epochMatched=1 deadlineNs=0 remainingNs=0 yawRad=2.8686 pitchRad=0.0048 rollRad=-0.0018 verificationEvidence=0
+R8 version=4 identity=TARE action=0 calPhase=0 tarePhase=6 checkPhase=0
+[1;36mGUIDE: persisting tare to device flash; wait.
+[0mtare axes=2 confirmPending=0 attitudeValid=1 epochMatched=1 deadlineNs=0 remainingNs=0 yawRad=2.8686 pitchRad=0.0048 rollRad=-0.0018 verificationEvidence=0
+R8 version=4 identity=TARE action=2 calPhase=0 tarePhase=8 checkPhase=0
+[1;36mGUIDE: verifying post-tare attitude; wait.
+[0mtare axes=2 confirmPending=0 attitudeValid=0 epochMatched=0 deadlineNs=7831695408584 remainingNs=499019687 yawRad=0.0000 pitchRad=0.0000 rollRad=0.0000 verificationEvidence=0
+R8 version=4 identity=TARE action=0 calPhase=0 tarePhase=10 checkPhase=0
+[1;36mGUIDE: restoring production reports; wait.
+[0mtare axes=2 confirmPending=0 attitudeValid=1 epochMatched=1 deadlineNs=0 remainingNs=0 yawRad=-0.0002 pitchRad=-0.0004 rollRad=-0.0004 verificationEvidence=1
+R7 version=4 identity=TARE state=SUCCEEDED reason=OK reasonCode=1 warningRequired=0 doNotAcquire=0 startedNs=7818974607287 endedNs=7831696387003 epochBefore=4 epochAfter=7 restoredProduction=1 dcdSaved=0 verified=1
+tare tareNow=1 persist=1 clearActive=0 clearSaved=0 requestedAxes=2 verificationEvidence=1
+R7 version=4 identity=SETTLE state=SUCCEEDED reason=OK reasonCode=1 warningRequired=0 doNotAcquire=0 startedNs=7831706858050 endedNs=7832007854025 epochBefore=0 epochAfter=0 restoredProduction=0 dcdSaved=0 verified=0
+acquisition epoch=7 validMask=0x07 observations=1 yaw=0.000 pitch=-0.000 roll=-0.000 ax=-0.031 ay=0.035 az=0.035 gx=0.000 gy=0.000 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=51 yaw=0.000 pitch=-0.000 roll=-0.000 ax=-0.008 ay=-0.016 az=-0.004 gx=0.000 gy=0.000 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=101 yaw=0.000 pitch=-0.000 roll=-0.000 ax=0.008 ay=0.020 az=0.035 gx=0.000 gy=0.000 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=151 yaw=0.000 pitch=-0.001 roll=-0.000 ax=0.008 ay=0.020 az=-0.004 gx=0.000 gy=0.000 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=201 yaw=0.000 pitch=-0.000 roll=-0.000 ax=0.043 ay=0.000 az=0.027 gx=0.002 gy=0.002 gz=-0.002
+acquisition epoch=7 validMask=0x07 observations=251 yaw=0.001 pitch=-0.000 roll=-0.000 ax=0.043 ay=0.000 az=-0.012 gx=-0.002 gy=0.000 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=301 yaw=0.001 pitch=0.000 roll=-0.000 ax=0.008 ay=0.012 az=-0.012 gx=0.006 gy=0.002 gz=-0.002
+acquisition epoch=7 validMask=0x07 observations=351 yaw=0.002 pitch=0.000 roll=-0.000 ax=0.008 ay=0.012 az=-0.004 gx=0.000 gy=0.000 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=401 yaw=0.003 pitch=0.000 roll=-0.000 ax=0.008 ay=0.012 az=-0.004 gx=0.000 gy=0.000 gz=-0.002
+acquisition epoch=7 validMask=0x07 observations=451 yaw=0.004 pitch=-0.000 roll=-0.000 ax=0.008 ay=0.020 az=-0.012 gx=0.002 gy=0.000 gz=-0.004
+acquisition epoch=7 validMask=0x07 observations=501 yaw=0.003 pitch=-0.000 roll=-0.000 ax=0.008 ay=0.020 az=-0.004 gx=-0.002 gy=0.000 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=551 yaw=0.004 pitch=-0.000 roll=-0.000 ax=-0.008 ay=-0.016 az=-0.004 gx=0.004 gy=0.002 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=601 yaw=0.004 pitch=-0.000 roll=-0.000 ax=0.031 ay=-0.035 az=-0.012 gx=0.004 gy=0.000 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=651 yaw=0.004 pitch=0.000 roll=-0.000 ax=0.016 ay=0.016 az=-0.012 gx=0.002 gy=0.002 gz=0.002
+acquisition epoch=7 validMask=0x07 observations=701 yaw=0.004 pitch=0.000 roll=-0.001 ax=0.000 ay=0.012 az=-0.039 gx=0.000 gy=0.000 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=751 yaw=0.005 pitch=0.000 roll=-0.000 ax=0.008 ay=0.012 az=-0.004 gx=0.002 gy=0.000 gz=-0.002
+acquisition epoch=7 validMask=0x07 observations=802 yaw=0.005 pitch=0.000 roll=0.000 ax=0.004 ay=0.020 az=-0.051 gx=0.002 gy=0.002 gz=0.002
+acquisition epoch=7 validMask=0x07 observations=852 yaw=0.005 pitch=-0.000 roll=-0.000 ax=-0.004 ay=-0.023 az=-0.004 gx=0.000 gy=-0.002 gz=0.002
+acquisition epoch=7 validMask=0x07 observations=902 yaw=0.005 pitch=-0.000 roll=-0.000 ax=0.008 ay=0.012 az=-0.004 gx=0.000 gy=0.000 gz=0.000
+acquisition epoch=7 validMask=0x07 observations=952 yaw=0.005 pitch=-0.000 roll=-0.000 ax=0.008 ay=0.012 az=-0.004 gx=0.000 gy=0.000 gz=0.000
+R7 version=4 identity=ACQUISITION state=SUCCEEDED reason=OK reasonCode=1 warningRequired=0 doNotAcquire=0 startedNs=7832008861060 endedNs=7842009858275 epochBefore=0 epochAfter=0 restoredProduction=0 dcdSaved=0 verified=0
+main: shutdown status=0 observations=1000 skippedDeadlines=34
+2026-10-01T13:02:24+08:00
+app_exit=0
+
+Script done on 2026-10-01 13:02:25+08:00 [COMMAND_EXIT_CODE="0"]

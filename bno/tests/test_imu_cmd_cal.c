@@ -275,9 +275,9 @@ static bool drive_to_save_request(uint64_t *now_ns,
     return cal_initialized;
 }
 
-static bool drive_save_reopen_and_verify_config(uint64_t *now_ns,
-                                                bool cal_initialized,
-                                                const char *id)
+static bool drive_save_and_same_session_verify(uint64_t *now_ns,
+                                               bool cal_initialized,
+                                               const char *id)
 {
     ImuCalPendingRequest_t request;
     ImuSampleSnapshot_t before;
@@ -294,10 +294,10 @@ static bool drive_save_reopen_and_verify_config(uint64_t *now_ns,
     after = snapshot_of(id);
     check(after.configurationEpoch == before.configurationEpoch, id,
           "DCD save does not increment epoch");
-    check(request.type == IMU_CAL_REQ_VERIFY_REOPEN, id,
-          "successful save requests verification reopen");
-
-    imu_session_test_set_reopen_result(true);
+    check(request.type == IMU_CAL_REQ_VERIFY_SAME_SESSION, id,
+          "successful save requests same-session verification");
+    check(request.calMask == 0u, id,
+          "same-session verification disables dynamic calibration");
     before = after;
 
     *now_ns += 1ull;
@@ -306,27 +306,38 @@ static bool drive_save_reopen_and_verify_config(uint64_t *now_ns,
 
     request = imu_cal_pending_request();
     after = snapshot_of(id);
-    check(after.readerState == IMU_READER_STATE_CONFIGURING, id,
-          "planned reopen returns session to configuring");
+    check(after.readerState == IMU_READER_STATE_CALIBRATION, id,
+          "same session remains calibration");
     check(after.configurationEpoch == before.configurationEpoch + 1u, id,
-          "planned reopen increments epoch once");
+          "same-session policy transition increments epoch once");
     check(!imu_session_test_recovery_observed(), id,
-          "planned reopen is not recovery");
+          "same-session policy is not recovery");
     check(imu_session_test_recovery_attempt_count() == 0u, id,
-          "planned reopen does not count recovery");
-    check(request.type == IMU_CAL_REQ_CONFIGURE_CALIBRATION, id,
-          "reopen requests verification configuration");
-    check(request.calMask == 0u, id,
-          "verification configuration uses zero calibration mask");
+          "same-session policy does not count recovery");
+    check(request.type == IMU_CAL_REQ_NONE, id,
+          "verification policy result consumed");
 
-    *now_ns += 1ull;
+    return cal_initialized;
+}
+
+static bool drive_next_mag_attempt_to_save(uint64_t *now_ns,
+                                           bool cal_initialized,
+                                           const char *id)
+{
+    cal_initialized = owner_turn(
+        *now_ns, cal_initialized, IMU_CMD_EVENT_OPERATOR_CONFIRM, id);
+    *now_ns += IMU_CAL_MAG_MOTION_NS;
     cal_initialized = owner_turn(
         *now_ns, cal_initialized, IMU_CMD_EVENT_TICK, id);
+    cal_initialized = sustain_good_facts(now_ns, cal_initialized, id);
 
-    request = imu_cal_pending_request();
-    check(request.type == IMU_CAL_REQ_NONE, id,
-          "verification configuration result consumed");
+    *now_ns += IMU_CAL_HOLD_WINDOW_NS;
+    cal_initialized = owner_turn(
+        *now_ns, cal_initialized, IMU_CMD_EVENT_TICK, id);
+    cal_initialized = sustain_good_facts(now_ns, cal_initialized, id);
 
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_SAVE_DCD,
+          id, "next outer attempt reached save");
     return cal_initialized;
 }
 
@@ -361,6 +372,53 @@ static ImuCmdPlan_t cal_then_tare_plan(uint8_t flight_mask)
     plan.persistTare = true;
     plan.flightCalMask = flight_mask;
     return plan;
+}
+
+static void start_dcd_clear(bool with_tare, const char *id)
+{
+    ImuCmdPlan_t plan;
+    ImuCmdEvent_t event;
+    ImuCmdProgress_t progress;
+
+    imu_session_test_reset();
+    check(imu_session_test_open(true), id, "open sole test session");
+    imu_cmd_plan_clear(&plan);
+    plan.slot1 = IMU_CMD_ID_DCD_CLEAR;
+    if (with_tare) {
+        plan.slot2 = IMU_CMD_ID_TARE;
+        plan.tareAxes = IMU_CMD_TARE_AXES_Z;
+        plan.persistTare = true;
+    }
+    check(imu_cmd_init(&plan), id, "init plan");
+    imu_cmd_service();
+    check(imu_cmd_get_progress(&progress), id, "read pending clear");
+    check(progress.active == IMU_CMD_ID_DCD_CLEAR, id, "clear selected");
+
+    event = make_tick(T0);
+    check(imu_cmd_post(&event), id, "first tick initializes clear");
+    imu_cmd_service();
+    check(imu_cmd_get_progress(&progress), id, "read clear prompt");
+    check(progress.requiredAction == IMU_CMD_ACTION_CONFIRM,
+          id, "confirmation required");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          id, "no clear before confirmation");
+}
+
+static void confirm_dcd_clear(const char *id)
+{
+    ImuCmdEvent_t event = make_event(IMU_CMD_EVENT_OPERATOR_CONFIRM);
+
+    check(imu_cmd_post(&event), id, "confirm clear");
+    imu_cmd_service();
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          id, "one clear request pending");
+}
+
+static void pump_dcd_clear(const char *id)
+{
+    imu_session_service();
+    check(imu_cal_adapter_pump(), id, "pump one session request");
+    imu_cmd_service();
 }
 
 /*
@@ -496,12 +554,12 @@ static void test_m02_full_success_adopts_result_and_continues_to_tare(void)
 
     cal_initialized = drive_to_save_request(
         &now_ns, cal_initialized, "M02");
-    cal_initialized = drive_save_reopen_and_verify_config(
+    cal_initialized = drive_save_and_same_session_verify(
         &now_ns, cal_initialized, "M02");
 
     progress = progress_of("M02");
     check(progress.cal.phase == IMU_CMD_CAL_PHASE_VERIFY, "M02",
-          "verification configuration reaches verify prompt");
+          "same-session verification reaches verify prompt");
     check(progress.requiredAction == IMU_CMD_ACTION_PRESS_Q_TO_END, "M02",
           "verify prompt action mirrored");
 
@@ -552,7 +610,8 @@ static void test_m02_full_success_adopts_result_and_continues_to_tare(void)
     check(result.epochAfter == after_restore.configurationEpoch, "M02",
           "adopted final restoration epoch");
     check(result.epochAfter > result.epochBefore, "M02",
-          "configuration epochs advanced through calibration");
+          "configuration epochs advanced through same-session policy"
+          " transition and production restoration");
     check(result.terminalProgress.version == IMU_CMD_PROGRESS_VERSION, "M02",
           "terminal progress version retained");
     check(result.terminalProgress.active == IMU_CMD_ID_CALIBRATION, "M02",
@@ -561,7 +620,7 @@ static void test_m02_full_success_adopts_result_and_continues_to_tare(void)
           "terminal progress captures restore phase");
 
     check(after_restore.readerState == IMU_READER_STATE_CONFIGURING, "M02",
-          "restore returns session to configuring");
+          "production restore returns session to configuring");
     check(after_restore.configurationEpoch ==
               before_restore.configurationEpoch + 1u,
           "M02",
@@ -570,10 +629,9 @@ static void test_m02_full_success_adopts_result_and_continues_to_tare(void)
           "read restored production policy");
     check(policy_mask == flight_mask, "M02",
           "nonzero flight mask restored");
-    check(!imu_session_test_recovery_observed(), "M02",
-          "full success never enters recovery");
-    check(imu_session_test_recovery_attempt_count() == 0u, "M02",
-          "full success records no recovery attempt");
+    check(!imu_session_test_recovery_observed() &&
+          imu_session_test_recovery_attempt_count() == 0u,
+          "M02", "guided calibration did not reset or recover");
     check(!imu_cmd_warning_required(), "M02",
           "coordinator warning latch remains clear");
     check(!imu_cmd_do_not_acquire(), "M02",
@@ -713,11 +771,12 @@ static void test_m04_restore_failure_stops_plan(void)
           "acquisition not started");
 }
 
-static void test_m05_reopen_failure_keeps_dcd_and_stops(void)
+static void test_m05_same_session_verify_keeps_dcd_and_continues(void)
 {
     ImuCmdPlan_t plan = cal_then_tare_plan(0x05u);
-    ImuCmdResult_t result;
     ImuCalPendingRequest_t request;
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
     uint64_t now_ns = T0;
     bool cal_initialized;
 
@@ -729,36 +788,28 @@ static void test_m05_reopen_failure_keeps_dcd_and_stops(void)
     cal_initialized = owner_turn(
         now_ns, cal_initialized, IMU_CMD_EVENT_TICK, "M05");
     request = imu_cal_pending_request();
-    check(request.type == IMU_CAL_REQ_VERIFY_REOPEN, "M05",
-          "save success requests reopen");
+    check(request.type == IMU_CAL_REQ_VERIFY_SAME_SESSION, "M05",
+          "save success requests same-session verification");
+    check(request.calMask == 0u, "M05",
+          "same-session verification mask zero");
 
-    imu_session_test_set_reopen_result(false);
+    before = snapshot_of("M05");
     now_ns += 1ull;
     cal_initialized = owner_turn(
         now_ns, cal_initialized, IMU_CMD_EVENT_TICK, "M05");
+    after = snapshot_of("M05");
     check(cal_initialized, "M05", "driver remembers initialization");
-
-    request = imu_cal_pending_request();
-    result = result_of(IMU_CMD_ID_CALIBRATION, "M05");
-    check(request.type == IMU_CAL_REQ_NONE, "M05",
-          "no restore after unusable session");
-    check(result.state == IMU_CMD_STATE_RECOVERY_FAILED, "M05",
-          "reopen failure is recovery failed");
-    check(result.reason == IMU_CMD_REASON_CAL_REOPEN_FAILED, "M05",
-          "reopen-failure reason retained");
-    check(result.dcdSaved, "M05", "prior DCD save retained");
-    check(!result.verified, "M05", "not verified");
-    check(!result.restoredProduction, "M05", "not restored");
-    check(imu_session_test_recovery_attempt_count() == 1u, "M05",
-          "failed planned reopen counts recovery");
-    check(imu_cmd_do_not_acquire(), "M05", "do not acquire");
-    check(imu_cmd_plan_complete(), "M05", "plan stopped");
-
-    imu_cmd_service();
-    check(result_of(IMU_CMD_ID_TARE, "M05").state ==
-              IMU_CMD_STATE_NOT_REQUESTED,
-          "M05",
-          "tare not started");
+    check(after.readerState == IMU_READER_STATE_CALIBRATION, "M05",
+          "session remains calibration");
+    check(after.configurationEpoch == before.configurationEpoch + 1u, "M05",
+          "one same-session policy epoch");
+    check(!imu_session_test_recovery_observed() &&
+          imu_session_test_recovery_attempt_count() == 0u, "M05",
+          "no reset/recovery path");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE, "M05",
+          "same-session verification consumed");
+    check(!imu_cmd_do_not_acquire() && !imu_cmd_plan_complete(), "M05",
+          "verification can proceed");
 }
 
 static void test_m06_progress_mirrors_and_confirm_routes_through_cmd(void)
@@ -898,16 +949,266 @@ static void test_m08_adapter_hard_failure_is_unrestorable(void)
           "tare not started");
 }
 
+static void test_m09_dcd_clear_requires_confirmation_and_restores(void)
+{
+    ImuCmdEvent_t event;
+    ImuCmdResult_t result;
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+
+    start_dcd_clear(false, "M09");
+    before = snapshot_of("M09");
+    event = make_event(IMU_CMD_EVENT_STAGE_TERMINAL);
+    event.terminal.identity = IMU_CMD_ID_DCD_CLEAR;
+    event.terminal.state = IMU_CMD_STATE_SUCCEEDED;
+    event.terminal.reason = IMU_CMD_REASON_OK;
+    check(!imu_cmd_post(&event), "M09", "external terminal rejected");
+
+    confirm_dcd_clear("M09");
+    event = make_event(IMU_CMD_EVENT_OPERATOR_CONFIRM);
+    check(!imu_cmd_post(&event), "M09", "duplicate confirm rejected");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          "M09", "still one pending request");
+
+    pump_dcd_clear("M09");
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u,
+          "M09", "one flash-delete attempt");
+    check(imu_session_test_dcd_clear_reset_attempts() == 1u,
+          "M09", "one reset-command attempt");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "M09", "restore requested after accepted clear");
+    check(result_of(IMU_CMD_ID_DCD_CLEAR, "M09").state ==
+              IMU_CMD_STATE_RUNNING, "M09", "no early terminal");
+
+    pump_dcd_clear("M09");
+    after = snapshot_of("M09");
+    result = result_of(IMU_CMD_ID_DCD_CLEAR, "M09");
+    check(result.state == IMU_CMD_STATE_SUCCEEDED, "M09", "succeeded");
+    check(result.reason == IMU_CMD_REASON_OK, "M09", "OK");
+    check(result.restoredProduction, "M09", "restoration observed");
+    check(!result.dcdSaved && !result.verified,
+          "M09", "clear did not masquerade as DCD save/verification");
+    check(result.epochBefore == before.configurationEpoch,
+          "M09", "real starting epoch");
+    check(result.epochAfter == after.configurationEpoch,
+          "M09", "real ending epoch");
+    check(after.configurationEpoch == before.configurationEpoch + 1u,
+          "M09", "reset/reopen took one epoch");
+    check(!imu_cmd_do_not_acquire(), "M09", "plan may continue");
+}
+
+static void test_m10_dcd_clear_failure_restores_and_advances(void)
+{
+    ImuCmdResult_t result;
+
+    start_dcd_clear(true, "M10");
+    confirm_dcd_clear("M10");
+    imu_session_test_set_clear_dcd_results(false, true);
+    pump_dcd_clear("M10");
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u,
+          "M10", "delete attempted");
+    check(imu_session_test_dcd_clear_reset_attempts() == 0u,
+          "M10", "reset not issued after failed delete");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "M10", "failed clear requests restoration");
+
+    pump_dcd_clear("M10");
+    result = result_of(IMU_CMD_ID_DCD_CLEAR, "M10");
+    check(result.state == IMU_CMD_STATE_FAILED, "M10", "ordinary failure");
+    check(result.reason == IMU_CMD_REASON_DCD_CLEAR_FAILED,
+          "M10", "clear failure reason");
+    check(result.warningRequired && imu_cmd_warning_required(),
+          "M10", "warning retained");
+    check(result.restoredProduction, "M10", "production restored");
+    check(!imu_cmd_do_not_acquire(), "M10", "may continue");
+    imu_cmd_service();
+    check(progress_of("M10").active == IMU_CMD_ID_TARE,
+          "M10", "tare follows ordinary failure");
+}
+
+static void test_m11_dcd_clear_reopen_failure_stops_plan(void)
+{
+    ImuCmdResult_t result;
+
+    start_dcd_clear(true, "M11");
+    confirm_dcd_clear("M11");
+    imu_session_test_set_reopen_result(false);
+    pump_dcd_clear("M11");
+    result = result_of(IMU_CMD_ID_DCD_CLEAR, "M11");
+    check(result.state == IMU_CMD_STATE_RECOVERY_FAILED,
+          "M11", "reopen failure");
+    check(result.reason == IMU_CMD_REASON_SESSION_UNUSABLE,
+          "M11", "session unusable");
+    check(!result.restoredProduction, "M11", "no false restore");
+    check(imu_cmd_do_not_acquire() && imu_cmd_plan_complete(),
+          "M11", "plan stopped");
+    check(imu_cmd_request() == IMU_CMD_REQ_STOP_PLAN,
+          "M11", "stop requested");
+    check(result_of(IMU_CMD_ID_TARE, "M11").state ==
+              IMU_CMD_STATE_NOT_REQUESTED, "M11", "tare not started");
+}
+
+static void test_m12_dcd_clear_q_before_mutation(void)
+{
+    ImuCmdEvent_t event;
+    ImuCmdResult_t result;
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+
+    start_dcd_clear(false, "M12");
+    before = snapshot_of("M12");
+    event = make_event(IMU_CMD_EVENT_OPERATOR_Q);
+    check(imu_cmd_post(&event), "M12", "q");
+    imu_cmd_service();
+    after = snapshot_of("M12");
+    result = result_of(IMU_CMD_ID_DCD_CLEAR, "M12");
+    check(result.state == IMU_CMD_STATE_CANCELLED, "M12", "cancelled");
+    check(result.reason == IMU_CMD_REASON_OPERATOR_Q, "M12", "q reason");
+    check(before.configurationEpoch == after.configurationEpoch,
+          "M12", "no mutation epoch");
+    check(imu_session_test_dcd_flash_delete_attempts() == 0u &&
+          imu_session_test_dcd_clear_reset_attempts() == 0u,
+          "M12", "no destructive action");
+    check(!result.restoredProduction, "M12", "no invented restoration");
+}
+
+static void test_m13_dcd_clear_stop_prevents_later_pump(void)
+{
+    ImuCmdEvent_t event;
+    ImuCmdResult_t result;
+
+    start_dcd_clear(false, "M13");
+    confirm_dcd_clear("M13");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          "M13", "request pending when stop arrives");
+    event = make_event(IMU_CMD_EVENT_PROCESS_STOP);
+    check(imu_cmd_post(&event), "M13", "adopt stop");
+    imu_cmd_service();
+
+    /* The stopped owner does not call pump_dcd_clear() here. */
+    result = result_of(IMU_CMD_ID_DCD_CLEAR, "M13");
+    check(result.state == IMU_CMD_STATE_ABANDONED &&
+          result.reason == IMU_CMD_REASON_PROCESS_STOP,
+          "M13", "process stop is not q");
+    check(imu_cmd_process_stop_seen() && imu_cmd_do_not_acquire(),
+          "M13", "stopped and cannot acquire");
+    check(imu_session_test_dcd_flash_delete_attempts() == 0u &&
+          imu_session_test_dcd_clear_reset_attempts() == 0u,
+          "M13", "no post-stop clear execution");
+}
+
+static void test_m14_best_effort_save_failure_verifies_and_continues(void)
+{
+    ImuCmdPlan_t plan = cal_then_tare_plan(0x05u);
+    ImuCmdResult_t result;
+    ImuCalPendingRequest_t request;
+    uint64_t now_ns = T0;
+    bool cal_initialized;
+    unsigned attempt;
+
+    cal_initialized = start_and_configure(&plan, &now_ns, "M14");
+    cal_initialized = drive_to_save_request(&now_ns, cal_initialized,
+                                             "M14");
+
+    /*
+     * First save failure enters the existing retry-hold path. The retry is
+     * then failed as well while this is the final permitted outer attempt.
+     */
+    imu_session_test_set_save_dcd_result(false);
+    for (attempt = 1u; attempt <= IMU_CAL_MAX_SAVE_ATTEMPTS; ++attempt) {
+        now_ns += 1ull;
+        cal_initialized = owner_turn(
+            now_ns, cal_initialized, IMU_CMD_EVENT_TICK, "M14");
+        check(progress_of("M14").cal.phase == IMU_CMD_CAL_PHASE_HOLD,
+              "M14", "failed save enters retry hold");
+
+        now_ns += IMU_CAL_SAVE_RETRY_HOLD_NS;
+        cal_initialized = owner_turn(
+            now_ns, cal_initialized, IMU_CMD_EVENT_TICK, "M14");
+        request = imu_cal_pending_request();
+        check(request.type == IMU_CAL_REQ_SAVE_DCD,
+              "M14", "save retry pending");
+
+        now_ns += 1ull;
+        cal_initialized = owner_turn(
+            now_ns, cal_initialized, IMU_CMD_EVENT_TICK, "M14");
+
+        if (attempt < IMU_CAL_MAX_SAVE_ATTEMPTS) {
+            cal_initialized = drive_next_mag_attempt_to_save(
+                &now_ns, cal_initialized, "M14");
+        }
+    }
+
+    request = imu_cal_pending_request();
+    check(request.type == IMU_CAL_REQ_VERIFY_SAME_SESSION,
+          "M14", "final save failure still requests same-session verify");
+    check(request.calMask == 0u,
+          "M14", "same-session verification disables dynamic calibration");
+
+    now_ns += 1ull;
+    cal_initialized = owner_turn(
+        now_ns, cal_initialized, IMU_CMD_EVENT_TICK, "M14");
+    check(progress_of("M14").cal.phase == IMU_CMD_CAL_PHASE_VERIFY,
+          "M14", "verification prompt entered without reopen");
+    check(!imu_session_test_recovery_observed() &&
+          imu_session_test_recovery_attempt_count() == 0u,
+          "M14", "save failure did not reset or recover session");
+
+    cal_initialized = owner_turn(
+        now_ns, cal_initialized, IMU_CMD_EVENT_OPERATOR_CONFIRM, "M14");
+    now_ns += IMU_CAL_VERIFY_MOTION_NS;
+    cal_initialized = owner_turn(
+        now_ns, cal_initialized, IMU_CMD_EVENT_TICK, "M14");
+    cal_initialized = sustain_good_facts(&now_ns, cal_initialized, "M14");
+
+    request = imu_cal_pending_request();
+    check(request.type == IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "M14", "verification success requests production restore");
+
+    now_ns += 1ull;
+    cal_initialized = owner_turn(
+        now_ns, cal_initialized, IMU_CMD_EVENT_TICK, "M14");
+    check(cal_initialized, "M14", "calibration machine remained initialized");
+
+    result = result_of(IMU_CMD_ID_CALIBRATION, "M14");
+    check(result.state == IMU_CMD_STATE_FAILED,
+          "M14", "best-effort save failure remains calibration failure");
+    check(result.reason == IMU_CMD_REASON_CAL_SAVE_FAILED,
+          "M14", "save failure reason retained");
+    check(result.warningRequired,
+          "M14", "save failure requires warning");
+    check(!result.dcdSaved,
+          "M14", "failed DCD save not claimed");
+    check(result.verified,
+          "M14", "same-session verification retained");
+    check(result.restoredProduction,
+          "M14", "production restoration retained");
+    check(!imu_cmd_do_not_acquire(),
+          "M14", "ordinary save failure may continue");
+    check(!imu_cmd_plan_complete(),
+          "M14", "later requested stages remain eligible");
+
+    imu_cmd_service();
+    check(progress_of("M14").active == IMU_CMD_ID_TARE,
+          "M14", "tare follows restorable save failure");
+}
+
 int main(void)
 {
     test_m01_first_tick_initializes_and_next_turn_pumps_configure();
     test_m02_full_success_adopts_result_and_continues_to_tare();
     test_m03_operator_q_waits_for_restore_then_continues();
     test_m04_restore_failure_stops_plan();
-    test_m05_reopen_failure_keeps_dcd_and_stops();
+    test_m05_same_session_verify_keeps_dcd_and_continues();
     test_m06_progress_mirrors_and_confirm_routes_through_cmd();
     test_m07_process_stop_abandons_without_later_pump();
     test_m08_adapter_hard_failure_is_unrestorable();
+    test_m09_dcd_clear_requires_confirmation_and_restores();
+    test_m10_dcd_clear_failure_restores_and_advances();
+    test_m11_dcd_clear_reopen_failure_stops_plan();
+    test_m12_dcd_clear_q_before_mutation();
+    test_m13_dcd_clear_stop_prevents_later_pump();
+    test_m14_best_effort_save_failure_verifies_and_continues();
 
     if (g_fail != 0) {
         fprintf(stderr, "test_imu_cmd_cal: %d failure(s)\n", g_fail);

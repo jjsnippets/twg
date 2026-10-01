@@ -247,6 +247,22 @@ static void drive_e2e_to_save(uint64_t *now_ns, const char *id)
           id, "save request pending");
 }
 
+static void start_clear_adapter(const char *id)
+{
+    ImuCalEvent_t event;
+
+    imu_session_test_reset();
+    check(imu_session_test_open(true), id, "open");
+    check(imu_cal_init_dcd_clear(0u, T0), id, "init clear machine");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          id, "no request before confirm");
+    memset(&event, 0, sizeof(event));
+    event.type = IMU_CAL_EVENT_OPERATOR_CONFIRM;
+    check(imu_cal_post(&event), id, "confirm");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          id, "clear pending");
+}
+
 static void test_a01_configure_calibration_maps_request(void)
 {
     ImuCalPendingRequest_t request;
@@ -292,12 +308,15 @@ static void test_a02_save_dcd_maps_request(void)
           "save remains in calibration");
 
     request = imu_cal_pending_request();
-    check(request.type == IMU_CAL_REQ_VERIFY_REOPEN,
+    check(request.type == IMU_CAL_REQ_VERIFY_SAME_SESSION,
           "A02",
-          "save success requests verify reopen");
+          "save success requests same-session verification");
+    check(request.calMask == 0u,
+          "A02",
+          "same-session verification mask is zero");
 }
 
-static void test_a03_verify_reopen_maps_request(void)
+static void test_a03_same_session_verify_maps_request(void)
 {
     ImuSampleSnapshot_t before;
     ImuSampleSnapshot_t after;
@@ -311,31 +330,20 @@ static void test_a03_verify_reopen_maps_request(void)
 
     before = snapshot();
     imu_session_test_set_reopen_result(true);
-    check(imu_cal_adapter_pump(), "A03", "verify reopen pump");
+    check(imu_cal_adapter_pump(), "A03",
+          "same-session verification pump");
     after = snapshot();
 
-    check(after.readerState == IMU_READER_STATE_CONFIGURING,
-          "A03",
-          "reopen returns configuring");
+    check(after.readerState == IMU_READER_STATE_CALIBRATION,
+          "A03", "remains in calibration session");
     check(after.configurationEpoch == before.configurationEpoch + 1u,
-          "A03",
-          "reopen takes one epoch");
+          "A03", "policy transition takes one epoch");
     check(!imu_session_test_recovery_observed(),
-          "A03",
-          "planned reopen is not recovery");
+          "A03", "same-session verification is not recovery");
 
     request = imu_cal_pending_request();
-    check(request.type == IMU_CAL_REQ_CONFIGURE_CALIBRATION,
-          "A03",
-          "verify configuration requested");
-    check(request.calMask == 0u,
-          "A03",
-          "verify configuration mask is zero");
-
-    check(imu_cal_adapter_pump(), "A03", "verify configure pump");
-    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
-          "A03",
-          "verify configure result consumed");
+    check(request.type == IMU_CAL_REQ_NONE,
+          "A03", "same-session result consumed");
 }
 
 static void test_a04_restore_production_maps_request(void)
@@ -443,28 +451,24 @@ static void test_a06_full_success_host_flow(void)
     imu_session_test_set_save_dcd_result(true);
     check(imu_cal_adapter_pump(), "A06", "save pump");
     request = imu_cal_pending_request();
-    check(request.type == IMU_CAL_REQ_VERIFY_REOPEN, "A06", "reopen requested");
+    check(request.type == IMU_CAL_REQ_VERIFY_SAME_SESSION,
+          "A06", "same-session verification requested");
+    check(request.calMask == 0u,
+          "A06", "same-session verification mask zero");
 
     before = snapshot();
-    imu_session_test_set_reopen_result(true);
-    check(imu_cal_adapter_pump(), "A06", "verify reopen pump");
+    check(imu_cal_adapter_pump(), "A06",
+          "same-session verification pump");
     after = snapshot();
-    check(after.readerState == IMU_READER_STATE_CONFIGURING, "A06",
-          "planned reopen returns CONFIGURING");
-    check(after.configurationEpoch == before.configurationEpoch + 1u, "A06",
-          "planned reopen takes one epoch");
-    check(!imu_session_test_recovery_observed(), "A06",
-          "planned reopen is not recovery");
-    check(imu_session_test_recovery_attempt_count() == 0u, "A06",
-          "planned reopen does not count a recovery attempt");
-
-    request = imu_cal_pending_request();
-    check(request.type == IMU_CAL_REQ_CONFIGURE_CALIBRATION, "A06",
-          "verify configure requested");
-    check(request.calMask == 0u, "A06", "verify configure mask is zero");
-    check(imu_cal_adapter_pump(), "A06", "verify configure pump");
+    check(after.readerState == IMU_READER_STATE_CALIBRATION,
+          "A06", "same session remains CALIBRATION");
+    check(after.configurationEpoch == before.configurationEpoch + 1u,
+          "A06", "policy transition takes one epoch");
+    check(!imu_session_test_recovery_observed() &&
+          imu_session_test_recovery_attempt_count() == 0u,
+          "A06", "same-session verification is not recovery");
     check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE, "A06",
-          "verify configure consumed");
+          "same-session verification consumed");
 
     post_confirm("A06", "verify");
     now_ns += IMU_CAL_VERIFY_MOTION_NS;
@@ -520,38 +524,35 @@ static void test_a07_save_retry_host_flow(void)
     imu_session_test_set_save_dcd_result(true);
     check(imu_cal_adapter_pump(), "A07", "retry save succeeds");
     request = imu_cal_pending_request();
-    check(request.type == IMU_CAL_REQ_VERIFY_REOPEN, "A07",
-          "reopen follows successful retry");
+    check(request.type == IMU_CAL_REQ_VERIFY_SAME_SESSION, "A07",
+          "same-session verification follows successful retry");
 }
 
-static void test_a08_reopen_failure_host_flow(void)
+static void test_a08_same_session_path_does_not_reopen(void)
 {
     uint64_t now_ns = T0;
-    ImuCmdResult_t result;
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
 
     open_and_init(0x00u, "A08");
     drive_e2e_to_save(&now_ns, "A08");
 
     imu_session_test_set_save_dcd_result(true);
     check(imu_cal_adapter_pump(), "A08", "save pump");
-    check(imu_cal_pending_request().type == IMU_CAL_REQ_VERIFY_REOPEN, "A08",
-          "reopen requested");
+    check(imu_cal_pending_request().type ==
+              IMU_CAL_REQ_VERIFY_SAME_SESSION,
+          "A08", "same-session verification requested");
 
-    imu_session_test_set_reopen_result(false);
-    check(imu_cal_adapter_pump(), "A08", "failed reopen is posted");
-    check(imu_cal_complete(), "A08", "unusable session completes cal");
-    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE, "A08",
-          "no restore after unusable session");
-    check(imu_cal_get_result(&result), "A08", "get result");
-    check(result.state == IMU_CMD_STATE_RECOVERY_FAILED, "A08",
-          "recovery failed");
-    check(result.reason == IMU_CMD_REASON_CAL_REOPEN_FAILED, "A08",
-          "reopen failed");
-    check(result.dcdSaved, "A08", "save already happened");
-    check(!result.verified, "A08", "not verified");
-    check(!result.restoredProduction, "A08", "not restored");
-    check(imu_session_test_recovery_attempt_count() == 1u, "A08",
-          "failed planned reopen counts recovery");
+    before = snapshot();
+    check(imu_cal_adapter_pump(), "A08", "same-session verification pump");
+    after = snapshot();
+    check(after.readerState == IMU_READER_STATE_CALIBRATION, "A08",
+          "session remains calibration");
+    check(after.configurationEpoch == before.configurationEpoch + 1u, "A08",
+          "same-session policy epoch");
+    check(!imu_session_test_recovery_observed() &&
+          imu_session_test_recovery_attempt_count() == 0u, "A08",
+          "no reset or recovery");
 }
 
 static void test_a09_facts_forwarded_without_request(void)
@@ -586,17 +587,96 @@ static void test_a09_facts_forwarded_without_request(void)
     check(progress.cal.magXuT == 11.0f, "A09", "mag X forwarded");
 }
 
+static void test_a10_clear_one_request_per_pump(void)
+{
+    ImuSampleSnapshot_t before;
+    ImuSampleSnapshot_t after;
+    ImuCmdResult_t result;
+
+    start_clear_adapter("A10");
+    before = snapshot();
+    check(imu_cal_adapter_pump(), "A10", "clear pump");
+    after = snapshot();
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u &&
+          imu_session_test_dcd_clear_reset_attempts() == 1u,
+          "A10", "one delete/reset sequence");
+    check(after.configurationEpoch == before.configurationEpoch + 1u,
+          "A10", "reset epoch once");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "A10", "restoration still pending after first pump");
+    check(!imu_cal_complete(), "A10", "not terminal yet");
+
+    check(imu_cal_adapter_pump(), "A10", "restore pump");
+    check(imu_cal_complete(), "A10", "terminal after restore");
+    check(imu_cal_get_result(&result), "A10", "result");
+    check(result.state == IMU_CMD_STATE_SUCCEEDED &&
+          result.restoredProduction, "A10", "success with restore");
+    check(imu_cal_adapter_pump(), "A10", "NONE pump");
+    check(imu_session_test_dcd_flash_delete_attempts() == 1u,
+          "A10", "no duplicate clear");
+}
+
+static void test_a11_failed_clear_posts_ordinary_result(void)
+{
+    ImuCmdResult_t result;
+
+    start_clear_adapter("A11");
+    imu_session_test_set_clear_dcd_results(false, true);
+    check(imu_cal_adapter_pump(), "A11", "failed clear posted");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_RESTORE_PRODUCTION,
+          "A11", "restoration requested");
+    check(imu_cal_adapter_pump(), "A11", "restore posted");
+    check(imu_cal_get_result(&result), "A11", "result");
+    check(result.state == IMU_CMD_STATE_FAILED &&
+          result.reason == IMU_CMD_REASON_DCD_CLEAR_FAILED,
+          "A11", "ordinary failed clear");
+    check(result.warningRequired && result.restoredProduction,
+          "A11", "warn and restore");
+}
+
+static void test_a12_failed_reopen_posts_unusable_result(void)
+{
+    ImuCmdResult_t result;
+
+    start_clear_adapter("A12");
+    imu_session_test_set_reopen_result(false);
+    check(imu_cal_adapter_pump(), "A12", "failed reopen posted");
+    check(imu_cal_complete(), "A12", "terminal");
+    check(imu_cal_get_result(&result), "A12", "result");
+    check(result.state == IMU_CMD_STATE_RECOVERY_FAILED &&
+          result.reason == IMU_CMD_REASON_SESSION_UNUSABLE,
+          "A12", "unusable, not ordinary failure");
+    check(!result.restoredProduction, "A12", "no invented restore");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_NONE,
+          "A12", "no retry from faulted session");
+}
+
+static void test_a13_missing_session_evidence_is_adapter_failure(void)
+{
+    start_clear_adapter("A13");
+    imu_session_test_reset();
+    check(!imu_cal_adapter_pump(), "A13", "snapshot unavailable");
+    check(imu_cal_pending_request().type == IMU_CAL_REQ_CLEAR_DCD,
+          "A13", "unexecuted request remains pending");
+    check(imu_session_test_dcd_flash_delete_attempts() == 0u,
+          "A13", "no destructive call");
+}
+
 int main(void)
 {
     test_a01_configure_calibration_maps_request();
     test_a02_save_dcd_maps_request();
-    test_a03_verify_reopen_maps_request();
+    test_a03_same_session_verify_maps_request();
     test_a04_restore_production_maps_request();
     test_a05_session_failure_is_posted_to_imu_cal();
     test_a06_full_success_host_flow();
     test_a07_save_retry_host_flow();
-    test_a08_reopen_failure_host_flow();
+    test_a08_same_session_path_does_not_reopen();
     test_a09_facts_forwarded_without_request();
+    test_a10_clear_one_request_per_pump();
+    test_a11_failed_clear_posts_ordinary_result();
+    test_a12_failed_reopen_posts_unusable_result();
+    test_a13_missing_session_evidence_is_adapter_failure();
 
     if (gfail != 0) {
         fprintf(stderr, "test_imu_cal_adapter: %d failures\n", gfail);

@@ -15,6 +15,14 @@ CAL_C="${BNO_DIR}/app/imu_cal.c"
 CAL_H="${BNO_DIR}/app/imu_cal.h"
 CAL_ADAPTER_C="${BNO_DIR}/app/imu_cal_adapter.c"
 CAL_ADAPTER_H="${BNO_DIR}/app/imu_cal_adapter.h"
+CLI_C="${BNO_DIR}/app/imu_cli.c"
+CLI_H="${BNO_DIR}/app/imu_cli.h"
+CONSOLE_C="${BNO_DIR}/app/imu_console.c"
+CONSOLE_H="${BNO_DIR}/app/imu_console.h"
+MAIN_C="${BNO_DIR}/app/main.c"
+CAL_ADAPTER_C="${BNO_DIR}/app/imu_cal_adapter.c"
+TARE_ADAPTER_C="${BNO_DIR}/app/imu_tare_adapter.c"
+CHECK_ADAPTER_C="${BNO_DIR}/app/imu_check_adapter.c"
 HAL_C="${BNO_DIR}/app/sh2_hal_rpi.c"
 RT_C="${REPO_DIR}/rt/realtime.c"
 
@@ -52,6 +60,33 @@ scan_calls "$CAL_C" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
 scan_calls "$CAL_H" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
 scan_calls "$CAL_ADAPTER_C" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
 scan_calls "$CAL_ADAPTER_H" StartRT RT_SleepUntil usleep nanosleep sleep exit printf
+scan_calls "$CLI_C" StartRT RT_SleepUntil usleep nanosleep sleep exit \
+    printf fprintf fgets getchar read
+scan_calls "$CLI_H" StartRT RT_SleepUntil usleep nanosleep sleep exit \
+    printf fprintf fgets getchar read
+# poll/read and bounded worker waiting are allowed here; scheduling,
+# process exit, and coordinator/session ownership are not.
+scan_calls "$CONSOLE_C" StartRT RT_SleepUntil usleep nanosleep sleep exit \
+    imu_cmd_service imu_session_service
+scan_calls "$CONSOLE_H" StartRT RT_SleepUntil usleep nanosleep sleep exit \
+    imu_cmd_service imu_session_service
+# The existing main has no owner-side blocking stdin read; Step 8.5 must
+# retain this property when the console adapter is wired.
+scan_calls "$MAIN_C" fgets getchar getline scanf read
+scan_calls "$CAL_ADAPTER_C" StartRT RT_SleepUntil
+scan_calls "$TARE_ADAPTER_C" StartRT RT_SleepUntil
+scan_calls "$CHECK_ADAPTER_C" StartRT RT_SleepUntil
+
+# Production code has one visible scheduler owner and one normal-turn
+# absolute-sleep call site, both in main.c.
+if [ -f "$MAIN_C" ]; then
+    sleep_sites=$(grep -Ec \
+        '(^|[^[:alnum:]_])RT_SleepUntil[[:space:]]*\(' "$MAIN_C" || true)
+    if [ "$sleep_sites" -ne 1 ]; then
+        echo "FAIL $(relpath "$MAIN_C"): expected one RT_SleepUntil call site"
+        fail=$((fail + 1))
+    fi
+fi
 scan_calls "$RT_C" exit
 scan_calls "$HAL_C" StartRT RT_SleepUntil exit
 
@@ -68,6 +103,59 @@ if [ -f "$RT_C" ]; then
     if grep -qE "(^|[^[:alnum:]_])clock_nanosleep[[:space:]]*\(" "$RT_C"; then
         echo "allow: $(relpath "$RT_C") clock_nanosleep (RT_SleepUntil implementation)"
     fi
+fi
+
+UNIFIED_NO_SH2=(
+    "${BNO_DIR}/app/main.c"
+    "${BNO_DIR}/app/imu_cmd.c"
+    "${BNO_DIR}/app/imu_cal.c"
+    "${BNO_DIR}/app/imu_cal_adapter.c"
+    "${BNO_DIR}/app/imu_tare.c"
+    "${BNO_DIR}/app/imu_tare_adapter.c"
+    "${BNO_DIR}/app/imu_check.c"
+    "${BNO_DIR}/app/imu_check_adapter.c"
+    "${BNO_DIR}/app/imu_cli.c"
+    "${BNO_DIR}/app/imu_console.c"
+)
+
+for file in "${UNIFIED_NO_SH2[@]}"; do
+    if [ ! -f "$file" ]; then
+        echo "FAIL missing unified-path file: $(relpath "$file")"
+        fail=$((fail + 1))
+        continue
+    fi
+    hits=$(grep -nE '\bsh2_[[:alnum:]_]*[[:space:]]*\(' "$file" || true)
+    if [ -n "$hits" ]; then
+        echo "FAIL $(relpath "$file"): SH-2 ownership outside imu_session"
+        echo "$hits"
+        fail=$((fail + 1))
+    fi
+done
+
+if [ -f "$MAIN_C" ]; then
+    stdin_hits=$(grep -nE \
+        '(^|[^[:alnum:]_])(fgets|getchar|getline|scanf|read)[[:space:]]*\(' \
+        "$MAIN_C" || true)
+    if [ -n "$stdin_hits" ]; then
+        echo "FAIL $(relpath "$MAIN_C"): owner path reads stdin directly"
+        echo "$stdin_hits"
+        fail=$((fail + 1))
+    fi
+fi
+
+MAKEFILE="${BNO_DIR}/Makefile"
+if [ -f "$MAKEFILE" ]; then
+    app_rule=$(sed -n '/^APPOBJS[[:space:]]*:=/,/^$/p' "$MAKEFILE")
+    for forbidden in cal_cal_main orient_orient_main \
+                     cal_cal_sensor orient_orient_sensor; do
+        if printf '%s\n' "$app_rule" | grep -q "$forbidden"; then
+            echo "FAIL $(relpath "$MAKEFILE"): bno_app links ${forbidden}"
+            fail=$((fail + 1))
+        fi
+    done
+else
+    echo "FAIL missing Makefile: $(relpath "$MAKEFILE")"
+    fail=$((fail + 1))
 fi
 
 if [ "$fail" -ne 0 ]; then
