@@ -26,7 +26,11 @@
 #                       realtime_start, rt_fallback_policy, imu_cmd,
 #                       session_cal, imu_cal, imu_cal_adapter, imu_cmd_cal,
 #                       session_tare, imu_tare, imu_tare_adapter,
-#                       imu_cmd_tare, scheduling audit
+#                       imu_cmd_tare, imu_check, session_check,
+#                       imu_check_adapter, imu_cmd_check, imu_cli,
+#                       imu_console, app_owner_loop, imu_publish_contract,
+#                       imu_publish, imu_publish_gate, imu_csv, imu_meta,
+#                       imu_logger, imu_logfile, scheduling audit
 #   make all            build all tools and test binaries
 #   make clean          remove build/ and bin/
 #
@@ -44,8 +48,10 @@ BINDIR    := bin
 
 CC       := gcc
 CFLAGS   := -Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE
+DEPFLAGS := -MMD -MP
 CPPFLAGS := -I$(REPODIR) -I. -I$(SH2DIR) -I$(APPDIR) -I$(CALDIR) -I$(ORIENTDIR) -I$(VALDIR)
 LDLIBS   := -lgpiod -lm -lpthread
+APPHDRS  := $(wildcard $(APPDIR)/*.h)
 
 # Vendored CEVA SH-2 objects
 SH2SRCS := \
@@ -72,7 +78,12 @@ APPOBJS := \
 	$(BUILDDIR)/app_imu_check.o \
 	$(BUILDDIR)/app_imu_check_adapter.o \
 	$(BUILDDIR)/app_imu_cli.o \
-	$(BUILDDIR)/app_imu_console.o
+	$(BUILDDIR)/app_imu_console.o \
+	$(BUILDDIR)/app_imu_publish.o \
+	$(BUILDDIR)/app_imu_csv.o \
+	$(BUILDDIR)/app_imu_meta.o \
+	$(BUILDDIR)/app_imu_logger.o \
+	$(BUILDDIR)/app_imu_logfile.o
 
 # Calibration objects
 CALOBJS := $(BUILDDIR)/cal_cal_sensor.o $(BUILDDIR)/cal_cal_main.o
@@ -107,6 +118,13 @@ TESTCMDSRC          := $(TESTDIR)/test_imu_cmd.c
 TESTCLISRC          := $(TESTDIR)/test_imu_cli.c
 TESTCONSOLESRC      := $(TESTDIR)/test_imu_console.c
 TESTAPPLOOPSRC      := $(TESTDIR)/test_app_owner_loop.c
+TESTPUBLISHCONTRACTSRC := $(TESTDIR)/test_imu_publish_contract.c
+TESTPUBLISHSRC      := $(TESTDIR)/test_imu_publish.c
+TESTPUBLISHGATESRC  := $(TESTDIR)/test_imu_publish_gate.c
+TESTCSVSRC          := $(TESTDIR)/test_imu_csv.c
+TESTMETASRC         := $(TESTDIR)/test_imu_meta.c
+TESTLOGGERSRC       := $(TESTDIR)/test_imu_logger.c
+TESTLOGFILESRC      := $(TESTDIR)/test_imu_logfile.c
 TESTCHECKSRC        := $(TESTDIR)/test_imu_check.c
 TESTCMDCALSRC       := $(TESTDIR)/test_imu_cmd_cal.c
 TESTCMDTARESRC      := $(TESTDIR)/test_imu_cmd_tare.c
@@ -179,7 +197,11 @@ test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_imu_cmd_tare $(BINDIR)/test_imu_check \
 	$(BINDIR)/test_session_check $(BINDIR)/test_imu_check_adapter \
 	$(BINDIR)/test_imu_cmd_check $(BINDIR)/test_imu_cli \
-	$(BINDIR)/test_imu_console $(BINDIR)/test_app_owner_loop
+	$(BINDIR)/test_imu_console $(BINDIR)/test_app_owner_loop \
+	$(BINDIR)/test_imu_publish_contract $(BINDIR)/test_imu_publish \
+	$(BINDIR)/test_imu_publish_gate $(BINDIR)/test_imu_csv \
+	$(BINDIR)/test_imu_meta $(BINDIR)/test_imu_logger \
+	$(BINDIR)/test_imu_logfile
 	$(BINDIR)/test_quad_decode
 	$(BINDIR)/test_session_r1_epoch
 	$(BINDIR)/test_realtime_start
@@ -200,6 +222,13 @@ test: $(BINDIR)/test_quad_decode $(BINDIR)/test_session_r1_epoch \
 	$(BINDIR)/test_imu_cli
 	$(BINDIR)/test_imu_console
 	$(BINDIR)/test_app_owner_loop
+	$(BINDIR)/test_imu_publish_contract
+	$(BINDIR)/test_imu_publish
+	$(BINDIR)/test_imu_publish_gate
+	$(BINDIR)/test_imu_csv
+	$(BINDIR)/test_imu_meta
+	$(BINDIR)/test_imu_logger
+	$(BINDIR)/test_imu_logfile
 	bash $(TESTDIR)/audit_scheduling.sh
 
 $(BINDIR)/test_session_r1_epoch: $(TESTSESSIONSRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
@@ -229,9 +258,32 @@ $(BINDIR)/test_imu_console: $(TESTCONSOLESRC) \
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BINDIR)/test_app_owner_loop: $(TESTAPPLOOPSRC) \
-	$(APPDIR)/main.c $(APPDIR)/imu_console.c | $(BINDIR)
+	$(APPDIR)/main.c $(APPDIR)/imu_console.c \
+	$(APPDIR)/imu_publish.c $(APPHDRS) | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ \
-		$(TESTAPPLOOPSRC) $(APPDIR)/imu_console.c $(LDLIBS)
+		$(TESTAPPLOOPSRC) $(APPDIR)/imu_console.c \
+		$(APPDIR)/imu_publish.c $(LDLIBS)
+
+$(BINDIR)/test_imu_publish_contract: $(TESTPUBLISHCONTRACTSRC) $(APPDIR)/imu_publish.h $(APPDIR)/imu_contract.h | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $<
+
+$(BINDIR)/test_imu_publish: $(TESTPUBLISHSRC) $(APPDIR)/imu_publish.c $(APPDIR)/imu_publish.h $(APPDIR)/imu_contract.h | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(TESTPUBLISHSRC) $(APPDIR)/imu_publish.c
+
+$(BINDIR)/test_imu_publish_gate: $(TESTPUBLISHGATESRC) $(APPDIR)/imu_publish.c $(APPDIR)/imu_publish.h $(APPDIR)/imu_contract.h | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(TESTPUBLISHGATESRC) $(APPDIR)/imu_publish.c
+
+$(BINDIR)/test_imu_csv: $(TESTCSVSRC) $(APPDIR)/imu_csv.c $(APPDIR)/imu_csv.h $(APPDIR)/imu_publish.h $(APPDIR)/imu_contract.h | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(TESTCSVSRC) $(APPDIR)/imu_csv.c
+
+$(BINDIR)/test_imu_meta: $(TESTMETASRC) $(APPDIR)/imu_meta.c $(APPDIR)/imu_meta.h $(APPDIR)/imu_cmd.h $(APPDIR)/imu_publish.h $(APPDIR)/imu_contract.h | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(TESTMETASRC) $(APPDIR)/imu_meta.c
+
+$(BINDIR)/test_imu_logger: $(TESTLOGGERSRC) $(APPDIR)/imu_logger.c $(APPDIR)/imu_logger.h $(APPDIR)/imu_csv.c $(APPDIR)/imu_csv.h $(APPDIR)/imu_publish.h | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -pthread -o $@ $(TESTLOGGERSRC) $(APPDIR)/imu_logger.c $(APPDIR)/imu_csv.c -lm
+
+$(BINDIR)/test_imu_logfile: $(TESTLOGFILESRC) $(APPDIR)/imu_logfile.c $(APPDIR)/imu_logfile.h $(APPDIR)/imu_logger.c $(APPDIR)/imu_logger.h $(APPDIR)/imu_csv.c $(APPDIR)/imu_csv.h | $(BINDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(TESTLOGFILESRC) $(APPDIR)/imu_logfile.c $(APPDIR)/imu_logger.c $(APPDIR)/imu_csv.c -pthread
 
 $(BINDIR)/test_session_tare: $(TESTSESSIONTARESRC) $(BUILDDIR)/app_imu_session.o $(SH2OBJS) $(APPHALOBJ) | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^ $(LDLIBS)
@@ -335,28 +387,30 @@ $(BINDIR)/test_report_len: $(TESTREPORTLENSRC) $(APPHALOBJ) $(SH2OBJS) $(RTOBJ) 
 # ------------------------------------------------------------------
 
 $(BUILDDIR)/sh2_%.o: $(SH2DIR)/%.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(BUILDDIR)/app_%.o: $(APPDIR)/%.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(RTOBJ): $(RTDIR)/realtime.c $(RTDIR)/realtime.h | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(BUILDDIR)/cal_%.o: $(CALDIR)/%.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(BUILDDIR)/orient_%.o: $(ORIENTDIR)/%.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(BUILDDIR)/val_%.o: $(VALDIR)/%.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(BUILDDIR):
 	mkdir -p $@
 
 $(BINDIR):
 	mkdir -p $@
+
+-include $(wildcard $(BUILDDIR)/*.d)
 
 clean:
 	rm -rf $(BUILDDIR) $(BINDIR)

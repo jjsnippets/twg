@@ -12,12 +12,11 @@ typedef struct {
     unsigned length;
     bool stop;
     bool failAdapter;
-    bool due;
     bool initialized;
     unsigned inputCalls;
     unsigned serviceCalls;
     unsigned sleepCalls;
-    unsigned acquireCalls;
+    unsigned publishCalls;
     ImuCmdIdentity_t active;
     AppAdapter_t pumped;
 } Fixture_t;
@@ -109,18 +108,12 @@ static bool render(void *context, uint64_t nowNs)
     return true;
 }
 
-static bool due(void *context)
+static bool publish(void *context, uint64_t nowNs)
 {
     Fixture_t *f = context;
+    (void)nowNs;
     note(f, 'E');
-    return f->due;
-}
-
-static bool acquire(void *context)
-{
-    Fixture_t *f = context;
-    note(f, 'O');
-    ++f->acquireCalls;
+    ++f->publishCalls;
     return true;
 }
 
@@ -134,7 +127,7 @@ static int sleep_once(void *context)
 
 static const AppTurnOps_t ops = {
     stopped, adopt, session, active, stage, fail_session,
-    tick, input, coordinator, render, due, acquire, sleep_once
+    tick, input, coordinator, render, publish, sleep_once
 };
 
 static void test_normal_order_and_next_turn_request(void)
@@ -150,6 +143,8 @@ static void test_normal_order_and_next_turn_request(void)
           "OL01", "service then tick/input/service/render/gate/sleep");
     check(f.pumped == APP_ADAPTER_NONE,
           "OL01", "first turn did not pump new request");
+    check(f.publishCalls == 1u,
+          "OL01", "publication seam checked every turn");
     check(f.inputCalls == 1u &&
           f.serviceCalls == 1u && f.sleepCalls == 1u,
           "OL01", "one input attempt, service, and sleep");
@@ -195,20 +190,16 @@ static void test_exclusive_selection_and_10ms_gate(void)
               "OL03", "selection turn");
         check(f.pumped == cases[i].adapter,
               "OL03", "no competing adapter");
-        check(f.acquireCalls == 0u, "OL03", "no early acquisition");
+        check(f.publishCalls == 1u,
+              "OL03", "one publication decision per normal turn");
     }
 
     memset(&f, 0, sizeof(f));
     f.active = IMU_CMD_ID_ACQUISITION;
     check(app_owner_turn(&ops, &f, 100ull) == APP_TURN_OK,
-          "OL04", "non-gated acquisition turn");
-    check(f.acquireCalls == 0u, "OL04", "no observation before gate");
-    f.due = true; /* Production due callback owns the tenth-tick gate. */
-    check(app_owner_turn(&ops, &f, 110ull) == APP_TURN_OK,
-          "OL04", "due acquisition turn");
-    check(f.acquireCalls == 1u &&
-          strstr(f.trace, "REOZ") != NULL,
-          "OL04", "one observation after rendering, before sleep");
+          "OL04", "acquisition turn");
+    check(f.publishCalls == 1u && strstr(f.trace, "REZ") != NULL,
+          "OL04", "publication decision after rendering, before sleep");
 }
 
 static void test_stop_and_adapter_failure(void)
@@ -234,7 +225,7 @@ static void test_stop_and_adapter_failure(void)
           "OL06", "adapter failure");
     check(strcmp(f.trace, "SAU") == 0 &&
           f.serviceCalls == 0u &&
-          f.acquireCalls == 0u,
+          f.publishCalls == 0u,
           "OL06", "unrestorable routed without coordinator pass");
 }
 
@@ -299,6 +290,7 @@ static void test_acquisition_formatter_validity(void)
     s.version = IMU_SAMPLE_CONTRACT_VERSION;
     s.configurationEpoch = 7u;
     check(app_format_acquisition(&s, 1u, out, sizeof(out)) &&
+          strstr(out, "publications=1") != NULL &&
           strstr(out, "orientation=not_seen") != NULL &&
           strstr(out, "linear_accel=not_seen") != NULL &&
           strstr(out, "calibrated_gyro=not_seen") != NULL &&
@@ -457,6 +449,119 @@ static void test_check_diagnostics_formatter(void)
           "OL11", "invalid arguments rejected");
 }
 
+static void test_publication_counters(void)
+{
+    ImuRunStats_t stats;
+    ImuPublicationRecord_t record;
+
+    memset(&stats, 0, sizeof(stats));
+    memset(&record, 0, sizeof(record));
+    record.validMask = IMU_GROUP_MASK_REQUIRED;
+    record.freshMask = IMU_GROUP_BIT_ROTATION | IMU_GROUP_BIT_ACCEL;
+    record.staleMask = IMU_GROUP_BIT_GYRO;
+    record.multiUpdateMask = IMU_GROUP_BIT_ACCEL;
+    record.deadlineMissed = 1u;
+    record.gatesSkippedBefore = 2u;
+
+    app_count_publication(&stats, &record);
+    check(stats.publicationsAttempted == 1u &&
+          stats.publicationsAllValid == 1u &&
+          stats.publicationsPartiallyFresh == 1u &&
+          stats.publicationsAllFresh == 0u &&
+          stats.deadlineMisses == 1u && stats.gatesSkipped == 2u,
+          "OL12", "publication totals and skipped deadlines");
+    check(stats.staleByGroup[IMU_PUBLISH_GROUP_GYRO] == 1u &&
+          stats.multiUpdateByGroup[IMU_PUBLISH_GROUP_ACCEL] == 1u,
+          "OL12", "per-group counters");
+}
+
+static void test_terminal_acquisition_publication(void)
+{
+    ImuCmdResult_t result;
+
+    memset(&result, 0, sizeof(result));
+    result.state = IMU_CMD_STATE_SUCCEEDED;
+    result.reason = IMU_CMD_REASON_OK;
+
+    check(app_publication_turn_eligible(
+              true, IMU_CMD_ID_ACQUISITION, NULL),
+          "OL13", "active acquisition is eligible");
+    check(app_publication_turn_eligible(true, IMU_CMD_ID_NONE, &result),
+          "OL13", "natural terminal turn emits final gate");
+    check(!app_publication_turn_eligible(false, IMU_CMD_ID_NONE, &result),
+          "OL13", "later turn cannot publish");
+    result.state = IMU_CMD_STATE_FAILED;
+    check(!app_publication_turn_eligible(true, IMU_CMD_ID_NONE, &result),
+          "OL13", "failed acquisition cannot publish terminal gate");
+}
+
+static void test_exit_reason_precedence(void)
+{
+    check(app_termination_reason(false, false, false, false, false, true) ==
+              IMU_TERM_REASON_COMPLETED,
+          "OL13", "normal completion");
+    check(app_termination_reason(false, false, false, false, true, true) ==
+              IMU_TERM_REASON_PROCESS_STOP,
+          "OL13", "graceful process stop");
+    check(app_termination_reason(false, false, false, false, false, false) ==
+              IMU_TERM_REASON_NO_ACQUISITION,
+          "OL13", "pre-window stop");
+    check(app_termination_reason(false, false, false, true, false, true) ==
+              IMU_TERM_REASON_SESSION_UNRECOVERED,
+          "OL13", "unrecovered session");
+    check(app_termination_reason(false, false, true, false, false, true) ==
+              IMU_TERM_REASON_OWNER_FAILURE,
+          "OL13", "owner failure");
+    check(app_termination_reason(false, true, false, false, false, false) ==
+              IMU_TERM_REASON_STARTUP_FAILURE,
+          "OL13", "startup failure");
+    check(app_termination_reason(true, true, true, true, true, true) ==
+              IMU_TERM_REASON_LOGGER_FAILURE,
+          "OL13", "logger failure takes precedence");
+}
+
+static void test_csv_finalization_policy(void)
+{
+    check(app_csv_finalizes_complete(IMU_TERM_REASON_COMPLETED,
+                                     true, true, true, true, 0u, 0u, 1000u),
+          "OL14", "natural completion finalizes the CSV");
+    check(app_csv_finalizes_complete(IMU_TERM_REASON_PROCESS_STOP,
+                                     true, false, true, true, 0u, 0u, 1405u),
+          "OL14", "graceful stop with rows finalizes the CSV");
+    check(!app_csv_finalizes_complete(IMU_TERM_REASON_PROCESS_STOP,
+                                      true, false, true, true, 0u, 0u, 0u),
+          "OL14", "stop before any row stays partial");
+    check(!app_csv_finalizes_complete(IMU_TERM_REASON_PROCESS_STOP,
+                                      false, false, true, true, 0u, 0u, 10u),
+          "OL14", "stop before the window opened stays partial");
+    check(!app_csv_finalizes_complete(IMU_TERM_REASON_COMPLETED,
+                                      true, false, true, true, 0u, 0u, 10u),
+          "OL14", "completed reason without a closed window stays partial");
+    check(!app_csv_finalizes_complete(IMU_TERM_REASON_PROCESS_STOP,
+                                      true, false, true, false, 0u, 0u, 1405u),
+          "OL14", "incomplete drain stays partial");
+    check(!app_csv_finalizes_complete(IMU_TERM_REASON_PROCESS_STOP,
+                                      true, false, true, true, 1u, 0u, 1405u),
+          "OL14", "sticky write failure stays partial");
+    check(!app_csv_finalizes_complete(IMU_TERM_REASON_COMPLETED,
+                                      true, true, true, true, 0u, 1u, 1000u),
+          "OL14", "shutdown error stays partial");
+    check(!app_csv_finalizes_complete(IMU_TERM_REASON_PROCESS_STOP,
+                                      true, false, false, true, 0u, 0u, 1405u),
+          "OL14", "logger never started stays partial");
+    check(!app_csv_finalizes_complete(IMU_TERM_REASON_SESSION_UNRECOVERED,
+                                      true, true, true, true, 0u, 0u, 1000u) &&
+          !app_csv_finalizes_complete(IMU_TERM_REASON_LOGGER_FAILURE,
+                                      true, true, true, true, 0u, 0u, 1000u) &&
+          !app_csv_finalizes_complete(IMU_TERM_REASON_OWNER_FAILURE,
+                                      true, true, true, true, 0u, 0u, 1000u) &&
+          !app_csv_finalizes_complete(IMU_TERM_REASON_STARTUP_FAILURE,
+                                      true, true, true, true, 0u, 0u, 1000u) &&
+          !app_csv_finalizes_complete(IMU_TERM_REASON_NO_ACQUISITION,
+                                      false, false, true, true, 0u, 0u, 0u),
+          "OL14", "failure reasons never finalize as complete");
+}
+
 int main(void)
 {
     test_normal_order_and_next_turn_request();
@@ -467,6 +572,10 @@ int main(void)
     test_instruction_color_is_tty_only();
     test_check_diagnostics_retention();
     test_check_diagnostics_formatter();
+    test_publication_counters();
+    test_terminal_acquisition_publication();
+    test_exit_reason_precedence();
+    test_csv_finalization_policy();
 
     if (failures != 0) {
         fprintf(stderr, "test_app_owner_loop: %d failure(s)\n", failures);

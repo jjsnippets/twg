@@ -975,3 +975,139 @@ logger threads, archival records, or combined IMU/pressure integration.
 later acceptance work, are temporary Phase 8 artifacts. Phase 12/13 is
 expected to consolidate durable information into this README and remove those
 temporary artifacts.
+
+## Phase 9 — Publication, Logging, Metadata
+
+**Status:** Phase 9 implementation and physical happy-path/controlled-stop
+acceptance complete. Failure-path hardware cases remain explicitly unclaimed.
+
+**Evidence baseline:** `b2ae9b5b1c239f2deb1df1cc1d9079c0ab5a4794`.
+The final Phase 9 squash SHA is intentionally not embedded here because the
+README is part of that squash.
+
+### Pipeline
+
+```text
+main.c (sole scheduler/owner)
+  -> imu_publish_begin_window (baseline, no clock)
+  -> imu_publish_gate_* (tenth-tick grid, skipped-gate accounting)
+  -> imu_publish_evaluate_snapshot + imu_publish_apply_timing (R9 row)
+  -> imu_logger_enqueue (async, drop-counted)
+  -> imu_csv / imu_logfile (CSV schema 1)
+  -> imu_meta (companion JSON, meta_schema_ver 3)
+```
+
+### Module ownership
+
+| Module | Owns | Must not |
+|---|---|---|
+| imu_publish.c | classification, gate grid | read clocks, do I/O, allocate |
+| imu_csv.c | R9 row -> CSV text | touch files |
+| imu_logger.c | queue, worker thread, R11 stats | schedule publication |
+| imu_logfile.c | file lifecycle, rename/commit | classify rows |
+| imu_meta.c | R13 JSON | write files |
+| main.c | clocks, scheduling, R10, R12, exit status | classify rows |
+
+### Output artifacts
+
+- `bno_acq_YYYYMMDD_HHMMSS.csv` (52 columns, CSV schema 1)
+- `bno_acq_YYYYMMDD_HHMMSS.json` (running -> final companion, metadata schema 3)
+
+The basename timestamp is system-local wall-clock time. Metadata schema 3
+serializes that stamp as `filename_local`; it does not include a UTC offset or
+time-zone identifier.
+
+### Phase 9 results
+
+Four physical capture pairs are retained temporarily in `bno/p9-runs/`. Two
+10-second runs reached the planned end, one 60-second plan was stopped with
+SIGINT, and one was stopped with SIGTERM.
+
+| Capture | End condition | Rows | All fresh | Partially fresh | Deadline misses | Gates skipped | Drops | Final result |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| `bno_acq_20261007_060156` | natural, 10 s | 1000 | 968 | 32 | 0 | 0 | 0 | completed, exit 0 |
+| `bno_acq_20261007_060541` | natural, 10 s | 1000 | 962 | 38 | 0 | 0 | 0 | completed, exit 0 |
+| `bno_acq_20261007_070649` | SIGINT during 60 s plan | 1449 | 1407 | 42 | 0 | 0 | 0 | process_stop, signal 2, exit 0 |
+| `bno_acq_20261007_070714` | SIGTERM during 60 s plan | 1348 | 1301 | 47 | 0 | 0 | 0 | process_stop, signal 15, exit 0 |
+
+Across all 4797 rows, every group was valid and no row was `not_ready`.
+`pub_seq` is contiguous from 1 through the row count in every file. For every
+row, fresh and stale are disjoint, their union equals `valid_mask`,
+`missing_mask` is the required-group complement of `valid_mask`, and
+`multi_mask` is a subset of `fresh_mask`.
+
+Every run enqueued and wrote exactly its row count. Each logger drained
+completely with queue high-water mark 1, no dropped records, no write failure,
+and no shutdown error. The two controlled-stop archives are deliberately
+`completion="complete"`: completion describes a drained, undamaged CSV
+archive, not whether the requested duration elapsed. R12 records
+`process_stop`, the signal number, and `acquisition_window_closed=false` to
+explain the shorter archive.
+
+The captures were generated before the metadata schema 3 local-time rename,
+so their preserved JSON companions are schema 2 and contain `filename_utc`.
+They are valid behavioral evidence but are not current schema examples; do
+not rewrite captured evidence. New output uses schema 3 and `filename_local`.
+
+### Acceptance status
+
+Host commands to rerun on the target before the squash:
+
+- [ ] `make -C bno clean && make -C bno test`
+- [ ] `make -C bno app`
+- [ ] `bash bno/tests/audit_scheduling.sh`
+- [ ] `git diff --check`
+
+Physical evidence at the Phase 9 evidence baseline:
+
+- [x] Two natural acquisitions produced 1000-row CSV files, final complete
+      companions, completed termination, and exit 0.
+- [x] Natural-run row count matched the 10 ms gate count for 10 seconds.
+- [x] SIGINT and SIGTERM during acquisition drained and finalized shortened
+      archives with process-stop termination and exit 0.
+- [x] `pub_seq` and the fresh/stale/missing/multi mask invariants held for
+      every captured row.
+- [x] Normal and controlled-stop captures had zero logger drops, deadline
+      misses, skipped gates, and clock-read failures.
+- [ ] Sensor-absent startup producing `completion="no_csv"` was not exercised
+      in the retained physical evidence.
+- [ ] An unrecoverable live session producing `session_unrecovered` and exit 1
+      was not exercised in the retained physical evidence.
+
+### Phase 9 squash
+
+The Phase 9 squash boundary is the Phase 8 checkpoint `88e3b87`. Squash the
+accepted range beginning at `133d1af` through this results/handoff update into
+one Phase 9 commit while preserving Phases 2 through 8. Keep a backup branch
+or tag at the pre-squash tip until the rewritten branch is built and checked.
+
+Suggested final subject:
+
+```text
+Phase 9 publication, logging, metadata, and acceptance evidence
+```
+
+### Phase 10 handoff
+
+Phase 10 inherits a single 1 kHz scheduler/owner in `main.c`, a 10 ms
+publication grid, R9-R13 contract version 1, CSV schema 1 with 52 frozen
+columns, and metadata schema 3 with a local-time filename stamp. Publisher and
+formatter code remain pure: clock reads, scheduling, file operations, and
+allocation must not migrate into them.
+
+`IMU_PUBLISH_T_LATE_NS` remains a 1 ms placeholder. Phase 10 must either
+validate that threshold against the integrated timing budget or replace it
+explicitly and update tests and metadata. The retained Phase 9 runs establish
+zero deadline misses and skipped gates under their recorded conditions; they
+do not establish a general worst-case timing bound.
+
+The physical captures do not prove sensor-absent or unrecoverable-session
+failure paths, metadata schema 3 interoperability with downstream consumers,
+or combined IMU/pressure behavior. Preserve those distinctions in Phase 10
+claims and tests.
+
+`bno/p9-runs/`, `bno/p8-evidence/`, and
+`bno/phase8-integration-results.md` are temporary acceptance artifacts. Keep
+them through the remaining roadmap work, consolidate any durable findings
+into this README, and remove the temporary artifacts together at the end of
+the roadmap.
