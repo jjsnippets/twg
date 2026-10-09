@@ -1097,7 +1097,9 @@ allocation must not migrate into them.
 
 `IMU_PUBLISH_T_LATE_NS` remains a 1 ms placeholder. Phase 10 must either
 validate that threshold against the integrated timing budget or replace it
-explicitly and update tests and metadata. The retained Phase 9 runs establish
+explicitly and update tests and metadata. Phase 10 (reduced scope) did neither:
+the 1 ms value is retained as a provisional, unvalidated threshold. See
+"Phase 10 closure" below. The retained Phase 9 runs establish
 zero deadline misses and skipped gates under their recorded conditions; they
 do not establish a general worst-case timing bound.
 
@@ -1111,3 +1113,120 @@ claims and tests.
 them through the remaining roadmap work, consolidate any durable findings
 into this README, and remove the temporary artifacts together at the end of
 the roadmap.
+
+## Phase 10 closure note (reduced scope)
+
+Pin: bno-integrate 9b12123ef4fa7c24146c655071bcd4de379ddd0d, tree clean.
+Basis: retained Phase 9 captures only. No new hardware runs.
+
+### 10.1 Accepted evidence
+
+Captures (metadata schema 2, filename_utc, unmodified):
+
+| Capture | Plan | End | Rows | Clean | Stale | Multi |
+|---|---|---|---|---|---|---|
+| bno_acq_20261007_060156 | none | natural | 1000 | 933 | 32 | 35 |
+| bno_acq_20261007_060541 | check, q | natural | 1000 | 915 | 38 | 47 |
+| bno_acq_20261007_070649 | none | SIGINT | 1449 | 1354 | 42 | 53 |
+| bno_acq_20261007_070714 | none | SIGTERM | 1348 | 1244 | 47 | 57 |
+| Total | | | 4797 | 4446 | 159 | 192 |
+
+SHA-256 (CSV):
+- 060156: 7e9a877635b9f28c5db728bbe5c6e5d442e03a209ef2c1548c19d3d1a7d7f95f
+- 060541: 29acb1658f72adb4bc50eda5a43e044f5078c89f1e1629d9eb0dbcfacd4f16f3
+- 070649: 6dc0d016479e90332f5c4019409c01ec5fb3491507bc09c0eb9afde220a5f0d5
+- 070714: 45d7d19d2d19c1c3a84553bce68d8068221f22ac60db2d3617086e92a38e48f5
+
+SHA-256 (JSON):
+- 060156: da51436aa928be8ec8abd0870798a065e86b302fd72a2835d179ca4ffe2e5130
+- 060541: 007d71f04eddcbff91827eedf51054cf82424101c0a281ae535b4589305d4faa
+- 070649: ed5e3920fb4bd6aa7b1ebd3f7ab5b623cec149aa4daccb9f694ed592d64246bb
+- 070714: a76a9c644bc43432786834b608cac211cdbe62a7833c6be8ccef18f8dfa58043
+
+Verified: 52 columns; contiguous pub_seq; fresh/stale/missing partition and
+multi subset hold on every row; no deadline misses, skipped gates, logger drops
+or not-ready rows; every logger drained; completion=complete in all four.
+
+Observed, not accepted as a guarantee:
+- 4446 of 4797 rows (92.7%) had exactly one new event per group. 159 rows
+  (3.3%) had a stale group and 192 rows (4.0%) had a multi-update group.
+- Row 1 of 060541 shows a multi-update on all three groups (baseline age).
+- service_overruns were 19, 32, 18 and 27 (96 total) with no skipped gate.
+- One run (060541) follows a check stage, so it is not a startup baseline.
+
+Not established: worst-case lateness, behavior after calibration, tare, clear
+or probe stages, recovery, console/storage load, or physical simultaneity.
+
+## 10.2 Selected publication policy
+
+Decision: retain fixed 100 Hz host-snapshot publication with per-group
+fresh/stale/missing/multi-update classification. No timing-policy change.
+
+Basis: schedule-driven waiver, not an evidence selection. The strict gate
+(zero stale, zero multi-update, no unexplained gaps) was not met by the
+retained captures: 351 of 4797 rows failed it (159 stale, 192 multi-update).
+The escalation alternatives (phase shift, bounded nonblocking holdoff,
+hard-deadline freshness barrier) were not tested. They are neither adopted
+nor ruled out on evidence.
+
+Retained unchanged:
+- 10 ms publication grid, 1 ms SH-2 service, single scheduling owner
+- one truthful row per emitted gate, including stale and multi-update rows
+- publisher-relative freshness from per-group epoch and event identity
+- IMU_PUBLISH_T_LATE_NS = 1 ms, provisional. Not validated against a
+  worst-case bound. Largest observed lateness in the inspected capture was
+  329 us, with zero deadline misses in all four captures.
+
+Contract disposition: no field meaning changed. R9-R13 contract version 1,
+CSV schema 1 (52 columns) and metadata schema 3 are unchanged. No code,
+test or metadata change in 10.2.
+
+Consumer rules:
+- Use fresh_mask, stale_mask, missing_mask and multi_mask. Do not treat
+  valid_mask == 0x07 as a synchronized or fresh frame.
+- A row with fresh_mask == 0x07 may still have multi_mask != 0.
+- Rows are not claimed to be physically simultaneous samples.
+
+Reopen the policy decision only on new contradictory evidence, or if a
+consumer (for example combined IMU-pressure publication) needs strict
+one-new-event-per-group frames.
+
+Not characterized (carried to the 10.3 limitations list): stage effects after
+calibration, tare, clear, check or probe; recovery; console and storage load;
+worst-case lateness; the 96 service overruns seen across the four captures
+(none reached a published gate).
+
+## 10.3 Limitations and Phase 11 handoff
+
+Phase 10 was closed at reduced scope. No new hardware captures, no analyzer
+suite and no timing-policy experiments were performed. The evidence is the
+four retained Phase 9 captures (see 10.1).
+
+Not characterized (no claim is made in either direction):
+- steady-state freshness after calibration, tare, DCD clear, tare clear,
+  check or probe stages, beyond the one capture that follows a q-ended check
+- SH-2 reset and recovery behavior in a live acquisition window
+- console redirection, storage pressure and logger stress
+- worst-case publication lateness; IMU_PUBLISH_T_LATE_NS stays 1 ms,
+  provisional
+- the 96 service overruns across the four captures (none reached a gate)
+- phase shift, bounded holdoff and freshness-barrier policies
+- sensor-absent startup (completion="no_csv") and unrecoverable-session exit
+- metadata schema 3 consumer compatibility
+- combined IMU and pressure timing
+
+Not done, by decision: no repository-owned analyzer, no Phase 10 manifest
+beyond the 10.1 hashes, no new raw-capture corpus, no contract or schema bump.
+
+Phase 11 inherits:
+- policy: fixed 100 Hz host-snapshot rows with truthful flags (10.2)
+- contracts: R9-R13 version 1, CSV schema 1 (52 columns), metadata schema 3
+- Phase 11 tests freshness truthfulness, not all-fresh frames
+- consumers must use fresh/stale/missing/multi masks, never valid_mask
+- the policy is reopened only on new contradictory evidence or a strict
+  consumer requirement (for example combined IMU and pressure frames)
+- bno/p8-evidence/, bno/p9-runs/ and bno/phase8-integration-results.md stay
+  until the final consolidation phase
+
+The Phase 10 commit SHA is supplied out-of-band or as tag phase10-accepted;
+a commit cannot contain its own SHA.
