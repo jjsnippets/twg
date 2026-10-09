@@ -1,12 +1,10 @@
 #
 # Makefile — BNO085 Unified Build System for Raspberry Pi 4B
 #
-# Production app, calibration, orientation, validation harnesses, and tests.
+# Production app, validation harnesses, and tests.
 #
 # Layout:
 #   app/         production application + Raspberry Pi HAL (sh2_hal_rpi.c)
-#   calibration/ BNO085 dynamic-calibration and DCD erase tool
-#   orientation/ BNO085 swing-axis tare tool
 #   validation/  AMT102 encoder vs BNO085 synchronized validation harness
 #   sh2/         vendored CEVA SH-2 sensor hub library
 #   tests/       hardware diagnostics and unit test suite
@@ -16,8 +14,6 @@
 # Targets:
 #   make                build bin/bno_app (default)
 #   make app            build the unified session-backed bno_app
-#   make cal            build bin/bno_cal
-#   make orient         build bin/bno_orient
 #   make validate       build bin/bno_validate
 #   make bringup        build bin/amt102_bringup
 #   make tools          build all production & field tools
@@ -37,8 +33,6 @@
 
 SH2DIR    := sh2
 APPDIR    := app
-CALDIR    := calibration
-ORIENTDIR := orientation
 VALDIR    := validation
 TESTDIR   := tests
 REPODIR   := ..
@@ -49,7 +43,7 @@ BINDIR    := bin
 CC       := gcc
 CFLAGS   := -Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE
 DEPFLAGS := -MMD -MP
-CPPFLAGS := -I$(REPODIR) -I. -I$(SH2DIR) -I$(APPDIR) -I$(CALDIR) -I$(ORIENTDIR) -I$(VALDIR)
+CPPFLAGS := -I$(REPODIR) -I. -I$(SH2DIR) -I$(APPDIR) -I$(VALDIR)
 LDLIBS   := -lgpiod -lm -lpthread
 APPHDRS  := $(wildcard $(APPDIR)/*.h)
 
@@ -84,12 +78,6 @@ APPOBJS := \
 	$(BUILDDIR)/app_imu_meta.o \
 	$(BUILDDIR)/app_imu_logger.o \
 	$(BUILDDIR)/app_imu_logfile.o
-
-# Calibration objects
-CALOBJS := $(BUILDDIR)/cal_cal_sensor.o $(BUILDDIR)/cal_cal_main.o
-
-# Orientation objects
-ORIENTOBJS := $(BUILDDIR)/orient_orient_sensor.o $(BUILDDIR)/orient_orient_main.o
 
 # Validation objects
 VALOBJS := \
@@ -138,21 +126,17 @@ TESTSESSIONCHECKSRC := $(TESTDIR)/test_session_check.c
 TESTCHECKADAPTERSRC := $(TESTDIR)/test_imu_check_adapter.c
 TESTCMDCHECKSRC     := $(TESTDIR)/test_imu_cmd_check.c
 
-.PHONY: default all app cal orient validate bringup tools tests test clean
+.PHONY: default all app validate bringup tools tests test clean
 
 default: $(BINDIR)/bno_app
 
 app: $(BINDIR)/bno_app
 
-cal: $(BINDIR)/bno_cal
-
-orient: $(BINDIR)/bno_orient
-
 validate: $(BINDIR)/bno_validate
 
 bringup: $(BINDIR)/amt102_bringup
 
-tools: $(BINDIR)/bno_app $(BINDIR)/bno_cal $(BINDIR)/bno_orient $(BINDIR)/bno_validate $(BINDIR)/amt102_bringup
+tools: $(BINDIR)/bno_app $(BINDIR)/bno_validate $(BINDIR)/amt102_bringup
 
 all: tools tests
 
@@ -161,12 +145,6 @@ all: tools tests
 # ------------------------------------------------------------------
 
 $(BINDIR)/bno_app: $(SH2OBJS) $(APPHALOBJ) $(RTOBJ) $(APPOBJS) | $(BINDIR)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-$(BINDIR)/bno_cal: $(CALOBJS) $(APPHALOBJ) $(SH2OBJS) | $(BINDIR)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-$(BINDIR)/bno_orient: $(ORIENTOBJS) $(APPHALOBJ) $(SH2OBJS) | $(BINDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BINDIR)/bno_validate: $(VALOBJS) $(APPHALOBJ) $(RTOBJ) $(SH2OBJS) | $(BINDIR)
@@ -393,12 +371,6 @@ $(BUILDDIR)/app_%.o: $(APPDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(RTOBJ): $(RTDIR)/realtime.c $(RTDIR)/realtime.h | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -c -o $@ $<
-
-$(BUILDDIR)/cal_%.o: $(CALDIR)/%.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -c -o $@ $<
-
-$(BUILDDIR)/orient_%.o: $(ORIENTDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(BUILDDIR)/val_%.o: $(VALDIR)/%.c | $(BUILDDIR)

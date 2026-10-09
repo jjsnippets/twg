@@ -1,7 +1,0 @@
-twg@twg1:~ $ pgrep -af 'bno_app --check-imu'
-35769 script -q -e -c date --iso-8601=seconds; sudo bno/bin/bno_app --check-imu --duration 2; rc=$?; date --iso-8601=seconds; echo app_exit=$rc; exit "$rc" bno/p8-evidence/24-check-sigterm.txt
-35770 bash -c date --iso-8601=seconds; sudo bno/bin/bno_app --check-imu --duration 2; rc=$?; date --iso-8601=seconds; echo app_exit=$rc; exit "$rc"
-35772 sudo bno/bin/bno_app --check-imu --duration 2
-35773 sudo bno/bin/bno_app --check-imu --duration 2
-35774 bno/bin/bno_app --check-imu --duration 2
-twg@twg1:~ $ sudo kill -TERM 35774

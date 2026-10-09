@@ -8,8 +8,8 @@
 #include "app/imu_cmd.h"
 
 /*
- * Phase 4 / 5.2 / 6.1 generic coordinator oracles: family K plus T
- * sub-results and G plan/stop/version checks. Calibration and the tare
+ * Generic coordinator oracles: family K, T sub-results, and G
+ * plan/stop/version checks. Calibration and the tare
  * family and DCD-clear are real stages; STAGE_TERMINAL cannot finish
  * them. DCD-clear failures/recovery live in test_imu_cmd_cal.c.
  * Tare T01-T05 and K02 live in test_imu_tare.c /

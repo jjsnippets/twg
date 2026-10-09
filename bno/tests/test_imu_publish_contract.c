@@ -84,7 +84,7 @@ static void test_header_tokens(void)
 
 static void test_r2_unchanged(void)
 {
-    /* LP64 golden layout of the pinned Phase 2 contract (aarch64/x86-64). */
+    /* LP64 golden layout of the pinned reader contract (aarch64/x86-64). */
     CHECK(IMU_SAMPLE_CONTRACT_VERSION == 1u);
     CHECK(IMU_METADATA_CONTRACT_VERSION == 1u);
 #if defined(__LP64__)

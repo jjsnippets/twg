@@ -6,7 +6,7 @@
  * Expected: print "test_rt_fallback_policy: pass" and exit 0.
  *
  * Does not link realtime.c, HAL, or SH-2. No BNO hardware or sudo.
- * bno/Makefile `make test` will invoke this later (Phase 3 Step 3.5).
+ * bno/Makefile `make test` invokes this test.
  */
 
 #include <stdio.h>

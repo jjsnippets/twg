@@ -345,7 +345,7 @@ void imu_session_close(void);
 
 /*
  * Host-test seam. Production main must not call these. They exist so
- * Phase 1I families C/E/X can run without hardware.
+ * host-test families C/E/X can run without hardware.
  *
  * imu_session_test_reset() restores CLOSED, epoch 0, zero mailbox.
  * imu_session_test_open() performs the open state change without HAL.

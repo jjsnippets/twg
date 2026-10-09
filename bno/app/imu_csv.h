@@ -2,7 +2,7 @@
 #define IMU_CSV_H
 
 /*
- * Phase 9.4 CSV schema 1 formatter. Pure and bounded: no I/O, no clock,
+ * CSV schema 1 formatter. Pure and bounded: no I/O, no clock,
  * no allocation, no globals. Intended for the logger worker only; the
  * publisher never formats. One header line and one data line per record,
  * each terminated by a single '\n' (no '\r').

@@ -2,7 +2,7 @@
 #define IMU_LOGFILE_H
 
 /*
- * Phase 9.7 CSV/companion file lifecycle. No clock, no threads, no globals.
+ * CSV/companion file lifecycle. No clock, no threads, no globals.
  * Called from startup/shutdown only, never from the 1 kHz path.
  *
  * Files for base bno_acq_YYYYMMDD_HHMMSS[_N]:

@@ -11,7 +11,7 @@
 #include "app/imu_session.h"
 
 /*
- * Phase 5.2 host-only composition oracles, M family.
+ * Host-only calibration composition oracles, M family.
  *
  * The explicit owner turn is:
  *   1. imu_session_service()

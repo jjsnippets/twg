@@ -9,13 +9,13 @@
 #include "app/imu_session.h"
 
 /*
- * Phase 2 host-only oracles for 1I families C/E/X, as far as R1/R2/R3
+ * Host-only oracles for contract families C/E/X, as far as R1/R2/R3
  * can observe them. No SPI. No publisher masks.
  *
  * Deferred (not implemented here):
- *   C01-C04 Then-clauses for fresh/stale/multi (Phase 9 publisher)
+ *   C01-C04 Then-clauses for fresh/stale/multi (publisher)
  *   E04/E11 publisher baseline
- *   E05-E08 probe/tare/q (Phases 5-7)
+ *   E05-E08 probe/tare/q (command stages)
  *   E09/E10 R4 flags
  *   X03 R9 / integration prev-copy
  *   Family D device-sequence gap flags

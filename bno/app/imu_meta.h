@@ -2,13 +2,13 @@
 #define IMU_META_H
 
 /*
- * Phase 9.5 companion metadata and filename generation. Pure and bounded:
+ * Companion metadata and filename generation. Pure and bounded:
  * no I/O, no clock, no allocation, no globals. The caller reads the wall
  * clock once, converts it to broken-down system local time (localtime_r
  * after tzset), and passes the fields in. The fields are local wall-clock
  * values; no offset or zone is recorded. The ImuMetaUtc_t type and the
  * *_utc_* names are historical and do not imply UTC. File creation,
- * collision handling, fsync, and rename belong to the logger/main phases.
+ * collision handling, fsync, and rename belong to the logger and main.
  *
  * Filename: bno_acq_YYYYMMDD_HHMMSS in local time (meta_schema_ver 3).
  * The CSV is <base>.csv and the companion is <base>.json; a temporary

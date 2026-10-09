@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 3 scheduling-ownership audit.
+# Scheduling-ownership audit.
 # Reusable production modules must not own StartRT, RT_SleepUntil, or exit.
 # imu_session, imu_cal, and imu_cal_adapter must not sleep, print, or terminate.
 
@@ -70,8 +70,8 @@ scan_calls "$CONSOLE_C" StartRT RT_SleepUntil usleep nanosleep sleep exit \
     imu_cmd_service imu_session_service
 scan_calls "$CONSOLE_H" StartRT RT_SleepUntil usleep nanosleep sleep exit \
     imu_cmd_service imu_session_service
-# The existing main has no owner-side blocking stdin read; Step 8.5 must
-# retain this property when the console adapter is wired.
+# main has no owner-side blocking stdin read; changes to console-adapter
+# wiring must retain this property.
 scan_calls "$MAIN_C" fgets getchar getline scanf read
 scan_calls "$CAL_ADAPTER_C" StartRT RT_SleepUntil
 scan_calls "$TARE_ADAPTER_C" StartRT RT_SleepUntil
@@ -141,21 +141,6 @@ if [ -f "$MAIN_C" ]; then
         echo "$stdin_hits"
         fail=$((fail + 1))
     fi
-fi
-
-MAKEFILE="${BNO_DIR}/Makefile"
-if [ -f "$MAKEFILE" ]; then
-    app_rule=$(sed -n '/^APPOBJS[[:space:]]*:=/,/^$/p' "$MAKEFILE")
-    for forbidden in cal_cal_main orient_orient_main \
-                     cal_cal_sensor orient_orient_sensor; do
-        if printf '%s\n' "$app_rule" | grep -q "$forbidden"; then
-            echo "FAIL $(relpath "$MAKEFILE"): bno_app links ${forbidden}"
-            fail=$((fail + 1))
-        fi
-    done
-else
-    echo "FAIL missing Makefile: $(relpath "$MAKEFILE")"
-    fail=$((fail + 1))
 fi
 
 if [ "$fail" -ne 0 ]; then

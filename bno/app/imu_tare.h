@@ -2,11 +2,11 @@
 #define IMU_TARE_H
 
 /*
- * Host-only tare-family machine boundary (Phase 6.1).
+ * Hardware-independent tare-family state-machine boundary.
  *
  * Types and API only. Does not own the SH-2 session, sleep, print,
- * read stdin, or call exit. Does not include sh2 or imu_session.
- * bno_app does not link this module.
+ * read stdin, or call exit. It does not include sh2; imu_session is included
+ * only for shared fact types, with session actions owned by the adapter.
  *
  * imu_tare produces a complete ImuCmdResult_t. It must not
  * down-convert through ImuCmdStageTerminal_t. PROCESS_STOP stays

@@ -10,7 +10,7 @@
 
 /*
  * Check-only, epoch-scoped mailbox snapshot. The session owns construction
- * and decoding in Step 7.2; this machine accepts copies as plain host data.
+ * and decoding; this machine accepts copies as plain host data.
  * Each have* flag is independent and sticky only within its source epoch.
  */
 typedef struct {

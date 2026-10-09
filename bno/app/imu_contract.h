@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /*
- * Phase 2 public BNO contract generation 1.
+ * Public BNO reader contract, generation 1.
  *
  * Incompatible with IMU_SAMPLE_STRUCT_VERSION 3 / ImuSample_t.
  * This header is facts only: R0 bits, R1 metadata, minimal R2 snapshot, R3
@@ -59,7 +59,7 @@ typedef struct {
 /*
  * Minimal R2 mailbox. Reader facts only.
  *
- * readerStatusFlags exists for later R4 work and must read as 0 in Phase 2.
+ * readerStatusFlags is reserved and currently reads as 0.
  * validMask is sticky seen-in-this-epoch state using IMU_GROUP_BIT_*.
  */
 typedef struct {

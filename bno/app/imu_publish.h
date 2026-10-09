@@ -2,7 +2,7 @@
 #define IMU_PUBLISH_H
 
 /*
- * Phase 9 publication, statistics, termination, and metadata contracts.
+ * Publication, statistics, termination, and metadata contracts.
  *
  * Contract generation 1 of R9-R13 plus the pure publisher baseline and
  * classification API. No clock reads, scheduling, I/O, or allocation.
@@ -10,7 +10,7 @@
  * R0 group bits and IMU_GROUP_MASK_REQUIRED stay owned by imu_contract.h.
  * R1/R2 stay reader facts only; nothing here is added to them.
  *
- * Skipped publication gates follow Phase 1G section 7: they are counted
+ * Skipped publication gates are counted
  * (gatesSkippedBefore, R10 gatesSkipped) and never produce a row. There is
  * no "not evaluated" row kind in CSV schema 1.
  */
@@ -26,8 +26,8 @@
 #define IMU_TERMINATION_CONTRACT_VERSION   1u   /* R12 */
 #define IMU_RUN_METADATA_CONTRACT_VERSION  1u   /* R13 in-memory record */
 
-/* Companion JSON meta_schema_ver. 2 recorded the approved filename
- * amendment (bno_acq_YYYYMMDD_HHMMSS); Phase 1H defined 1. 3 renames the
+/* Companion JSON meta_schema_ver. Version 2 recorded the approved filename
+ * amendment (bno_acq_YYYYMMDD_HHMMSS). Version 3 renames the
  * JSON key filename_utc to filename_local: the stamp is system local
  * wall-clock time with no offset or zone. */
 #define IMU_META_SCHEMA_VERSION            3u
@@ -66,7 +66,7 @@ typedef struct {
 
 #define IMU_PUBLISH_GROUP_BIT(index)       (1u << (unsigned)(index))
 
-/* Phase 1H section 9 serialization-only bit map for reader_flags. */
+/* Serialization-only bit map for reader_flags. */
 #define IMU_CSV_FLAG_RESET_OBSERVED              (1u << 0)
 #define IMU_CSV_FLAG_DECODE_ERROR_OBSERVED       (1u << 1)
 #define IMU_CSV_FLAG_UNEXPECTED_REPORT_OBSERVED  (1u << 2)
@@ -77,7 +77,7 @@ typedef struct {
 
 /*
  * R9 per-group block. Copied from R1 for CSV; ageNs is meaningful only when
- * ageValid is 1 (Phase 1G section 5.2: invalid age is ageValid 0, ageNs 0).
+ * ageValid is 1. Invalid age is represented by ageValid 0 and ageNs 0.
  * identityPresent is 0 for a group that is missing on this row.
  */
 typedef struct {
@@ -235,7 +235,7 @@ typedef struct {
     ImuTermination_t termination;
 } ImuRunMetadata_t;
 
-/* CSV schema 1 header tokens, Phase 1H section 6, in frozen order. */
+/* CSV schema 1 header tokens in frozen order. */
 static const char *const IMU_CSV_HEADER_TOKENS[IMU_CSV_COLUMN_COUNT] = {
     "schema_ver", "pub_seq", "sched_ns", "actual_ns", "epoch", "deadline",
     "gates_skipped", "sample_ready", "not_ready", "valid_mask", "fresh_mask",
@@ -261,7 +261,7 @@ bool imu_publish_begin_window(ImuPublisherState_t *state,
 /*
  * Build one R9 record without allocation, I/O, or clock access. scheduledNs
  * and actualNs are caller-provided CLOCK_MONOTONIC readings. Deadline and
- * skipped-gate policy are added by Phase 9.3; this step leaves them zero.
+ * skipped-gate policy are applied separately; this step leaves them zero.
  */
 bool imu_publish_evaluate_snapshot(ImuPublisherState_t *state,
                                    const ImuSampleSnapshot_t *snapshot,
@@ -271,11 +271,11 @@ bool imu_publish_evaluate_snapshot(ImuPublisherState_t *state,
                                    bool actualValid,
                                    ImuPublicationRecord_t *out);
 
-/* ---- Phase 9.3 schedule and skipped-gate accounting ---- */
+/* Publication schedule and skipped-gate accounting */
 
 #define IMU_PUBLISH_SERVICE_PERIOD_NS  1000000ull   /* T_service, plan R6 */
 #define IMU_PUBLISH_GATE_TICKS         10u          /* tenth-tick gate */
-#define IMU_PUBLISH_T_LATE_NS          1000000ull   /* Phase 10 may replace */
+#define IMU_PUBLISH_T_LATE_NS          1000000ull   /* lateness threshold */
 
 typedef enum {
     IMU_PUBLISH_GATE_IDLE     = 0,   /* no new gate boundary reached */

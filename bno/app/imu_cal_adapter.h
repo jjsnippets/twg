@@ -25,7 +25,7 @@
  * successfully posted result with success == false, allowing imu_cal to own
  * retry, restore, and terminal policy.
  *
- * This Phase 5.1 adapter accepts only:
+ * The adapter accepts only:
  * CONFIGURE_CALIBRATION, SAVE_DCD, VERIFY_REOPEN, and RESTORE_PRODUCTION.
  */
 bool imu_cal_adapter_pump(void);

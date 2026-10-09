@@ -2,7 +2,7 @@
 #define IMU_CMD_H
 
 /*
- * Host-only command coordinator (Phase 4, plan contract Phase 5.2).
+ * Hardware-independent command coordinator and immutable plan contract.
  *
  * Immutable R6 plan in, injected events in, R7/R8 and next-stage
  * requests out. Does not open hardware, parse CLI, sleep, print, or
@@ -19,7 +19,7 @@
  * IMU_CMD_PLAN_VERSION remains 2; plan fields are unchanged.
  * requiredAction stays in the common progress header.
  *
- * bno_app does not link this module in Phase 6.
+ * bno_app links this module without giving it hardware ownership.
  */
 
 #include <stdbool.h>

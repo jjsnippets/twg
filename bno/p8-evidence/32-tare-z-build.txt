@@ -1,8 +1,0 @@
-2026-10-01T11:54:59+08:00
-twg1
-9dfd53f1-60b9-47cc-a8fb-148285dc1ddd
-3796.79 15060.67
-3cc9cab1c46c9dd1c56877ffeb64f8f75351ed92
-?? bno/p8-evidence/32-tare-z-build.txt
-89d22d6f107bd766ab47b0a977956299d32c918658d67df21853a5482684e524  bno/bin/bno_app
-Authorization: one Z-axis persistent-tare invocation; no full tare, tare clear, or DCD clear.

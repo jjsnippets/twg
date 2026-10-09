@@ -1,8 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
 
 /*
- * The only BNO085 executable/session-loop owner. Phase 9 keeps publication
- * scheduling here while the logger worker owns CSV formatting and I/O.
+ * The only BNO085 executable and session-loop owner. Publication scheduling
+ * stays here while the logger worker owns CSV formatting and I/O.
  */
 #include <stdbool.h>
 #include <stdint.h>

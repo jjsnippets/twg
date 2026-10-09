@@ -2,7 +2,7 @@
 #define IMU_LOGGER_H
 
 /*
- * Phase 9.6 logger queue and worker.
+ * Logger queue and worker.
  *
  * One fixed single-producer/single-consumer ring of ImuPublicationRecord_t
  * plus one worker thread that formats rows (imu_csv) and writes them through

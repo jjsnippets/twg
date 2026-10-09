@@ -13,7 +13,7 @@
 #include "app/imu_tare_adapter.h"
 
 /*
- * Phase 6.5 host composition. Frozen owner turn:
+ * Host-only tare composition. Frozen owner turn:
  *   1. imu_session_service()
  *   2. pump the adapter for the one active initialized composed command
  *   3. post TICK
