@@ -1230,3 +1230,39 @@ Phase 11 inherits:
 
 The Phase 10 commit SHA is supplied out-of-band or as tag phase10-accepted;
 a commit cannot contain its own SHA.
+
+## Phase 11 hardware acceptance (2026-10-09)
+
+Runs: bno_acq_20261009_145850 through bno_acq_20261009_163046 (17 captures).
+Evidence: p11-hardware.txt, per-run CSV/JSON in ~/p11/runs.
+
+Freshness semantics (as measured and as implemented)
+- Streams are independent 100 Hz SH-2 reports sampled at a host 100 Hz boundary.
+  Rows are not synchronous sensor frames.
+- publications_all_fresh: rows with fresh_mask == 0x07.
+  publications_partially_fresh: rows with fresh_mask != 0 and != 0x07
+  (at least one but not all groups fresh; includes rows with missing groups
+  if any group advanced).
+  publications_not_ready: rows with not_ready == 1 (reader not OPERATIONAL,
+  epoch changed or none, or valid_mask != 0x07). Counted independently of the
+  fresh counters, so a row can be both partially fresh and not ready.
+- Rows with fresh_mask == 0 are not counted as fresh or partial. A not-ready
+  such row appears in publications_not_ready. A valid all-stale row appears in
+  none of the freshness counters. Derive all-stale rows from the CSV as
+  rows with fresh_mask == 0 and not_ready == 0.
+- all_valid counts valid_mask == 0x07 independently of freshness.
+
+Check-script note
+- The two FAIL lines for 163003 and 163046 come from an earlier check that treated
+  any fresh_mask != 7 row as partial. The counters are consistent as above.
+
+Stage behavior verified on hardware
+- q cancels tare, calibration, check and probe; plan continues to settle and acquire.
+- Probe: timeout, early q, and config-failure (mask 128) each warn or record and acquire.
+- CtrlC and SIGTERM during acquisition end as abandoned/processstop, exit status 0,
+  clean drain.
+- No logger drops, no deadline misses, no unrecovered sessions in captured runs.
+
+Scope note
+- Later runs (153808, 154234, 162952 to 163046) were clarification runs for
+  calibration and ondemand versus performance governor, accepted by pass/fail summary.
