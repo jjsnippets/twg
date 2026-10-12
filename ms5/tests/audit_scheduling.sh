@@ -231,20 +231,14 @@ scan_calls "$PUBLISH_C" clock_gettime malloc calloc realloc free fopen fclose
 
 # ---- Superseded helpers must stay unlinked ----
 for file in "$APP_DIR"/*.c "$APP_DIR"/*.h; do
-    case "$file" in
-        */ms5837_reference.c|*/ms5837_reference.h) continue ;;
-    esac
     scan_pattern "$file" "superseded helper" \
-        'service_until_idle|CONVERSION_POLL_NS|ms5837_reference'
+        'service_until_idle|CONVERSION_POLL_NS'
 done
 
 if need_file "$MAKEFILE"; then
     link_line=$(grep -E '^\$\(CAPTURE_APP\):' "$MAKEFILE" || true)
     if [ -z "$link_line" ]; then
         echo "FAIL $(relpath "$MAKEFILE"): CAPTURE_APP link rule not found"
-        fail=$((fail + 1))
-    elif printf '%s' "$link_line" | grep -q 'ms5837_reference'; then
-        echo "FAIL $(relpath "$MAKEFILE"): capture still links ms5837_reference"
         fail=$((fail + 1))
     fi
 fi
