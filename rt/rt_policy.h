@@ -1,5 +1,5 @@
-#ifndef APP_RT_POLICY_H
-#define APP_RT_POLICY_H
+#ifndef RT_POLICY_H
+#define RT_POLICY_H
 
 #include "rt/realtime.h"
 
@@ -39,4 +39,4 @@ static inline AppRtPolicy_t app_rt_policy_from_start(RT_StartStatus_t status)
     return APP_RT_POLICY_WARN_AND_CONTINUE;
 }
 
-#endif /* APP_RT_POLICY_H */
+#endif /* RT_POLICY_H */

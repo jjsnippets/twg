@@ -436,7 +436,7 @@ static bool app_csv_finalizes_complete(ImuTerminationReason_t reason,
 #include <unistd.h>
 
 #include "rt/realtime.h"
-#include "app/app_rt_policy.h"
+#include "rt/rt_policy.h"
 #include "app/imu_cal.h"
 #include "app/imu_cal_adapter.h"
 #include "app/imu_check.h"

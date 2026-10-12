@@ -111,7 +111,6 @@ bno/
 │   ├── imu_tare_adapter.c/.h   session-backed tare request translator (not linked into bno_app)
 │   ├── imu_check.c/.h       host-only continuous-check/probe machine (not linked into bno_app)
 │   ├── imu_check_adapter.c/.h  session-backed check/probe translator (not linked into bno_app)
-│   ├── app_rt_policy.h      StartRT warn-vs-fatal policy (main-owned)
 │   ├── main.c               standalone bno_app loop/example
 │   ├── app_contract.h       leftover ImuSample_t version 3 (unused by bno_app)
 │   ├── app_sensor.c/.h      leftover v3 reader (unused by bno_app)
@@ -126,7 +125,8 @@ bno/
 
 ../rt/                       repository-level lab real-time helper
 ├── realtime.c               scheduling, locking, monotonic sleep
-└── realtime.h               status and timing API
+├── realtime.h               status and timing API
+└── rt_policy.h              StartRT warn-vs-fatal policy (main-owned)
 ```
 
 ## Software architecture
@@ -548,7 +548,7 @@ that loop. Long I/O, printing, file writes, calibration prompts, and sleeps
 must not delay cooperative sensor service.
 
 `bno_app` is the sole production caller of `StartRT()` and `RT_SleepUntil()`.
-`app_rt_policy.h` selects the process policy; `imu_session` must not schedule,
+`rt/rt_policy.h` selects the process policy; `imu_session` must not schedule,
 print, or call `exit`. Standalone diagnostics that have their own `main()`
 may call the RT helper; reusable modules may not.
 

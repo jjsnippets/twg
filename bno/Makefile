@@ -45,7 +45,7 @@ CFLAGS   := -Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE
 DEPFLAGS := -MMD -MP
 CPPFLAGS := -I$(REPODIR) -I. -I$(SH2DIR) -I$(APPDIR) -I$(VALDIR)
 LDLIBS   := -lgpiod -lm -lpthread
-APPHDRS  := $(wildcard $(APPDIR)/*.h)
+APPHDRS  := $(wildcard $(APPDIR)/*.h) $(RTDIR)/rt_policy.h
 
 # Vendored CEVA SH-2 objects
 SH2SRCS := \
@@ -219,7 +219,7 @@ $(BINDIR)/test_realtime_start: $(TESTRTSTARTSRC) $(RTDIR)/realtime.c | $(BINDIR)
 		-Wl,--wrap=clock_gettime \
 		-o $@ $^ -lm
 
-$(BINDIR)/test_rt_fallback_policy: $(TESTRTFALLBACKSRC) | $(BINDIR)
+$(BINDIR)/test_rt_fallback_policy: $(TESTRTFALLBACKSRC) $(RTDIR)/rt_policy.h | $(BINDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
 
 $(BINDIR)/test_imu_cmd: $(TESTCMDSRC) $(APPDIR)/imu_cmd.c $(APPDIR)/imu_cal.c \

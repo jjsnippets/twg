@@ -11,7 +11,7 @@
 
 #include <stdio.h>
 
-#include "app/app_rt_policy.h"
+#include "rt/rt_policy.h"
 
 static int g_fail;
 
