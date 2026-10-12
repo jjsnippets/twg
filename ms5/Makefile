@@ -19,20 +19,23 @@ TEST_INIT_LIVE = $(BINDIR)/test_ms5837_init_live
 TEST_ACQUISITION_MOCK = $(BINDIR)/test_ms5837_acquisition_mock
 TEST_ACQUISITION_LIVE = $(BINDIR)/test_ms5837_acquisition_live
 TEST_APP = $(BINDIR)/test_ms5837_app
+TEST_PUBLISH = $(BINDIR)/test_ms5837_publish
+TEST_OWNERLOOP = $(BINDIR)/test_ms5837_ownerloop
+TEST_PUBLISH = $(BINDIR)/test_ms5837_publish
 CAPTURE_APP = $(BINDIR)/ms5837_capture
 
 RT_OBJ = $(BUILDDIR)/realtime.o
 
-.PHONY: all clean dirs tests host-tests live-tests app
+.PHONY: all clean dirs tests host-tests live-tests app audit check
 
 all: dirs tests app
 
 dirs:
 	@mkdir -p $(BUILDDIR) $(BINDIR)
 
-tests: dirs $(TEST_RAW) $(TEST_MATH) $(TEST_BENCH) $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_INIT_LIVE) $(TEST_ACQUISITION_MOCK) $(TEST_ACQUISITION_LIVE) $(TEST_APP)
+tests: dirs $(TEST_RAW) $(TEST_MATH) $(TEST_BENCH) $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_INIT_LIVE) $(TEST_ACQUISITION_MOCK) $(TEST_ACQUISITION_LIVE) $(TEST_APP) $(TEST_PUBLISH) $(TEST_OWNERLOOP)
 
-host-tests: dirs $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_ACQUISITION_MOCK) $(TEST_APP)
+host-tests: dirs $(TEST_PROD_MATH) $(TEST_INIT_MOCK) $(TEST_ACQUISITION_MOCK) $(TEST_PUBLISH) $(TEST_APP) $(TEST_OWNERLOOP)
 
 live-tests: dirs $(TEST_INIT_LIVE) $(TEST_ACQUISITION_LIVE)
 
@@ -125,28 +128,62 @@ $(BUILDDIR)/test_ms5837_acquisition_live.o: $(TESTDIR)/test_ms5837_acquisition_l
 $(TEST_ACQUISITION_LIVE): $(BUILDDIR)/test_ms5837_acquisition_live.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-# Step 4D production orchestration, restricted CLI, and asynchronous CSV logger
+# Phase 2 pure publisher and 100 Hz gate
+$(BUILDDIR)/ms5837_publish.o: | dirs
+$(BUILDDIR)/ms5837_publish.o: $(APPDIR)/ms5837_publish.c $(APPDIR)/ms5837_publish.h $(APPDIR)/ms5837_contract.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(BUILDDIR)/test_ms5837_publish.o: | dirs
+$(BUILDDIR)/test_ms5837_publish.o: $(TESTDIR)/test_ms5837_publish.c $(APPDIR)/ms5837_publish.h $(APPDIR)/ms5837_contract.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
+
+$(TEST_PUBLISH): $(BUILDDIR)/test_ms5837_publish.o $(BUILDDIR)/ms5837_publish.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+# Phase 2 reference capture, restricted CLI, and asynchronous CSV logger
 $(BUILDDIR)/ms5837_cli.o: | dirs
 $(BUILDDIR)/ms5837_cli.o: $(APPDIR)/ms5837_cli.c $(APPDIR)/ms5837_cli.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BUILDDIR)/ms5837_logger.o: | dirs
-$(BUILDDIR)/ms5837_logger.o: $(APPDIR)/ms5837_logger.c $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_contract.h
+$(BUILDDIR)/ms5837_logger.o: $(APPDIR)/ms5837_logger.c $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_publish.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BUILDDIR)/ms5837_main.o: | dirs
-$(BUILDDIR)/ms5837_main.o: $(APPDIR)/main.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal_rpi.h $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_reference.h $(RT_DIR)/realtime.h
+$(BUILDDIR)/ms5837_main.o: $(APPDIR)/main.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal_rpi.h $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_publish.h $(RT_DIR)/realtime.h $(RT_DIR)/rt_policy.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -I$(REPODIR) -c $< -o $@
 
-$(CAPTURE_APP): $(BUILDDIR)/ms5837_main.o $(BUILDDIR)/ms5837_cli.o $(BUILDDIR)/ms5837_logger.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o $(BUILDDIR)/ms5837_reference.o $(RT_OBJ)
+$(CAPTURE_APP): $(BUILDDIR)/ms5837_main.o $(BUILDDIR)/ms5837_cli.o $(BUILDDIR)/ms5837_logger.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o $(BUILDDIR)/ms5837_publish.o $(RT_OBJ)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 $(BUILDDIR)/test_ms5837_app.o: | dirs
-$(BUILDDIR)/test_ms5837_app.o: $(TESTDIR)/test_ms5837_app.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_contract.h
+$(BUILDDIR)/test_ms5837_app.o: $(TESTDIR)/test_ms5837_app.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_publish.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
-$(TEST_APP): $(BUILDDIR)/test_ms5837_app.o $(BUILDDIR)/ms5837_cli.o $(BUILDDIR)/ms5837_logger.o
+$(TEST_APP): $(BUILDDIR)/test_ms5837_app.o $(BUILDDIR)/ms5837_cli.o $(BUILDDIR)/ms5837_logger.o $(BUILDDIR)/ms5837_publish.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+# Phase 2 capture-owner proof. main.c is compiled into the test through the
+# MS5837_APP_OWNER_TEST seam; no real-time or Linux I2C object is linked.
+$(BUILDDIR)/test_ms5837_ownerloop.o: | dirs
+$(BUILDDIR)/test_ms5837_ownerloop.o: $(TESTDIR)/test_ms5837_ownerloop.c $(APPDIR)/main.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal_rpi.h $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_publish.h $(RT_DIR)/realtime.h $(RT_DIR)/rt_policy.h
+	$(CC) $(CFLAGS) -I$(APPDIR) -I$(REPODIR) -c $< -o $@
+
+$(TEST_OWNERLOOP): $(BUILDDIR)/test_ms5837_ownerloop.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_math.o $(BUILDDIR)/ms5837_publish.o $(BUILDDIR)/ms5837_logger.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
+
+# Scheduling and boundary-ownership audit (static source scan)
+audit:
+	bash $(TESTDIR)/audit_scheduling.sh
+
+# Build and run every host proof, then the audit. No hardware is touched.
+check: host-tests audit
+	./$(TEST_PROD_MATH)
+	./$(TEST_INIT_MOCK)
+	./$(TEST_ACQUISITION_MOCK)
+	./$(TEST_PUBLISH)
+	./$(TEST_APP)
+	./$(TEST_OWNERLOOP)
 
 clean:
 	rm -rf $(BUILDDIR) $(BINDIR)

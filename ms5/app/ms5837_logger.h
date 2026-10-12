@@ -5,12 +5,17 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+
 #include <pthread.h>
 
-#include "ms5837_contract.h"
+#include "ms5837_publish.h"
 
 #define MS5837_LOGGER_CAPACITY 2048U
 #define MS5837_LOGGER_FILENAME_SIZE 40U
+
+#define MS5837_CSV_SCHEMA_VERSION 2U
+#define MS5837_CSV_COLUMN_COUNT 32U
+#define MS5837_CSV_MISSING_TOKEN "NaN"
 
 typedef enum {
     BARO_CAPTURE_PHASE_ZERO = 0,
@@ -18,16 +23,20 @@ typedef enum {
 } BaroCapturePhase_t;
 
 typedef struct {
-    uint64_t publication_sequence;
-    uint64_t publication_time_ns;
+    uint32_t schema_version;
     BaroCapturePhase_t phase;
-    bool sample_ready;
-    bool sample_stale;
-    double fluid_density_kg_m3;
+    Ms5837PublicationRecord_t publication;
+
+    bool zero_requested;
+    bool zero_valid;
+    uint64_t zero_valid_samples;
+    uint64_t zero_rejected_samples;
+
     double surface_pressure_mbar;
-    bool surface_pressure_valid;
+    double fluid_density_kg_m3;
     double depth_m;
-    BaroSample_t sample;
+
+    uint64_t logger_drops_before;
 } BaroLogRecord_t;
 
 typedef struct {
@@ -35,20 +44,31 @@ typedef struct {
     pthread_t thread;
     pthread_mutex_t mutex;
     pthread_cond_t ready;
+
     BaroLogRecord_t queue[MS5837_LOGGER_CAPACITY];
     size_t head;
     size_t count;
+
     bool stopping;
     bool thread_started;
     bool write_failed;
+
     char filename[MS5837_LOGGER_FILENAME_SIZE];
 } Ms5837Logger_t;
 
 int ms5837_logger_start(Ms5837Logger_t *logger);
-int ms5837_logger_start_path(Ms5837Logger_t *logger, const char *path);
-int ms5837_logger_enqueue(Ms5837Logger_t *logger,
-                          const BaroLogRecord_t *record);
+
+int ms5837_logger_start_path(
+    Ms5837Logger_t *logger,
+    const char *path);
+
+int ms5837_logger_enqueue(
+    Ms5837Logger_t *logger,
+    const BaroLogRecord_t *record);
+
 int ms5837_logger_stop(Ms5837Logger_t *logger);
-const char *ms5837_logger_filename(const Ms5837Logger_t *logger);
+
+const char *ms5837_logger_filename(
+    const Ms5837Logger_t *logger);
 
 #endif /* MS5837_LOGGER_H */

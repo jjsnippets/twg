@@ -15,6 +15,47 @@ Linux userspace driver, real-time capture application, diagnostics, and archived
 
 The production path is implemented through Step 4D. It uses a dedicated I2C1 bus, fixed symmetric OSR 512 pressure/temperature pairs, explicit acquisition triggering at the start of each 10 ms frame, 100 Hz publication, optional five-second surface taring, and asynchronous CSV logging.
 
+## Phase 2 reference capture
+
+Build, test, and audit without hardware:
+
+```bash
+cd ~/twg/ms5
+make clean
+make check
+```
+
+Run on the Raspberry Pi:
+
+```bash
+sudo ./bin/ms5837_capture --duration 10
+sudo ./bin/ms5837_capture --zero --duration 10
+```
+
+The executable exposes only `--duration <seconds>` and `--zero`. The bus,
+address, OSR-512 acquisition, 1 kHz owner loop, 100 Hz publication gate,
+real-time priority, and the 1000.0 kg/m3 capture density are fixed.
+
+`--zero` adds a five-second reference stage before the requested duration.
+Publication and CSV logging stay active, and those rows carry `phase=zero`,
+so there is no output gap. The requested `--duration` starts afterward,
+whether zeroing succeeds or fails. If zeroing fails, depth stays `NaN`.
+
+### Host proofs
+
+| Binary | Proves |
+| --- | --- |
+| `test_ms5837_math` | production math contract |
+| `test_ms5837_init_mock` | mock initialization and cleanup |
+| `test_ms5837_acquisition_mock` | raw contract and bounded recovery |
+| `test_ms5837_publish` | pure publisher and 100 Hz gate |
+| `test_ms5837_app` | restricted CLI and CSV logger |
+| `test_ms5837_ownerloop` | capture owner: zero stage, run, recovery |
+
+`make audit` runs `tests/audit_scheduling.sh`. Only `main.c` may call
+`StartRT` or `RT_SleepUntil`. Startup-only sleeps are whitelisted, and the
+driver and publisher stay free of consumer policy.
+
 ## Final configuration
 
 | Item | Production setting |

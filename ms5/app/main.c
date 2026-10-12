@@ -1,23 +1,18 @@
 #define _POSIX_C_SOURCE 200809L
 
 /*
- * MS5837-02BA capture application.
+ * MS5837-02BA pressure-only reference capture.
  *
- * CLI:
+ * Usage:
  *   sudo ./bin/ms5837_capture [--duration SECONDS] [--zero]
- *                              [--density KG_PER_M3]
  *
- * --duration sets only the post-zero capture window (default: 10 seconds).
- * --zero first collects a separate five-second surface-pressure reference;
- *         without --zero, no taring is performed and depth remains NaN.
- * --density selects fluid density (default: 1000 kg/m^3, freshwater).
+ * main owns the only real-time schedule. The nonblocking pressure driver is
+ * serviced once per logical 1 ms turn. The pure publisher emits at tenth-tick
+ * gates, giving a nominal 100 Hz publication rate.
  *
- * The bus (/dev/i2c-1), address (0x76), SCHED_FIFO priority (90), 100 Hz
- * frame/publication cadence, and symmetric OSR 512 are fixed settings.
- * The dedicated I2C bus permits one symmetric D1/D2 conversion pair per
- * frame: D1 is triggered at the beginning of each 10 ms frame. A concise
- * telemetry line is printed every 50 frames (500 ms). Every frame record is
- * queued to a timestamped CSV file in the current working directory.
+ * --zero adds a five-second consumer-owned reference stage before the
+ * requested run. Publication and logging remain active during zeroing, with
+ * phase=zero in the capture-owned CSV rows.
  */
 
 #include <errno.h>
@@ -27,24 +22,52 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#include "ms5837_contract.h"
 #include "ms5837_cli.h"
 #include "ms5837_driver.h"
 #include "ms5837_hal_rpi.h"
 #include "ms5837_logger.h"
-#include "ms5837_reference.h"
+#include "ms5837_math.h"
+#include "ms5837_publish.h"
 #include "rt/realtime.h"
+#include "rt/rt_policy.h"
 
 #define RT_PRIORITY 90
-#define FRAME_PERIOD_SEC 0.010
-#define FRAME_PERIOD_NS UINT64_C(10000000)
-#define CONVERSION_POLL_NS UINT64_C(100000)
-#define TELEMETRY_FRAMES UINT64_C(50)
+#define SERVICE_PERIOD_SEC 0.001
+
+#define TELEMETRY_ROWS UINT64_C(50)
+
+#define STARTUP_MAX_ATTEMPTS 3U
+#define STARTUP_RETRY_NS UINT64_C(200000000)
+
+#define ZERO_DURATION_NS UINT64_C(5000000000)
+#define ZERO_TRIM_FRACTION 0.10
+#define ZERO_MIN_VALID_SAMPLES 350U
+#define ZERO_MAX_SAMPLES 512U
+
+#define CAPTURE_FLUID_DENSITY_KG_M3 1000.0
 
 static volatile sig_atomic_t stop_requested;
+
+typedef struct {
+    double pressure_samples[ZERO_MAX_SAMPLES];
+    size_t valid_sample_count;
+    size_t rejected_sample_count;
+    uint64_t last_measurement_sequence;
+    double surface_pressure_mbar;
+    bool valid;
+} ZeroEstimator_t;
+
+typedef struct {
+    bool zero_requested;
+    bool surface_pressure_valid;
+    double surface_pressure_mbar;
+    double fluid_density_kg_m3;
+    ZeroEstimator_t zero;
+} CapturePolicy_t;
 
 static void request_stop(int signal_number)
 {
@@ -52,242 +75,703 @@ static void request_stop(int signal_number)
     stop_requested = 1;
 }
 
-static uint64_t monotonic_ns(void)
+static bool monotonic_now(uint64_t *now_ns)
 {
     struct timespec now;
 
-    if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
-        return 0U;
+    if ((now_ns == NULL) ||
+        (clock_gettime(CLOCK_MONOTONIC, &now) < 0)) {
+        return false;
     }
-    return ((uint64_t)now.tv_sec * UINT64_C(1000000000)) +
-           (uint64_t)now.tv_nsec;
+
+    *now_ns =
+        ((uint64_t)now.tv_sec * UINT64_C(1000000000)) +
+        (uint64_t)now.tv_nsec;
+
+    return true;
 }
 
-typedef struct {
-    double fluid_density_kg_m3;
-    double surface_pressure_mbar;
-    bool surface_pressure_valid;
-    bool zero_at_start_requested;
-} AppDepthConfig_t;
-
-typedef struct {
-    uint64_t publications_attempted;
-    uint64_t publications_not_ready;
-    uint64_t publications_stale;
-    uint64_t service_overruns;
-    uint64_t logger_drops;
-    uint64_t maximum_loop_body_ns;
-} AppRuntimeStats_t;
-
-static BaroSample_t not_ready_sample(void)
+static int sleep_relative_ns(uint64_t duration_ns)
 {
-    BaroSample_t sample;
-    ms5837_sample_set_not_ready(&sample);
-    return sample;
+    struct timespec pause;
+
+    pause.tv_sec =
+        (time_t)(duration_ns / UINT64_C(1000000000));
+    pause.tv_nsec =
+        (long)(duration_ns % UINT64_C(1000000000));
+
+    while (nanosleep(&pause, &pause) < 0) {
+        if (errno != EINTR) {
+            return -errno;
+        }
+
+        if (stop_requested) {
+            return -EINTR;
+        }
+    }
+
+    return 0;
 }
 
-static double sample_depth(const BaroSample_t *sample,
-                           const AppDepthConfig_t *config)
+static int compare_double(
+    const void *left,
+    const void *right)
 {
-    if ((sample == NULL) || (config == NULL) ||
-        !config->surface_pressure_valid) {
+    const double left_value =
+        *(const double *)left;
+    const double right_value =
+        *(const double *)right;
+
+    if (left_value < right_value) {
+        return -1;
+    }
+
+    if (left_value > right_value) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static void zero_estimator_begin(
+    ZeroEstimator_t *estimator)
+{
+    memset(estimator, 0, sizeof(*estimator));
+    estimator->surface_pressure_mbar = NAN;
+}
+
+static bool zero_estimator_add(
+    ZeroEstimator_t *estimator,
+    const BaroSample_t *sample)
+{
+    const uint32_t rejection_flags =
+        BARO_STATUS_NOT_READY |
+        BARO_STATUS_RAW_INVALID |
+        BARO_STATUS_PRESSURE_INVALID;
+
+    if ((estimator == NULL) ||
+        (sample == NULL)) {
+        return false;
+    }
+
+    if ((sample->measurement_sequence == 0U) ||
+        (sample->measurement_sequence ==
+         estimator->last_measurement_sequence) ||
+        ((sample->status_flags & rejection_flags) != 0U) ||
+        !isfinite(sample->pressure_mbar) ||
+        (estimator->valid_sample_count >=
+         ZERO_MAX_SAMPLES)) {
+        ++estimator->rejected_sample_count;
+        return false;
+    }
+
+    estimator->pressure_samples[
+        estimator->valid_sample_count++] =
+        sample->pressure_mbar;
+
+    estimator->last_measurement_sequence =
+        sample->measurement_sequence;
+
+    return true;
+}
+
+static bool zero_estimator_finalize(
+    ZeroEstimator_t *estimator)
+{
+    size_t trim_count;
+    size_t end_index;
+    size_t retained_count;
+    size_t index;
+    double sum = 0.0;
+
+    if ((estimator == NULL) ||
+        (estimator->valid_sample_count <
+         ZERO_MIN_VALID_SAMPLES)) {
+        if (estimator != NULL) {
+            estimator->surface_pressure_mbar = NAN;
+            estimator->valid = false;
+        }
+
+        return false;
+    }
+
+    qsort(
+        estimator->pressure_samples,
+        estimator->valid_sample_count,
+        sizeof(estimator->pressure_samples[0]),
+        compare_double);
+
+    trim_count =
+        (size_t)(
+            (double)estimator->valid_sample_count *
+            ZERO_TRIM_FRACTION);
+
+    end_index =
+        estimator->valid_sample_count - trim_count;
+
+    retained_count =
+        end_index - trim_count;
+
+    if (retained_count == 0U) {
+        estimator->surface_pressure_mbar = NAN;
+        estimator->valid = false;
+        return false;
+    }
+
+    for (index = trim_count;
+         index < end_index;
+         ++index) {
+        sum += estimator->pressure_samples[index];
+    }
+
+    estimator->surface_pressure_mbar =
+        sum / (double)retained_count;
+
+    estimator->valid =
+        isfinite(estimator->surface_pressure_mbar);
+
+    return estimator->valid;
+}
+
+static double capture_depth(
+    const Ms5837PublicationRecord_t *publication,
+    const CapturePolicy_t *policy)
+{
+    if ((publication == NULL) ||
+        (policy == NULL) ||
+        (publication->sample_ready == 0U) ||
+        !policy->surface_pressure_valid) {
         return NAN;
     }
+
     return ms5837_depth_from_reference(
-        sample->pressure_mbar, config->surface_pressure_mbar,
-        config->fluid_density_kg_m3);
+        publication->sample.pressure_mbar,
+        policy->surface_pressure_mbar,
+        policy->fluid_density_kg_m3);
 }
 
-static void publish_record(Ms5837Logger_t *logger,
-                           const Ms5837Driver_t *driver,
-                           const AppDepthConfig_t *config,
-                           BaroCapturePhase_t phase,
-                           uint64_t publication_sequence,
-                           uint64_t publication_time_ns,
-                           uint64_t *last_published_measurement,
-                           AppRuntimeStats_t *app_stats)
+static bool recovery_active(
+    const Ms5837Driver_t *driver)
 {
-    BaroLogRecord_t record;
+    Ms5837DriverState_t state =
+        ms5837_driver_state(driver);
 
-    memset(&record, 0, sizeof(record));
-    record.publication_sequence = publication_sequence;
-    record.publication_time_ns = publication_time_ns;
-    record.phase = phase;
-    record.fluid_density_kg_m3 = config->fluid_density_kg_m3;
-    record.surface_pressure_mbar = config->surface_pressure_mbar;
-    record.surface_pressure_valid = config->surface_pressure_valid;
-    record.sample = not_ready_sample();
+    return
+        (state >= MS5837_STATE_RECOVERY_BACKOFF) &&
+        (state <= MS5837_STATE_RECOVERY_VALIDATE);
+}
 
-    ++app_stats->publications_attempted;
-    if (ms5837_driver_latest_sample(driver, &record.sample)) {
-        record.sample_ready = true;
-        if (record.sample.measurement_sequence == *last_published_measurement) {
-            record.sample_stale = true;
-            ++app_stats->publications_stale;
-        } else {
-            *last_published_measurement = record.sample.measurement_sequence;
+static int initialize_with_retry(
+    Ms5837Driver_t *driver,
+    const Ms5837Hal_t *hal)
+{
+    unsigned int attempt;
+    int status =
+        MS5837_DRIVER_ERR_NOT_INITIALIZED;
+
+    for (attempt = 1U;
+         attempt <= STARTUP_MAX_ATTEMPTS;
+         ++attempt) {
+        status = ms5837_driver_init(driver, hal);
+
+        if (status == MS5837_DRIVER_OK) {
+            return status;
         }
-    } else {
-        ++app_stats->publications_not_ready;
+
+        fprintf(
+            stderr,
+            "MS5837 initialization attempt %u/%u failed: %d\n",
+            attempt,
+            STARTUP_MAX_ATTEMPTS,
+            status);
+
+        if (attempt < STARTUP_MAX_ATTEMPTS) {
+            status =
+                sleep_relative_ns(STARTUP_RETRY_NS);
+
+            if (status < 0) {
+                return status;
+            }
+        }
     }
 
-    record.depth_m = sample_depth(&record.sample, config);
-    if (ms5837_logger_enqueue(logger, &record) < 0) {
-        ++app_stats->logger_drops;
+    return status;
+}
+
+static int service_once(
+    Ms5837Driver_t *driver,
+    BaroDriverStats_t *driver_stats,
+    BaroSample_t *completed,
+    bool *sample_completed)
+{
+    uint64_t now_ns;
+    int status;
+
+    if (!monotonic_now(&now_ns)) {
+        return -EIO;
     }
-}
 
-static void print_telemetry(uint64_t tick, BaroCapturePhase_t phase,
-                            const Ms5837Driver_t *driver,
-                            const AppDepthConfig_t *config,
-                            const BaroDriverStats_t *driver_stats,
-                            const AppRuntimeStats_t *app_stats)
-{
-    BaroSample_t sample;
+    status = ms5837_driver_service(
+        driver,
+        now_ns,
+        driver_stats,
+        completed);
 
-    if (ms5837_driver_latest_sample(driver, &sample)) {
-        printf("frame=%" PRIu64 " phase=%s seq=%" PRIu64
-               " P=%.2f_mbar T=%.2f_C depth=%.4f_m flags=0x%08" PRIX32
-               " i2c=%" PRIu64 " drops=%" PRIu64 "\n",
-               tick, phase == BARO_CAPTURE_PHASE_ZERO ? "zero" : "run",
-               sample.measurement_sequence, sample.pressure_mbar,
-               sample.temperature_c, sample_depth(&sample, config),
-               sample.status_flags, driver_stats->i2c_errors,
-               app_stats->logger_drops);
-    } else {
-        printf("frame=%" PRIu64 " phase=%s sample=not_ready i2c=%" PRIu64
-               " drops=%" PRIu64 " density=%.3f\n",
-               tick, phase == BARO_CAPTURE_PHASE_ZERO ? "zero" : "run",
-               driver_stats->i2c_errors, app_stats->logger_drops,
-               config->fluid_density_kg_m3);
+    *sample_completed =
+        status == MS5837_SERVICE_SAMPLE_READY;
+
+    if ((status < 0) &&
+        !recovery_active(driver) &&
+        (ms5837_driver_state(driver) !=
+         MS5837_STATE_STOPPED)) {
+        return status;
     }
+
+    return 0;
 }
 
-static bool recovery_active(const Ms5837Driver_t *driver)
+static int sleep_owner_turn(
+    Ms5837RunStats_t *run_stats,
+    uint64_t *logical_ticks)
 {
-    Ms5837DriverState_t state = ms5837_driver_state(driver);
-    return (state >= MS5837_STATE_RECOVERY_BACKOFF) &&
-           (state <= MS5837_STATE_RECOVERY_VALIDATE);
+    int sleep_status =
+        RT_SleepUntil(SERVICE_PERIOD_SEC);
+
+    if (sleep_status < 0) {
+        return sleep_status;
+    }
+
+    if (sleep_status > 0) {
+        run_stats->service_overruns +=
+            (uint64_t)sleep_status;
+    }
+
+    if (logical_ticks != NULL) {
+        *logical_ticks =
+            UINT64_C(1) +
+            (uint64_t)sleep_status;
+    }
+
+    return 0;
 }
 
-static int service_until_idle(Ms5837Driver_t *driver,
-                              BaroDriverStats_t *driver_stats,
-                              Ms5837Reference_t *reference,
-                              BaroCapturePhase_t phase,
-                              uint64_t frame_deadline_ns)
+static int warm_up_sample(
+    Ms5837Driver_t *driver,
+    BaroDriverStats_t *driver_stats,
+    Ms5837RunStats_t *run_stats,
+    BaroSample_t *baseline)
 {
-    BaroSample_t completed;
-
     while (!stop_requested) {
-        uint64_t now_ns = monotonic_ns();
-        int service_status;
+        BaroSample_t completed;
+        bool completed_now = false;
+        int status;
 
-        if (now_ns >= frame_deadline_ns) {
-            return -ETIMEDOUT;
-        }
-        service_status = ms5837_driver_service(
-            driver, now_ns, driver_stats, &completed);
-        if (service_status == MS5837_SERVICE_SAMPLE_READY) {
-            if ((phase == BARO_CAPTURE_PHASE_ZERO) &&
-                (reference != NULL)) {
-                (void)ms5837_reference_add_sample(reference, &completed);
-            }
+        if (ms5837_driver_latest_sample(
+                driver,
+                baseline)) {
             return 0;
         }
-        if ((service_status < 0) && !recovery_active(driver)) {
-            return service_status;
+
+        if (ms5837_driver_state(driver) ==
+            MS5837_STATE_STOPPED) {
+            return ms5837_driver_last_error(driver);
         }
-        if (ms5837_driver_state(driver) == MS5837_STATE_IDLE) {
+
+        if (ms5837_driver_state(driver) ==
+            MS5837_STATE_IDLE) {
+            status = ms5837_driver_trigger(
+                driver,
+                driver_stats);
+
+            if ((status < 0) &&
+                !recovery_active(driver)) {
+                return status;
+            }
+        }
+
+        status = service_once(
+            driver,
+            driver_stats,
+            &completed,
+            &completed_now);
+
+        ++run_stats->service_ticks;
+
+        if (status < 0) {
+            ++run_stats->clock_read_failures;
+            return status;
+        }
+
+        if (completed_now) {
+            *baseline = completed;
             return 0;
         }
-        {
-            struct timespec pause;
-            pause.tv_sec = 0;
-            pause.tv_nsec = (long)CONVERSION_POLL_NS;
-            while ((nanosleep(&pause, &pause) < 0) && (errno == EINTR) &&
-                   !stop_requested) {
-            }
+
+        status = sleep_owner_turn(
+            run_stats,
+            NULL);
+
+        if (status < 0) {
+            return status;
         }
     }
+
     return -EINTR;
 }
 
-static int run_phase(Ms5837Driver_t *driver, Ms5837Logger_t *logger,
-                     AppDepthConfig_t *config, BaroDriverStats_t *driver_stats,
-                     AppRuntimeStats_t *app_stats,
-                     Ms5837Reference_t *reference,
-                     BaroCapturePhase_t phase, uint64_t duration_ns,
-                     uint64_t *global_frame, uint64_t *publication_sequence,
-                     uint64_t *last_published_measurement)
+static void account_publication(
+    Ms5837RunStats_t *stats,
+    const Ms5837PublicationRecord_t *publication)
 {
-    uint64_t start_ns = monotonic_ns();
-    uint64_t frame_start_ns = start_ns;
+    ++stats->publications_attempted;
 
-    while (!stop_requested && ((frame_start_ns - start_ns) < duration_ns)) {
-        uint64_t body_start_ns = monotonic_ns();
-        uint64_t frame_deadline_ns = frame_start_ns + FRAME_PERIOD_NS;
-        int frame_status;
+    stats->gates_skipped +=
+        publication->gates_skipped_before;
 
-        /* Trigger D1 first: this is the defined beginning of every frame. */
-        frame_status = ms5837_driver_trigger(driver, driver_stats);
-        if (frame_status == MS5837_DRIVER_ERR_BUSY) {
-            /* Finish a late prior pair so one overrun cannot stall capture. */
-            frame_status = service_until_idle(
-                driver, driver_stats, reference, phase, frame_deadline_ns);
-            if (frame_status == 0) {
-                frame_status = -ETIMEDOUT;
-            }
-        } else if (frame_status < 0) {
-            if (recovery_active(driver)) {
-                frame_status = service_until_idle(
-                    driver, driver_stats, NULL, phase, frame_deadline_ns);
-            }
-        } else {
-            frame_status = service_until_idle(
-                driver, driver_stats, reference, phase, frame_deadline_ns);
+    if (publication->deadline_missed != 0U) {
+        ++stats->deadline_misses;
+    }
+
+    if (publication->not_ready != 0U) {
+        ++stats->publications_not_ready;
+    } else if (publication->sample_fresh != 0U) {
+        ++stats->publications_fresh;
+    } else if (publication->sample_stale != 0U) {
+        ++stats->publications_stale;
+    }
+}
+
+static int emit_record(
+    Ms5837Logger_t *logger,
+    Ms5837Driver_t *driver,
+    Ms5837PublisherState_t *publisher,
+    CapturePolicy_t *policy,
+    Ms5837RunStats_t *run_stats,
+    BaroCapturePhase_t phase,
+    const Ms5837PublishGateDecision_t *decision,
+    uint64_t actual_ns,
+    bool actual_valid)
+{
+    BaroLogRecord_t record;
+    BaroSample_t sample;
+    bool sample_available;
+
+    memset(&record, 0, sizeof(record));
+
+    sample_available =
+        ms5837_driver_latest_sample(
+            driver,
+            &sample);
+
+    if (!ms5837_publish_evaluate(
+            publisher,
+            sample_available ? &sample : NULL,
+            sample_available,
+            (int32_t)ms5837_driver_state(driver),
+            decision->scheduled_ns,
+            decision->scheduled_valid,
+            actual_ns,
+            actual_valid,
+            decision->gates_skipped_before,
+            &record.publication)) {
+        return -EINVAL;
+    }
+
+    account_publication(
+        run_stats,
+        &record.publication);
+
+    record.schema_version =
+        MS5837_CSV_SCHEMA_VERSION;
+    record.phase = phase;
+    record.zero_requested =
+        policy->zero_requested;
+    record.zero_valid =
+        policy->surface_pressure_valid;
+    record.zero_valid_samples =
+        (uint64_t)policy->zero.valid_sample_count;
+    record.zero_rejected_samples =
+        (uint64_t)policy->zero.rejected_sample_count;
+
+    record.surface_pressure_mbar =
+        policy->surface_pressure_valid
+        ? policy->surface_pressure_mbar
+        : NAN;
+
+    record.fluid_density_kg_m3 =
+        policy->fluid_density_kg_m3;
+
+    record.depth_m =
+        capture_depth(
+            &record.publication,
+            policy);
+
+    record.logger_drops_before =
+        run_stats->logger_drops;
+
+    if (ms5837_logger_enqueue(
+            logger,
+            &record) < 0) {
+        ++run_stats->logger_drops;
+        return -EAGAIN;
+    }
+
+    ++run_stats->publications_enqueued;
+    return 0;
+}
+
+static void print_telemetry(
+    BaroCapturePhase_t phase,
+    const Ms5837Driver_t *driver,
+    const CapturePolicy_t *policy,
+    const BaroDriverStats_t *driver_stats,
+    const Ms5837RunStats_t *run_stats)
+{
+    BaroSample_t sample;
+    const char *phase_name =
+        phase == BARO_CAPTURE_PHASE_ZERO
+        ? "zero"
+        : "run";
+
+    if (ms5837_driver_latest_sample(
+            driver,
+            &sample)) {
+        double depth =
+            policy->surface_pressure_valid
+            ? ms5837_depth_from_reference(
+                  sample.pressure_mbar,
+                  policy->surface_pressure_mbar,
+                  policy->fluid_density_kg_m3)
+            : NAN;
+
+        printf(
+            "row=%" PRIu64
+            " phase=%s"
+            " seq=%" PRIu64
+            " P=%.2f_mbar"
+            " T=%.2f_C"
+            " depth=%.4f_m"
+            " flags=0x%08" PRIX32
+            " i2c=%" PRIu64
+            " drops=%" PRIu64
+            "\n",
+            run_stats->publications_attempted,
+            phase_name,
+            sample.measurement_sequence,
+            sample.pressure_mbar,
+            sample.temperature_c,
+            depth,
+            sample.status_flags,
+            driver_stats->i2c_errors,
+            run_stats->logger_drops);
+    } else {
+        printf(
+            "row=%" PRIu64
+            " phase=%s"
+            " sample=not_ready"
+            " i2c=%" PRIu64
+            " drops=%" PRIu64
+            " density=%.3f"
+            "\n",
+            run_stats->publications_attempted,
+            phase_name,
+            driver_stats->i2c_errors,
+            run_stats->logger_drops,
+            policy->fluid_density_kg_m3);
+    }
+}
+
+static int run_capture_phase(
+    Ms5837Driver_t *driver,
+    Ms5837Logger_t *logger,
+    Ms5837PublisherState_t *publisher,
+    CapturePolicy_t *policy,
+    BaroDriverStats_t *driver_stats,
+    Ms5837RunStats_t *run_stats,
+    BaroCapturePhase_t phase,
+    uint64_t duration_ns)
+{
+    Ms5837PublishGate_t gate;
+    uint64_t tick1_ns;
+    uint64_t logical_ticks = 1U;
+    int trigger_status;
+
+    if (!monotonic_now(&tick1_ns)) {
+        ++run_stats->clock_read_failures;
+        return -EIO;
+    }
+
+    if (!ms5837_publish_gate_begin(
+            &gate,
+            tick1_ns,
+            true,
+            duration_ns)) {
+        return -EINVAL;
+    }
+
+    if (ms5837_driver_state(driver) ==
+        MS5837_STATE_IDLE) {
+        trigger_status =
+            ms5837_driver_trigger(
+                driver,
+                driver_stats);
+
+        if ((trigger_status < 0) &&
+            !recovery_active(driver)) {
+            return trigger_status;
+        }
+    }
+
+    while (!stop_requested &&
+           !ms5837_publish_gate_window_done(&gate)) {
+        Ms5837PublishGateDecision_t decision;
+        Ms5837PublishGateStatus_t gate_status;
+        BaroSample_t completed;
+        bool sample_completed = false;
+        uint64_t body_start_ns;
+        uint64_t body_end_ns;
+        int status;
+        int sleep_status;
+
+        if (!monotonic_now(&body_start_ns)) {
+            ++run_stats->clock_read_failures;
+            return -EIO;
         }
 
-        ++*global_frame;
-        ++*publication_sequence;
-        publish_record(logger, driver, config, phase,
-                       *publication_sequence, frame_start_ns,
-                       last_published_measurement, app_stats);
-        if ((*global_frame % TELEMETRY_FRAMES) == 0U) {
-            print_telemetry(*global_frame, phase, driver, config,
-                            driver_stats, app_stats);
+        status = service_once(
+            driver,
+            driver_stats,
+            &completed,
+            &sample_completed);
+
+        ++run_stats->service_ticks;
+
+        if (status < 0) {
+            return status;
         }
 
-        {
-            uint64_t body_end_ns = monotonic_ns();
-            uint64_t body_ns = body_end_ns - body_start_ns;
-            if (body_ns > app_stats->maximum_loop_body_ns) {
-                app_stats->maximum_loop_body_ns = body_ns;
-            }
-            if ((body_ns > FRAME_PERIOD_NS) ||
-                (frame_status == -ETIMEDOUT)) {
-                ++app_stats->service_overruns;
-            }
-        }
-        if ((frame_status < 0) &&
-            (frame_status != -ETIMEDOUT) &&
-            (frame_status != -EINTR)) {
-            return frame_status;
+        if ((phase == BARO_CAPTURE_PHASE_ZERO) &&
+            sample_completed) {
+            (void)zero_estimator_add(
+                &policy->zero,
+                &completed);
         }
 
-        int rt_status = RT_SleepUntil(FRAME_PERIOD_SEC);
-        if (rt_status > 0) {
-            app_stats->service_overruns += (uint64_t)rt_status;
-        } else if (rt_status < 0) {
-            if ((rt_status == -EINTR) && stop_requested) {
+        gate_status =
+            ms5837_publish_gate_advance(
+                &gate,
+                logical_ticks,
+                &decision);
+
+        if (gate_status ==
+            MS5837_PUBLISH_GATE_ERROR) {
+            return -ERANGE;
+        }
+
+        if (gate_status ==
+            MS5837_PUBLISH_GATE_DUE) {
+            uint64_t actual_ns;
+            bool actual_valid =
+                monotonic_now(&actual_ns);
+
+            if (!actual_valid) {
+                actual_ns = 0U;
+                ++run_stats->clock_read_failures;
+            }
+
+            status = emit_record(
+                logger,
+                driver,
+                publisher,
+                policy,
+                run_stats,
+                phase,
+                &decision,
+                actual_ns,
+                actual_valid);
+
+            if (status < 0) {
+                return status;
+            }
+
+            if ((run_stats->publications_attempted %
+                 TELEMETRY_ROWS) == 0U) {
+                print_telemetry(
+                    phase,
+                    driver,
+                    policy,
+                    driver_stats,
+                    run_stats);
+            }
+
+            /*
+             * Runtime exhaustion is represented by this gate before
+             * controlled shutdown.
+             */
+            if (ms5837_driver_state(driver) ==
+                MS5837_STATE_STOPPED) {
+                return ms5837_driver_last_error(driver);
+            }
+
+            /*
+             * Do not start an unnecessary pair after the final gate. This
+             * also ensures the run phase triggers its own first pair after
+             * a completed zero phase.
+             */
+            if (!ms5837_publish_gate_window_done(&gate) &&
+                (ms5837_driver_state(driver) ==
+                 MS5837_STATE_IDLE)) {
+                trigger_status =
+                    ms5837_driver_trigger(
+                        driver,
+                        driver_stats);
+
+                if ((trigger_status < 0) &&
+                    !recovery_active(driver)) {
+                    return trigger_status;
+                }
+            }
+        }
+
+        if (!monotonic_now(&body_end_ns)) {
+            ++run_stats->clock_read_failures;
+            return -EIO;
+        }
+
+        if (body_end_ns >= body_start_ns) {
+            uint64_t body_ns =
+                body_end_ns - body_start_ns;
+
+            if (body_ns >
+                run_stats->maximum_loop_body_ns) {
+                run_stats->maximum_loop_body_ns =
+                    body_ns;
+            }
+        }
+
+        if (ms5837_publish_gate_window_done(&gate)) {
+            break;
+        }
+
+        sleep_status =
+            sleep_owner_turn(
+                run_stats,
+                &logical_ticks);
+
+        if (sleep_status < 0) {
+            if ((sleep_status == -EINTR) &&
+                stop_requested) {
                 break;
             }
-            return rt_status;
-        }
 
-        frame_start_ns = monotonic_ns();
+            return sleep_status;
+        }
     }
+
     return stop_requested ? -EINTR : 0;
 }
+
+#ifndef MS5837_APP_OWNER_TEST
 
 int main(int argc, char *argv[])
 {
@@ -296,115 +780,238 @@ int main(int argc, char *argv[])
     Ms5837Hal_t hal;
     Ms5837Driver_t driver;
     Ms5837Logger_t logger;
-    Ms5837Reference_t reference;
-    AppDepthConfig_t config;
+    Ms5837PublisherState_t publisher;
+    CapturePolicy_t policy;
     BaroDriverStats_t driver_stats;
-    AppRuntimeStats_t app_stats;
-    uint64_t global_frame = 0U;
-    uint64_t publication_sequence = 0U;
-    uint64_t last_published_measurement = 0U;
-    int result = 1;
+    Ms5837RunStats_t run_stats;
+    BaroSample_t baseline;
+    RT_StartStatus_t rt_status;
+    AppRtPolicy_t rt_policy;
     int status;
+    int result = 1;
 
-    if (ms5837_cli_parse(argc, argv, &options) < 0) {
-        fprintf(stderr, "Invalid arguments; see the CLI instructions in app/main.c.\n");
+    if (ms5837_cli_parse(
+            argc,
+            argv,
+            &options) < 0) {
+        fprintf(
+            stderr,
+            "Usage: %s [--duration SECONDS] [--zero]\n",
+            argv[0]);
         return 2;
     }
-    memset(&config, 0, sizeof(config));
+
+    memset(&policy, 0, sizeof(policy));
     memset(&driver_stats, 0, sizeof(driver_stats));
-    memset(&app_stats, 0, sizeof(app_stats));
-    config.fluid_density_kg_m3 = options.density_kg_m3;
-    config.surface_pressure_mbar = NAN;
-    config.surface_pressure_valid = false;
-    config.zero_at_start_requested = options.zero_requested;
+    memset(&run_stats, 0, sizeof(run_stats));
+
+    policy.zero_requested =
+        options.zero_requested;
+    policy.surface_pressure_mbar = NAN;
+    policy.fluid_density_kg_m3 =
+        CAPTURE_FLUID_DENSITY_KG_M3;
+
+    zero_estimator_begin(&policy.zero);
+
+    run_stats.version =
+        MS5837_RUN_STATS_CONTRACT_VERSION;
 
     (void)signal(SIGINT, request_stop);
     (void)signal(SIGTERM, request_stop);
-    ms5837_reference_reset(&reference);
-    ms5837_hal_rpi_configure(&rpi, MS5837_DEFAULT_I2C_BUS,
-                             MS5837_I2C_ADDRESS);
+
+    ms5837_hal_rpi_configure(
+        &rpi,
+        MS5837_DEFAULT_I2C_BUS,
+        MS5837_I2C_ADDRESS);
+
     hal = ms5837_hal_rpi_make(&rpi);
-    status = ms5837_driver_init(&driver, &hal);
+
+    status = initialize_with_retry(
+        &driver,
+        &hal);
+
     if (status < 0) {
-        fprintf(stderr, "MS5837 initialization failed: %d\n", status);
+        fprintf(
+            stderr,
+            "MS5837 initialization exhausted: %d\n",
+            status);
         return 1;
     }
+
     status = ms5837_logger_start(&logger);
+
     if (status < 0) {
-        fprintf(stderr, "CSV logger start failed: %d\n", status);
+        fprintf(
+            stderr,
+            "CSV logger start failed: %d\n",
+            status);
         (void)ms5837_driver_shutdown(&driver);
         return 1;
     }
-    
-    RT_StartStatus_t rt_status = StartRT(RT_PRIORITY, FRAME_PERIOD_SEC);
-    if (rt_status != RT_START_OK) {
-        fprintf(stderr,
-                "WARNING: StartRT status=0x%08" PRIX32
-                "; continuing with available scheduling/locking.\n",
-                rt_status);
+
+    rt_status =
+        StartRT(
+            RT_PRIORITY,
+            SERVICE_PERIOD_SEC);
+
+    rt_policy =
+        app_rt_policy_from_start(rt_status);
+
+    if (rt_policy == APP_RT_POLICY_FATAL) {
+        fprintf(
+            stderr,
+            "Fatal StartRT status=0x%08" PRIX32 "\n",
+            rt_status);
+        (void)ms5837_logger_stop(&logger);
+        (void)ms5837_driver_shutdown(&driver);
+        return 1;
     }
 
-    printf("capture=%s duration=%" PRIu64 "s zero=%s density=%.3f\n",
-           ms5837_logger_filename(&logger), options.duration_sec,
-           options.zero_requested ? "yes" : "no", options.density_kg_m3);
+    if (rt_policy ==
+        APP_RT_POLICY_WARN_AND_CONTINUE) {
+        fprintf(
+            stderr,
+            "WARNING: StartRT status=0x%08" PRIX32
+            "; continuing without all RT privileges.\n",
+            rt_status);
+    }
 
-    if (options.zero_requested) {
-        ms5837_reference_begin(&reference);
-        status = run_phase(&driver, &logger, &config, &driver_stats, &app_stats,
-                           &reference,
-                           BARO_CAPTURE_PHASE_ZERO, MS5837_ZERO_DURATION_NS,
-                           &global_frame, &publication_sequence,
-                           &last_published_measurement);
-        if ((status == 0) && ms5837_reference_finalize(&reference)) {
-            config.surface_pressure_mbar =
-                ms5837_reference_surface_pressure(&reference);
-            config.surface_pressure_valid = true;
-            printf("surface_reference=%.6f_mbar valid_samples=%zu rejected=%zu\n",
-                   config.surface_pressure_mbar,
-                   reference.valid_sample_count,
-                   reference.rejected_sample_count);
+    status = warm_up_sample(
+        &driver,
+        &driver_stats,
+        &run_stats,
+        &baseline);
+
+    if ((status == 0) &&
+        !ms5837_publish_begin_window(
+            &publisher,
+            &baseline,
+            true)) {
+        status = -EINVAL;
+    }
+
+    printf(
+        "capture=%s duration=%" PRIu64
+        "s zero=%s density=%.3f\n",
+        ms5837_logger_filename(&logger),
+        options.duration_sec,
+        options.zero_requested ? "yes" : "no",
+        policy.fluid_density_kg_m3);
+
+    /*
+     * Zeroing is a separate five-second phase, but it uses the same
+     * publisher and logger. It therefore emits normal 100 Hz CSV rows with
+     * phase=zero.
+     */
+    if ((status == 0) &&
+        options.zero_requested &&
+        !stop_requested) {
+        status = run_capture_phase(
+            &driver,
+            &logger,
+            &publisher,
+            &policy,
+            &driver_stats,
+            &run_stats,
+            BARO_CAPTURE_PHASE_ZERO,
+            ZERO_DURATION_NS);
+
+        if ((status == 0) &&
+            zero_estimator_finalize(&policy.zero)) {
+            policy.surface_pressure_mbar =
+                policy.zero.surface_pressure_mbar;
+            policy.surface_pressure_valid = true;
+
+            printf(
+                "surface_reference=%.6f_mbar"
+                " valid_samples=%zu"
+                " rejected=%zu\n",
+                policy.surface_pressure_mbar,
+                policy.zero.valid_sample_count,
+                policy.zero.rejected_sample_count);
         } else if (status == 0) {
-            fprintf(stderr,
-                    "Surface reference failed: valid_samples=%zu rejected=%zu; "
-                    "depth will remain NaN.\n",
-                    reference.valid_sample_count,
-                    reference.rejected_sample_count);
+            fprintf(
+                stderr,
+                "Surface reference failed:"
+                " valid_samples=%zu"
+                " rejected=%zu;"
+                " capture continues with depth=NaN.\n",
+                policy.zero.valid_sample_count,
+                policy.zero.rejected_sample_count);
         }
-    } else {
-        status = 0;
     }
 
-    if ((status == 0) && !stop_requested) {
-        status = run_phase(&driver, &logger, &config, &driver_stats, &app_stats,
-                           NULL,
-                           BARO_CAPTURE_PHASE_RUN,
-                           options.duration_sec * UINT64_C(1000000000),
-                           &global_frame, &publication_sequence,
-                           &last_published_measurement);
+    /*
+     * The requested duration starts after zeroing, whether zeroing succeeds
+     * or fails.
+     */
+    if ((status == 0) &&
+        !stop_requested) {
+        status = run_capture_phase(
+            &driver,
+            &logger,
+            &publisher,
+            &policy,
+            &driver_stats,
+            &run_stats,
+            BARO_CAPTURE_PHASE_RUN,
+            options.duration_sec *
+            UINT64_C(1000000000));
     }
-    result = ((status == 0) && (app_stats.logger_drops == 0U)) ? 0 : 1;
+
+    result =
+        ((status == 0) &&
+         (run_stats.logger_drops == 0U))
+        ? 0
+        : 1;
 
     if (ms5837_logger_stop(&logger) < 0) {
-        fprintf(stderr, "CSV logger shutdown failed.\n");
-        result = 1;
-    }
-    if (ms5837_driver_shutdown(&driver) < 0) {
-        fprintf(stderr, "MS5837 shutdown failed.\n");
+        fprintf(
+            stderr,
+            "CSV logger shutdown failed.\n");
         result = 1;
     }
 
-    printf("completed=%" PRIu64 " publications=%" PRIu64
-           " not_ready=%" PRIu64 " stale=%" PRIu64
-           " i2c_errors=%" PRIu64 " aborted_pairs=%" PRIu64
-           " recoveries=%" PRIu64 "/%" PRIu64
-           " overruns=%" PRIu64 " logger_drops=%" PRIu64
-           " max_body_ns=%" PRIu64 "\n",
-           driver_stats.measurements_completed,
-           app_stats.publications_attempted,
-           app_stats.publications_not_ready, app_stats.publications_stale,
-           driver_stats.i2c_errors, driver_stats.aborted_pairs,
-           driver_stats.recovery_successes, driver_stats.recovery_attempts,
-           app_stats.service_overruns, app_stats.logger_drops,
-           app_stats.maximum_loop_body_ns);
+    if (ms5837_driver_shutdown(&driver) < 0) {
+        fprintf(
+            stderr,
+            "MS5837 shutdown failed.\n");
+        result = 1;
+    }
+
+    printf(
+        "completed=%" PRIu64
+        " publications=%" PRIu64
+        " enqueued=%" PRIu64
+        " not_ready=%" PRIu64
+        " fresh=%" PRIu64
+        " stale=%" PRIu64
+        " i2c_errors=%" PRIu64
+        " aborted_pairs=%" PRIu64
+        " recoveries=%" PRIu64 "/%" PRIu64
+        " skipped_ticks=%" PRIu64
+        " skipped_gates=%" PRIu64
+        " deadline_misses=%" PRIu64
+        " logger_drops=%" PRIu64
+        " max_body_ns=%" PRIu64
+        "\n",
+        driver_stats.measurements_completed,
+        run_stats.publications_attempted,
+        run_stats.publications_enqueued,
+        run_stats.publications_not_ready,
+        run_stats.publications_fresh,
+        run_stats.publications_stale,
+        driver_stats.i2c_errors,
+        driver_stats.aborted_pairs,
+        driver_stats.recovery_successes,
+        driver_stats.recovery_attempts,
+        run_stats.service_overruns,
+        run_stats.gates_skipped,
+        run_stats.deadline_misses,
+        run_stats.logger_drops,
+        run_stats.maximum_loop_body_ns);
+
     return result;
 }
+
+#endif /* MS5837_APP_OWNER_TEST */
