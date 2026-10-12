@@ -13,13 +13,11 @@ TEST_RAW = $(BINDIR)/test_i2c_raw
 TEST_MATH = $(BINDIR)/test_crc_math
 TEST_BENCH = $(BINDIR)/test_rate_bench
 TEST_PROD_MATH = $(BINDIR)/test_ms5837_math
-TEST_REFERENCE = $(BINDIR)/test_ms5837_reference
 TEST_INIT_MOCK = $(BINDIR)/test_ms5837_init_mock
 TEST_INIT_LIVE = $(BINDIR)/test_ms5837_init_live
 TEST_ACQUISITION_MOCK = $(BINDIR)/test_ms5837_acquisition_mock
 TEST_ACQUISITION_LIVE = $(BINDIR)/test_ms5837_acquisition_live
 TEST_APP = $(BINDIR)/test_ms5837_app
-TEST_PUBLISH = $(BINDIR)/test_ms5837_publish
 TEST_OWNERLOOP = $(BINDIR)/test_ms5837_ownerloop
 TEST_PUBLISH = $(BINDIR)/test_ms5837_publish
 CAPTURE_APP = $(BINDIR)/ms5837_capture
@@ -33,7 +31,7 @@ all: dirs tests app
 dirs:
 	@mkdir -p $(BUILDDIR) $(BINDIR)
 
-tests: dirs $(TEST_RAW) $(TEST_MATH) $(TEST_BENCH) $(TEST_PROD_MATH) $(TEST_REFERENCE) $(TEST_INIT_MOCK) $(TEST_INIT_LIVE) $(TEST_ACQUISITION_MOCK) $(TEST_ACQUISITION_LIVE) $(TEST_APP) $(TEST_PUBLISH) $(TEST_OWNERLOOP)
+tests: dirs $(TEST_RAW) $(TEST_MATH) $(TEST_BENCH) $(TEST_PROD_MATH) $(TEST_INIT_MOCK) $(TEST_INIT_LIVE) $(TEST_ACQUISITION_MOCK) $(TEST_ACQUISITION_LIVE) $(TEST_APP) $(TEST_PUBLISH) $(TEST_OWNERLOOP)
 
 host-tests: dirs $(TEST_PROD_MATH) $(TEST_INIT_MOCK) $(TEST_ACQUISITION_MOCK) $(TEST_PUBLISH) $(TEST_APP) $(TEST_OWNERLOOP)
 
@@ -67,13 +65,9 @@ $(BUILDDIR)/test_rate_bench.o: $(TESTDIR)/test_rate_bench.c
 $(BINDIR)/test_rate_bench: $(BUILDDIR)/test_rate_bench.o $(RT_OBJ)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-# Step 4A production calculation and surface-reference tests
+# Step 4A production calculation tests
 $(BUILDDIR)/ms5837_math.o: | dirs
 $(BUILDDIR)/ms5837_math.o: $(APPDIR)/ms5837_math.c $(APPDIR)/ms5837_math.h $(APPDIR)/ms5837_contract.h
-	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
-
-$(BUILDDIR)/ms5837_reference.o: | dirs
-$(BUILDDIR)/ms5837_reference.o: $(APPDIR)/ms5837_reference.c $(APPDIR)/ms5837_reference.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BUILDDIR)/test_ms5837_math.o: | dirs
@@ -81,13 +75,6 @@ $(BUILDDIR)/test_ms5837_math.o: $(TESTDIR)/test_ms5837_math.c $(APPDIR)/ms5837_m
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BINDIR)/test_ms5837_math: $(BUILDDIR)/test_ms5837_math.o $(BUILDDIR)/ms5837_math.o
-	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
-
-$(BUILDDIR)/test_ms5837_reference.o: | dirs
-$(BUILDDIR)/test_ms5837_reference.o: $(TESTDIR)/test_ms5837_reference.c $(APPDIR)/ms5837_reference.h $(APPDIR)/ms5837_contract.h
-	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
-
-$(BINDIR)/test_ms5837_reference: $(BUILDDIR)/test_ms5837_reference.o $(BUILDDIR)/ms5837_reference.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 # Step 4B generic HAL, Raspberry Pi I2C backend, and initialization tests
