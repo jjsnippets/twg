@@ -17,13 +17,13 @@
 #define MS5837_RECOVERY_MAX_ATTEMPTS 3U
 #define MS5837_RECOVERY_RETRY_NS UINT64_C(200000000)
 
-/* Step 4C deliberately supports only symmetric pressure/temperature OSR 512. */
+/* The driver deliberately supports only symmetric pressure/temperature OSR 512. */
 #define MS5837_OSR_512 0x02U
 #define MS5837_ACQUISITION_OSR MS5837_OSR_512
 #define MS5837_OSR_512_CONVERSION_NS UINT64_C(1100000)
 
 #if MS5837_ACQUISITION_OSR != MS5837_OSR_512
-#error "Step 4C supports only symmetric MS5837_OSR_512 acquisition"
+#error "The driver supports only symmetric MS5837_OSR_512 acquisition"
 #endif
 
 typedef enum {

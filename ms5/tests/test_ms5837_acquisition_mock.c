@@ -530,6 +530,6 @@ int main(void)
     CHECK(test_recovery_backoff_nonblocking() == 0);
     CHECK(test_shutdown_from_every_state() == 0);
     CHECK(test_recovery_fresh_allowance_per_incident() == 0);
-    puts("PASS: Phase 1 raw contract and bounded recovery");
+    puts("PASS: version-2 contract and bounded recovery");
     return 0;
 }

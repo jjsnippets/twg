@@ -240,6 +240,6 @@ int main(void)
     CHECK(test_crc_failure() == 0);
     CHECK(test_invalid_coefficients() == 0);
     CHECK(test_bad_contract() == 0);
-    puts("PASS: Step 4B mock initialization and cleanup");
+    puts("PASS: mock initialization and cleanup");
     return 0;
 }

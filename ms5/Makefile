@@ -65,7 +65,7 @@ $(BUILDDIR)/test_rate_bench.o: $(TESTDIR)/test_rate_bench.c
 $(BINDIR)/test_rate_bench: $(BUILDDIR)/test_rate_bench.o $(RT_OBJ)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-# Step 4A production calculation tests
+# Production calculation tests
 $(BUILDDIR)/ms5837_math.o: | dirs
 $(BUILDDIR)/ms5837_math.o: $(APPDIR)/ms5837_math.c $(APPDIR)/ms5837_math.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
@@ -77,7 +77,7 @@ $(BUILDDIR)/test_ms5837_math.o: $(TESTDIR)/test_ms5837_math.c $(APPDIR)/ms5837_m
 $(BINDIR)/test_ms5837_math: $(BUILDDIR)/test_ms5837_math.o $(BUILDDIR)/ms5837_math.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-# Step 4B generic HAL, Raspberry Pi I2C backend, and initialization tests
+# Generic HAL, Raspberry Pi I2C backend, and initialization tests
 $(BUILDDIR)/ms5837_driver.o: | dirs
 $(BUILDDIR)/ms5837_driver.o: $(APPDIR)/ms5837_driver.c $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal.h $(APPDIR)/ms5837_math.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
@@ -100,7 +100,7 @@ $(BUILDDIR)/test_ms5837_init_live.o: $(TESTDIR)/test_ms5837_init_live.c $(APPDIR
 $(TEST_INIT_LIVE): $(BUILDDIR)/test_ms5837_init_live.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-# Step 4C fixed symmetric OSR-512 acquisition and recovery tests
+# Fixed symmetric OSR-512 acquisition and recovery tests
 $(BUILDDIR)/test_ms5837_acquisition_mock.o: | dirs
 $(BUILDDIR)/test_ms5837_acquisition_mock.o: $(TESTDIR)/test_ms5837_acquisition_mock.c $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
@@ -115,7 +115,7 @@ $(BUILDDIR)/test_ms5837_acquisition_live.o: $(TESTDIR)/test_ms5837_acquisition_l
 $(TEST_ACQUISITION_LIVE): $(BUILDDIR)/test_ms5837_acquisition_live.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-# Phase 2 pure publisher and 100 Hz gate
+# Pure publisher and 100 Hz gate
 $(BUILDDIR)/ms5837_publish.o: | dirs
 $(BUILDDIR)/ms5837_publish.o: $(APPDIR)/ms5837_publish.c $(APPDIR)/ms5837_publish.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
@@ -127,7 +127,7 @@ $(BUILDDIR)/test_ms5837_publish.o: $(TESTDIR)/test_ms5837_publish.c $(APPDIR)/ms
 $(TEST_PUBLISH): $(BUILDDIR)/test_ms5837_publish.o $(BUILDDIR)/ms5837_publish.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-# Phase 2 reference capture, restricted CLI, and asynchronous CSV logger
+# Reference capture, restricted CLI, and asynchronous CSV logger
 $(BUILDDIR)/ms5837_cli.o: | dirs
 $(BUILDDIR)/ms5837_cli.o: $(APPDIR)/ms5837_cli.c $(APPDIR)/ms5837_cli.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
@@ -150,7 +150,7 @@ $(BUILDDIR)/test_ms5837_app.o: $(TESTDIR)/test_ms5837_app.c $(APPDIR)/ms5837_cli
 $(TEST_APP): $(BUILDDIR)/test_ms5837_app.o $(BUILDDIR)/ms5837_cli.o $(BUILDDIR)/ms5837_logger.o $(BUILDDIR)/ms5837_publish.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
-# Phase 2 capture-owner proof. main.c is compiled into the test through the
+# Capture-owner proof. main.c is compiled into the test through the
 # MS5837_APP_OWNER_TEST seam; no real-time or Linux I2C object is linked.
 $(BUILDDIR)/test_ms5837_ownerloop.o: | dirs
 $(BUILDDIR)/test_ms5837_ownerloop.o: $(TESTDIR)/test_ms5837_ownerloop.c $(APPDIR)/main.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal_rpi.h $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_publish.h $(RT_DIR)/realtime.h $(RT_DIR)/rt_policy.h

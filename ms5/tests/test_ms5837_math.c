@@ -130,6 +130,6 @@ int main(void)
     CHECK(test_boundaries() == 0);
     CHECK(test_depth() == 0);
     CHECK(test_not_ready_sample() == 0);
-    puts("PASS: Step 4A production math contract");
+    puts("PASS: production math contract");
     return 0;
 }
