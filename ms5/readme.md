@@ -56,6 +56,41 @@ whether zeroing succeeds or fails. If zeroing fails, depth stays `NaN`.
 `StartRT` or `RT_SleepUntil`. Startup-only sleeps are whitelisted, and the
 driver and publisher stay free of consumer policy.
 
+## Phase 3 hardware acceptance evidence
+
+Build under test: `4aed8995bdc87175184dcbf8d1cecb067b6cc478`, Raspberry Pi
+(`twg1`), kernel `6.12.68-v8-rt+` (PREEMPT_RT, aarch64), CPU governor
+`ondemand`, run as root via `sudo`. Binary SHA-256 of `bin/ms5837_capture`:
+`58b6ab99e92f5bd8ba47c1793965aaa60d9e9e037cb1740ce105fe4426318b61`.
+
+Captures are retained outside Git. Each run reported zero I2C errors,
+aborted pairs, recoveries, skipped gates, deadline misses, stale rows,
+not-ready rows, and logger drops unless stated otherwise.
+
+| Run | Command | Result |
+|---|---|---|
+| Basic, no zero | `--duration 10` | 1000 rows, depth NaN, baseline invalid (`ms5_capture_20261012_190438.csv`) |
+| Zero success | `--zero --duration 10` | 500 zero rows plus 1000 run rows, 500 valid zero samples (`ms5_capture_20261012_184509.csv`) |
+| Stability | `--zero --duration 60` | 500 zero rows plus 6000 run rows, max loop body 608992 ns (`ms5_capture_20261012_184529.csv`) |
+| SIGINT stop, run phase | `--zero --duration 60`, Ctrl-C | 775 rows drained (`ms5_capture_20261012_184638.csv`) |
+| SIGINT stop, zero phase | `--zero --duration 60`, Ctrl-C | 204 rows drained (`ms5_capture_20261012_184652.csv`) |
+| SIGINT stop, no zero | `--duration 60`, Ctrl-C | 590 rows drained, startup attempt 1/3 failed then succeeded (`ms5_capture_20261012_185249.csv`) |
+| SIGTERM stop | `--zero --duration 60`, `pkill -TERM` | 557 rows drained (`ms5_capture_20261012_184718.csv`) |
+
+Limitations of this evidence:
+
+- The roadmap's runtime-recovery run was not fully recorded. A capture
+  showing a 41-row not-ready period followed by a stopped driver state
+  exists, but its console output and exit status were not retained.
+- Startup retry was observed once (attempt 1 of 3 failed, attempt 2
+  succeeded). The 200 ms spacing was not measured on hardware.
+- `scheduled_ns` is anchored to a monotonic read at the start of each phase,
+  so `actual_ns - scheduled_ns` is a constant phase offset (about -0.17 to
+  -0.6 ms) and not a jitter measurement. `deadline_missed` only flags late rows.
+- With `--zero`, the first run row follows the last zero row after about
+  9 ms rather than 10 ms. This is not a skipped gate.
+- No worst-case latency bound is claimed. Runs used the `ondemand` governor.
+
 ## Final configuration
 
 | Item | Production setting |
