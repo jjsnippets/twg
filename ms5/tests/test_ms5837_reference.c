@@ -24,7 +24,6 @@ static BaroSample_t make_sample(uint64_t sequence, double pressure,
     sample.raw_temperature_d2 = 1U;
     sample.pressure_mbar = pressure;
     sample.temperature_c = 20.0;
-    sample.depth_m = NAN;
     return sample;
 }
 

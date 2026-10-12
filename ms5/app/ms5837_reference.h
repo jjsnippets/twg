@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "app_contract.h"
+#include "ms5837_contract.h"
 
 #define MS5837_ZERO_DURATION_NS UINT64_C(5000000000)
 #define MS5837_ZERO_TRIM_FRACTION 0.10
@@ -36,4 +36,4 @@ bool ms5837_reference_finalize(Ms5837Reference_t *reference);
 bool ms5837_reference_is_valid(const Ms5837Reference_t *reference);
 double ms5837_reference_surface_pressure(const Ms5837Reference_t *reference);
 
-#endif
+#endif /* MS5837_REFERENCE_H */

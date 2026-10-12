@@ -66,22 +66,22 @@ $(BINDIR)/test_rate_bench: $(BUILDDIR)/test_rate_bench.o $(RT_OBJ)
 
 # Step 4A production calculation and surface-reference tests
 $(BUILDDIR)/ms5837_math.o: | dirs
-$(BUILDDIR)/ms5837_math.o: $(APPDIR)/ms5837_math.c $(APPDIR)/ms5837_math.h $(APPDIR)/app_contract.h
+$(BUILDDIR)/ms5837_math.o: $(APPDIR)/ms5837_math.c $(APPDIR)/ms5837_math.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BUILDDIR)/ms5837_reference.o: | dirs
-$(BUILDDIR)/ms5837_reference.o: $(APPDIR)/ms5837_reference.c $(APPDIR)/ms5837_reference.h $(APPDIR)/app_contract.h
+$(BUILDDIR)/ms5837_reference.o: $(APPDIR)/ms5837_reference.c $(APPDIR)/ms5837_reference.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BUILDDIR)/test_ms5837_math.o: | dirs
-$(BUILDDIR)/test_ms5837_math.o: $(TESTDIR)/test_ms5837_math.c $(APPDIR)/ms5837_math.h $(APPDIR)/app_contract.h
+$(BUILDDIR)/test_ms5837_math.o: $(TESTDIR)/test_ms5837_math.c $(APPDIR)/ms5837_math.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BINDIR)/test_ms5837_math: $(BUILDDIR)/test_ms5837_math.o $(BUILDDIR)/ms5837_math.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 $(BUILDDIR)/test_ms5837_reference.o: | dirs
-$(BUILDDIR)/test_ms5837_reference.o: $(TESTDIR)/test_ms5837_reference.c $(APPDIR)/ms5837_reference.h $(APPDIR)/app_contract.h
+$(BUILDDIR)/test_ms5837_reference.o: $(TESTDIR)/test_ms5837_reference.c $(APPDIR)/ms5837_reference.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BINDIR)/test_ms5837_reference: $(BUILDDIR)/test_ms5837_reference.o $(BUILDDIR)/ms5837_reference.o
@@ -112,14 +112,14 @@ $(TEST_INIT_LIVE): $(BUILDDIR)/test_ms5837_init_live.o $(BUILDDIR)/ms5837_driver
 
 # Step 4C fixed symmetric OSR-512 acquisition and recovery tests
 $(BUILDDIR)/test_ms5837_acquisition_mock.o: | dirs
-$(BUILDDIR)/test_ms5837_acquisition_mock.o: $(TESTDIR)/test_ms5837_acquisition_mock.c $(APPDIR)/ms5837_driver.h $(APPDIR)/app_contract.h
+$(BUILDDIR)/test_ms5837_acquisition_mock.o: $(TESTDIR)/test_ms5837_acquisition_mock.c $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(TEST_ACQUISITION_MOCK): $(BUILDDIR)/test_ms5837_acquisition_mock.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_math.o
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 $(BUILDDIR)/test_ms5837_acquisition_live.o: | dirs
-$(BUILDDIR)/test_ms5837_acquisition_live.o: $(TESTDIR)/test_ms5837_acquisition_live.c $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal_rpi.h $(APPDIR)/app_contract.h
+$(BUILDDIR)/test_ms5837_acquisition_live.o: $(TESTDIR)/test_ms5837_acquisition_live.c $(APPDIR)/ms5837_driver.h $(APPDIR)/ms5837_hal_rpi.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(TEST_ACQUISITION_LIVE): $(BUILDDIR)/test_ms5837_acquisition_live.o $(BUILDDIR)/ms5837_driver.o $(BUILDDIR)/ms5837_hal_rpi.o $(BUILDDIR)/ms5837_math.o
@@ -131,7 +131,7 @@ $(BUILDDIR)/ms5837_cli.o: $(APPDIR)/ms5837_cli.c $(APPDIR)/ms5837_cli.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BUILDDIR)/ms5837_logger.o: | dirs
-$(BUILDDIR)/ms5837_logger.o: $(APPDIR)/ms5837_logger.c $(APPDIR)/ms5837_logger.h $(APPDIR)/app_contract.h
+$(BUILDDIR)/ms5837_logger.o: $(APPDIR)/ms5837_logger.c $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(BUILDDIR)/ms5837_main.o: | dirs
@@ -142,7 +142,7 @@ $(CAPTURE_APP): $(BUILDDIR)/ms5837_main.o $(BUILDDIR)/ms5837_cli.o $(BUILDDIR)/m
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS) -lm
 
 $(BUILDDIR)/test_ms5837_app.o: | dirs
-$(BUILDDIR)/test_ms5837_app.o: $(TESTDIR)/test_ms5837_app.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_logger.h $(APPDIR)/app_contract.h
+$(BUILDDIR)/test_ms5837_app.o: $(TESTDIR)/test_ms5837_app.c $(APPDIR)/ms5837_cli.h $(APPDIR)/ms5837_logger.h $(APPDIR)/ms5837_contract.h
 	$(CC) $(CFLAGS) -I$(APPDIR) -c $< -o $@
 
 $(TEST_APP): $(BUILDDIR)/test_ms5837_app.o $(BUILDDIR)/ms5837_cli.o $(BUILDDIR)/ms5837_logger.o

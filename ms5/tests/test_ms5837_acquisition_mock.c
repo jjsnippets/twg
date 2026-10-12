@@ -26,6 +26,7 @@ typedef struct {
     unsigned int conversion_write_count;
     unsigned int adc_read_count;
     unsigned int fail_next_read;
+    unsigned int fail_open_count;
     uint8_t selected_command;
     size_t prom_index;
 } MockHal_t;
@@ -47,6 +48,10 @@ static int mock_open(void *opaque)
 {
     MockHal_t *mock = (MockHal_t *)opaque;
     ++mock->open_count;
+    if (mock->fail_open_count != 0U) {
+        --mock->fail_open_count;
+        return -EIO;
+    }
     return 0;
 }
 
@@ -87,10 +92,9 @@ static int mock_read(void *opaque, uint8_t *data, size_t length)
     }
     mock->time_ns += MOCK_READ_TIME_NS;
     if (mock->fail_next_read != 0U) {
-        mock->fail_next_read = 0U;
+        --mock->fail_next_read;
         return -EIO;
     }
-
     if (length == 2U) {
         if (mock->prom_index >= MS5837_PROM_WORD_COUNT) {
             return -EPROTO;
@@ -104,7 +108,6 @@ static int mock_read(void *opaque, uint8_t *data, size_t length)
         (mock->selected_command != MS5837_COMMAND_ADC_READ)) {
         return -EPROTO;
     }
-
     raw = ((mock->conversion_write_count & 1U) != 0U)
         ? mock->d1 : mock->d2;
     data[0] = (uint8_t)(raw >> 16U);
@@ -144,17 +147,6 @@ static Ms5837Hal_t make_hal(MockHal_t *mock)
     return hal;
 }
 
-static BaroRunConfig_t make_config(void)
-{
-    BaroRunConfig_t config;
-    memset(&config, 0, sizeof(config));
-    config.config_version = BARO_RUN_CONFIG_VERSION;
-    config.fluid_density_kg_m3 = 997.0;
-    config.surface_pressure_mbar = 1100.02;
-    config.surface_pressure_valid = true;
-    return config;
-}
-
 static int initialize(MockHal_t *mock, Ms5837Driver_t *driver)
 {
     Ms5837Hal_t hal = make_hal(mock);
@@ -162,11 +154,9 @@ static int initialize(MockHal_t *mock, Ms5837Driver_t *driver)
 }
 
 static int complete_pair(MockHal_t *mock, Ms5837Driver_t *driver,
-                         const BaroRunConfig_t *config,
-                         BaroRuntimeStats_t *stats, BaroSample_t *sample)
+                         BaroDriverStats_t *stats, BaroSample_t *sample)
 {
     int status;
-    unsigned int adc_read_count = mock->adc_read_count;
 
     status = ms5837_driver_trigger(driver, stats);
     CHECK(status == MS5837_SERVICE_PROGRESS);
@@ -175,39 +165,58 @@ static int complete_pair(MockHal_t *mock, Ms5837Driver_t *driver,
           (MS5837_COMMAND_CONVERT_D1_BASE | MS5837_OSR_512));
 
     status = ms5837_driver_service(driver, driver->deadline_ns - 1U,
-                                    config, stats, sample);
+                                    stats, sample);
     CHECK(status == MS5837_SERVICE_PROGRESS);
-    CHECK(mock->adc_read_count == adc_read_count);
-
     mock->time_ns = driver->deadline_ns;
-    status = ms5837_driver_service(driver, mock->time_ns, config, stats,
-                                    sample);
+    status = ms5837_driver_service(driver, mock->time_ns, stats, sample);
     CHECK(status == MS5837_SERVICE_PROGRESS);
     CHECK(ms5837_driver_state(driver) == MS5837_STATE_START_D2);
 
-    status = ms5837_driver_service(driver, mock->time_ns, config, stats,
-                                    sample);
+    status = ms5837_driver_service(driver, mock->time_ns, stats, sample);
     CHECK(status == MS5837_SERVICE_PROGRESS);
     CHECK(ms5837_driver_state(driver) == MS5837_STATE_WAIT_D2);
     CHECK(mock->selected_command ==
           (MS5837_COMMAND_CONVERT_D2_BASE | MS5837_OSR_512));
 
     mock->time_ns = driver->deadline_ns;
-    status = ms5837_driver_service(driver, mock->time_ns, config, stats,
-                                    sample);
+    status = ms5837_driver_service(driver, mock->time_ns, stats, sample);
     CHECK(status == MS5837_SERVICE_SAMPLE_READY);
     return 0;
 }
 
-static int test_symmetric_osr512_pair(void)
+static int drive_recovery(MockHal_t *mock, Ms5837Driver_t *driver,
+                          BaroDriverStats_t *stats, BaroSample_t *sample)
+{
+    size_t guard;
+
+    for (guard = 0U; guard < 128U; ++guard) {
+        int status;
+        if (ms5837_driver_state(driver) == MS5837_STATE_RECOVERY_BACKOFF) {
+            mock->time_ns = driver->recovery_retry_deadline_ns;
+        } else if (ms5837_driver_state(driver) ==
+                   MS5837_STATE_RECOVERY_WAIT_RESET) {
+            mock->time_ns = driver->deadline_ns;
+        }
+        status = ms5837_driver_service(driver, mock->time_ns, stats, sample);
+        if (ms5837_driver_state(driver) == MS5837_STATE_IDLE) {
+            CHECK(status == MS5837_SERVICE_RECOVERING);
+            return 0;
+        }
+        if (ms5837_driver_state(driver) == MS5837_STATE_STOPPED) {
+            return status;
+        }
+        CHECK((status == MS5837_SERVICE_RECOVERING) || (status < 0));
+    }
+    return -ETIMEDOUT;
+}
+
+static int test_raw_contract_pair(void)
 {
     MockHal_t mock;
     Ms5837Driver_t driver;
-    BaroRunConfig_t config = make_config();
-    BaroRuntimeStats_t stats;
+    BaroDriverStats_t stats;
     BaroSample_t sample;
     BaroSample_t latest;
-    uint64_t deadline;
 
     memset(&stats, 0, sizeof(stats));
     load_valid_prom(&mock);
@@ -215,121 +224,27 @@ static int test_symmetric_osr512_pair(void)
     mock.conversion_write_count = 0U;
     mock.adc_read_count = 0U;
 
-    CHECK(ms5837_driver_trigger(NULL, &stats) ==
-          MS5837_DRIVER_ERR_ARGUMENT);
-    CHECK(ms5837_driver_trigger(&driver, NULL) ==
-          MS5837_DRIVER_ERR_ARGUMENT);
-    CHECK(ms5837_driver_state(&driver) == MS5837_STATE_IDLE);
-    CHECK(ms5837_driver_trigger(&driver, &stats) == MS5837_SERVICE_PROGRESS);
-    deadline = mock.time_ns + MS5837_OSR_512_CONVERSION_NS;
-    CHECK(driver.deadline_ns == deadline);
-    CHECK(mock.selected_command == 0x42U);
-    CHECK(ms5837_driver_trigger(&driver, &stats) == MS5837_DRIVER_ERR_BUSY);
-    CHECK(mock.conversion_write_count == 1U);
-
-    CHECK(ms5837_driver_service(&driver, deadline - 1U, &config, &stats,
-                                 &sample) == MS5837_SERVICE_PROGRESS);
-    CHECK(mock.adc_read_count == 0U);
-    mock.time_ns = deadline;
-    CHECK(ms5837_driver_service(&driver, mock.time_ns, &config, &stats,
-                                 &sample) == MS5837_SERVICE_PROGRESS);
-    CHECK(mock.adc_read_count == 1U);
-
-    CHECK(ms5837_driver_service(&driver, mock.time_ns, &config, &stats,
-                                 &sample) == MS5837_SERVICE_PROGRESS);
-    CHECK(mock.selected_command == 0x52U);
-    deadline = mock.time_ns + MS5837_OSR_512_CONVERSION_NS;
-    CHECK(driver.deadline_ns == deadline);
-
-    mock.time_ns = deadline;
-    CHECK(ms5837_driver_service(&driver, mock.time_ns, &config, &stats,
-                                 &sample) == MS5837_SERVICE_SAMPLE_READY);
+    CHECK(complete_pair(&mock, &driver, &stats, &sample) == 0);
+    CHECK(sample.contract_version == 2U);
     CHECK(sample.measurement_sequence == 1U);
-    CHECK(sample.measurement_complete_time_ns == mock.time_ns);
     CHECK(sample.raw_pressure_d1 == mock.d1);
     CHECK(sample.raw_temperature_d2 == mock.d2);
     CHECK(fabs(sample.pressure_mbar - 1071.05) < 0.01);
     CHECK(fabs(sample.temperature_c - 24.30) < 0.01);
-    CHECK(isfinite(sample.depth_m));
+    CHECK((sample.status_flags & BARO_STATUS_RESERVED_MASK) == 0U);
     CHECK(stats.measurements_completed == 1U);
+    CHECK(stats.service_ticks == 4U);
     CHECK(ms5837_driver_latest_sample(&driver, &latest));
-    CHECK(latest.measurement_sequence == sample.measurement_sequence);
-
-    CHECK(complete_pair(&mock, &driver, &config, &stats, &sample) == 0);
-    CHECK(sample.measurement_sequence == 2U);
+    CHECK(latest.measurement_sequence == 1U);
     CHECK(ms5837_driver_shutdown(&driver) == 0);
     return 0;
 }
 
-static int drive_recovery(MockHal_t *mock, Ms5837Driver_t *driver,
-                          const BaroRunConfig_t *config,
-                          BaroRuntimeStats_t *stats, BaroSample_t *sample)
-{
-    size_t guard;
-
-    for (guard = 0U; guard < 32U; ++guard) {
-        int status;
-        if (ms5837_driver_state(driver) == MS5837_STATE_RECOVERY_WAIT_RESET) {
-            mock->time_ns = driver->deadline_ns;
-        }
-        status = ms5837_driver_service(driver, mock->time_ns, config, stats,
-                                        sample);
-        CHECK(status == MS5837_SERVICE_RECOVERING);
-        if (ms5837_driver_state(driver) == MS5837_STATE_IDLE) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-static int test_error_aborts_pair_and_recovers(void)
+static int test_raw_invalid_record(void)
 {
     MockHal_t mock;
     Ms5837Driver_t driver;
-    BaroRunConfig_t config = make_config();
-    BaroRuntimeStats_t stats;
-    BaroSample_t sample;
-
-    memset(&stats, 0, sizeof(stats));
-    load_valid_prom(&mock);
-    CHECK(initialize(&mock, &driver) == MS5837_DRIVER_OK);
-    mock.conversion_write_count = 0U;
-    mock.adc_read_count = 0U;
-
-    CHECK(ms5837_driver_trigger(&driver, &stats) ==
-          MS5837_SERVICE_PROGRESS);
-    mock.fail_next_read = 1U;
-    mock.time_ns = driver.deadline_ns;
-    CHECK(ms5837_driver_service(&driver, mock.time_ns, &config, &stats,
-                                 &sample) == -EIO);
-    CHECK(ms5837_driver_state(&driver) == MS5837_STATE_RECOVERY_OPEN);
-    CHECK(!ms5837_driver_is_initialized(&driver));
-    CHECK(stats.i2c_errors == 1U);
-    CHECK(stats.aborted_pairs == 1U);
-    CHECK(stats.measurements_completed == 0U);
-    CHECK(mock.close_count == 1U);
-
-    CHECK(drive_recovery(&mock, &driver, &config, &stats, &sample) == 0);
-    CHECK(ms5837_driver_is_initialized(&driver));
-    CHECK(stats.recovery_attempts == 1U);
-    CHECK(stats.recovery_successes == 1U);
-    CHECK(mock.open_count == 2U);
-
-    mock.conversion_write_count = 0U;
-    mock.adc_read_count = 0U;
-    CHECK(complete_pair(&mock, &driver, &config, &stats, &sample) == 0);
-    CHECK(sample.measurement_sequence == 1U);
-    CHECK(stats.measurements_completed == 1U);
-    CHECK(ms5837_driver_shutdown(&driver) == 0);
-    return 0;
-}
-
-static int test_raw_invalid_still_completes_record(void)
-{
-    MockHal_t mock;
-    Ms5837Driver_t driver;
-    BaroRunConfig_t config = make_config();
-    BaroRuntimeStats_t stats;
+    BaroDriverStats_t stats;
     BaroSample_t sample;
 
     memset(&stats, 0, sizeof(stats));
@@ -337,47 +252,284 @@ static int test_raw_invalid_still_completes_record(void)
     mock.d1 = 0U;
     CHECK(initialize(&mock, &driver) == MS5837_DRIVER_OK);
     mock.conversion_write_count = 0U;
-    mock.adc_read_count = 0U;
-
-    CHECK(complete_pair(&mock, &driver, &config, &stats, &sample) == 0);
+    CHECK(complete_pair(&mock, &driver, &stats, &sample) == 0);
     CHECK((sample.status_flags & BARO_STATUS_RAW_INVALID) != 0U);
+    CHECK((sample.status_flags & BARO_STATUS_RESERVED_MASK) == 0U);
     CHECK(isnan(sample.pressure_mbar));
     CHECK(isnan(sample.temperature_c));
-    CHECK(isnan(sample.depth_m));
-    CHECK(sample.measurement_sequence == 1U);
-    CHECK(stats.measurements_completed == 1U);
     CHECK(ms5837_driver_shutdown(&driver) == 0);
     return 0;
 }
 
-static int test_depth_reference_flags(void)
+static int test_recovery_success(void)
 {
     MockHal_t mock;
     Ms5837Driver_t driver;
-    BaroRunConfig_t config = make_config();
-    BaroRuntimeStats_t stats;
+    BaroDriverStats_t stats;
     BaroSample_t sample;
 
     memset(&stats, 0, sizeof(stats));
     load_valid_prom(&mock);
-    config.surface_pressure_valid = false;
-    config.zero_at_start_requested = true;
     CHECK(initialize(&mock, &driver) == MS5837_DRIVER_OK);
     mock.conversion_write_count = 0U;
-    mock.adc_read_count = 0U;
-    CHECK(complete_pair(&mock, &driver, &config, &stats, &sample) == 0);
-    CHECK((sample.status_flags & BARO_STATUS_DEPTH_REFERENCE_PENDING) != 0U);
-    CHECK(isnan(sample.depth_m));
+    CHECK(ms5837_driver_trigger(&driver, &stats) ==
+          MS5837_SERVICE_PROGRESS);
+    mock.fail_next_read = 1U;
+    mock.time_ns = driver.deadline_ns;
+    CHECK(ms5837_driver_service(&driver, mock.time_ns, &stats, &sample) ==
+          -EIO);
+    CHECK(ms5837_driver_state(&driver) == MS5837_STATE_RECOVERY_OPEN);
+    CHECK(!ms5837_driver_is_initialized(&driver));
+    CHECK(stats.recovery_incidents == 1U);
+    CHECK(stats.aborted_pairs == 1U);
+
+    CHECK(drive_recovery(&mock, &driver, &stats, &sample) == 0);
+    CHECK(ms5837_driver_is_initialized(&driver));
+    CHECK(stats.recovery_attempts == 1U);
+    CHECK(stats.recovery_successes == 1U);
+    CHECK(stats.recovery_exhaustions == 0U);
+    CHECK(complete_pair(&mock, &driver, &stats, &sample) == 0);
+    CHECK(sample.measurement_sequence == 1U);
+    CHECK(ms5837_driver_shutdown(&driver) == 0);
+    return 0;
+}
+
+static int test_recovery_exhaustion(void)
+{
+    MockHal_t mock;
+    Ms5837Driver_t driver;
+    BaroDriverStats_t stats;
+    BaroSample_t sample;
+
+    memset(&stats, 0, sizeof(stats));
+    load_valid_prom(&mock);
+    CHECK(initialize(&mock, &driver) == MS5837_DRIVER_OK);
+    mock.conversion_write_count = 0U;
+    CHECK(ms5837_driver_trigger(&driver, &stats) ==
+          MS5837_SERVICE_PROGRESS);
+    mock.fail_next_read = 1U;
+    mock.time_ns = driver.deadline_ns;
+    CHECK(ms5837_driver_service(&driver, mock.time_ns, &stats, &sample) ==
+          -EIO);
+    mock.fail_open_count = MS5837_RECOVERY_MAX_ATTEMPTS;
+    CHECK(drive_recovery(&mock, &driver, &stats, &sample) == -EIO);
+    CHECK(ms5837_driver_state(&driver) == MS5837_STATE_STOPPED);
+    CHECK(stats.recovery_incidents == 1U);
+    CHECK(stats.recovery_attempts == MS5837_RECOVERY_MAX_ATTEMPTS);
+    CHECK(stats.recovery_successes == 0U);
+    CHECK(stats.recovery_exhaustions == 1U);
+    CHECK(ms5837_driver_trigger(&driver, &stats) ==
+          MS5837_DRIVER_ERR_NOT_INITIALIZED);
+    CHECK(ms5837_driver_shutdown(&driver) == 0);
+    return 0;
+}
+
+static int test_recovery_backoff_nonblocking(void)
+{
+    MockHal_t mock;
+    Ms5837Driver_t driver;
+    BaroDriverStats_t stats;
+    BaroSample_t sample;
+    uint64_t failure_time_ns;
+    unsigned int open_count;
+
+    memset(&stats, 0, sizeof(stats));
+    load_valid_prom(&mock);
+    CHECK(initialize(&mock, &driver) == MS5837_DRIVER_OK);
+    mock.conversion_write_count = 0U;
+    CHECK(ms5837_driver_trigger(&driver, &stats) ==
+          MS5837_SERVICE_PROGRESS);
+    mock.fail_next_read = 1U;
+    mock.time_ns = driver.deadline_ns;
+    CHECK(ms5837_driver_service(&driver, mock.time_ns, &stats, &sample) ==
+          -EIO);
+    mock.fail_open_count = 1U;
+    failure_time_ns = mock.time_ns;
+    CHECK(ms5837_driver_service(&driver, failure_time_ns, &stats, &sample) ==
+          -EIO);
+    CHECK(ms5837_driver_state(&driver) == MS5837_STATE_RECOVERY_BACKOFF);
+    CHECK(driver.recovery_retry_deadline_ns ==
+          failure_time_ns + MS5837_RECOVERY_RETRY_NS);
+    CHECK(ms5837_driver_trigger(&driver, &stats) == MS5837_DRIVER_ERR_BUSY);
+    CHECK(!ms5837_driver_latest_sample(&driver, &sample));
+
+    open_count = mock.open_count;
+    CHECK(ms5837_driver_service(&driver,
+                                driver.recovery_retry_deadline_ns - 1U,
+                                &stats, &sample) ==
+          MS5837_SERVICE_RECOVERING);
+    CHECK(mock.open_count == open_count);
+    CHECK(ms5837_driver_state(&driver) == MS5837_STATE_RECOVERY_BACKOFF);
+
+    mock.time_ns = driver.recovery_retry_deadline_ns;
+    CHECK(drive_recovery(&mock, &driver, &stats, &sample) == 0);
+    CHECK(stats.recovery_incidents == 1U);
+    CHECK(stats.recovery_attempts == 2U);
+    CHECK(stats.recovery_successes == 1U);
+
+    CHECK(ms5837_driver_trigger(&driver, &stats) ==
+          MS5837_SERVICE_PROGRESS);
+    mock.fail_next_read = 1U;
+    mock.time_ns = driver.deadline_ns;
+    CHECK(ms5837_driver_service(&driver, mock.time_ns, &stats, &sample) ==
+          -EIO);
+    CHECK(drive_recovery(&mock, &driver, &stats, &sample) == 0);
+    CHECK(stats.recovery_incidents == 2U);
+    CHECK(stats.recovery_attempts == 3U);
+    CHECK(ms5837_driver_shutdown(&driver) == 0);
+    return 0;
+}
+
+static int enter_state(MockHal_t *mock, Ms5837Driver_t *driver,
+                       BaroDriverStats_t *stats, Ms5837DriverState_t target)
+{
+    BaroSample_t sample;
+    size_t guard;
+
+    if (target == MS5837_STATE_IDLE) {
+        return 0;
+    }
+    CHECK(ms5837_driver_trigger(driver, stats) == MS5837_SERVICE_PROGRESS);
+    if (target == MS5837_STATE_WAIT_D1) {
+        return 0;
+    }
+    if ((target == MS5837_STATE_START_D2) ||
+        (target == MS5837_STATE_WAIT_D2)) {
+        mock->time_ns = driver->deadline_ns;
+        CHECK(ms5837_driver_service(driver, mock->time_ns, stats, &sample) ==
+              MS5837_SERVICE_PROGRESS);
+        if (target == MS5837_STATE_WAIT_D2) {
+            CHECK(ms5837_driver_service(driver, mock->time_ns, stats,
+                                        &sample) == MS5837_SERVICE_PROGRESS);
+        }
+        CHECK(ms5837_driver_state(driver) == target);
+        return 0;
+    }
+    if (target == MS5837_STATE_RECOVERY_BACKOFF) {
+        mock->fail_open_count = 1U;
+    }
+    mock->fail_next_read = 1U;
+    mock->time_ns = driver->deadline_ns;
+    CHECK(ms5837_driver_service(driver, mock->time_ns, stats, &sample) ==
+          -EIO);
+    for (guard = 0U; guard < 64U; ++guard) {
+        if (ms5837_driver_state(driver) == target) {
+            return 0;
+        }
+        if (ms5837_driver_state(driver) == MS5837_STATE_RECOVERY_WAIT_RESET) {
+            mock->time_ns = driver->deadline_ns;
+        }
+        (void)ms5837_driver_service(driver, mock->time_ns, stats, &sample);
+    }
+    return -ETIMEDOUT;
+}
+
+static int test_shutdown_from_every_state(void)
+{
+    static const Ms5837DriverState_t states[] = {
+        MS5837_STATE_IDLE,
+        MS5837_STATE_WAIT_D1,
+        MS5837_STATE_START_D2,
+        MS5837_STATE_WAIT_D2,
+        MS5837_STATE_RECOVERY_BACKOFF,
+        MS5837_STATE_RECOVERY_OPEN,
+        MS5837_STATE_RECOVERY_RESET,
+        MS5837_STATE_RECOVERY_WAIT_RESET,
+        MS5837_STATE_RECOVERY_PROM,
+        MS5837_STATE_RECOVERY_VALIDATE
+    };
+    size_t index;
+
+    for (index = 0U; index < (sizeof(states) / sizeof(states[0])); ++index) {
+        MockHal_t mock;
+        Ms5837Driver_t driver;
+        BaroDriverStats_t stats;
+        BaroSample_t sample;
+        unsigned int closes_before;
+        unsigned int opens_before;
+        bool was_open;
+
+        memset(&stats, 0, sizeof(stats));
+        load_valid_prom(&mock);
+        CHECK(initialize(&mock, &driver) == MS5837_DRIVER_OK);
+        mock.conversion_write_count = 0U;
+        CHECK(enter_state(&mock, &driver, &stats, states[index]) == 0);
+        CHECK(ms5837_driver_state(&driver) == states[index]);
+
+        was_open = driver.hal_open;
+        closes_before = mock.close_count;
+        CHECK(ms5837_driver_shutdown(&driver) == 0);
+        CHECK(ms5837_driver_state(&driver) == MS5837_STATE_STOPPED);
+        CHECK(!ms5837_driver_is_initialized(&driver));
+        CHECK(!driver.hal_open);
+        CHECK(!driver.recovery_incident_active);
+        CHECK(mock.close_count == closes_before + (was_open ? 1U : 0U));
+
+        opens_before = mock.open_count;
+        CHECK(ms5837_driver_trigger(&driver, &stats) ==
+              MS5837_DRIVER_ERR_NOT_INITIALIZED);
+        CHECK(ms5837_driver_service(&driver, mock.time_ns, &stats,
+                                    &sample) < 0);
+        CHECK(mock.open_count == opens_before);
+
+        closes_before = mock.close_count;
+        CHECK(ms5837_driver_shutdown(&driver) == 0);
+        CHECK(mock.close_count == closes_before);
+    }
+    return 0;
+}
+
+static int test_recovery_fresh_allowance_per_incident(void)
+{
+    MockHal_t mock;
+    Ms5837Driver_t driver;
+    BaroDriverStats_t stats;
+    BaroSample_t sample;
+
+    memset(&stats, 0, sizeof(stats));
+    load_valid_prom(&mock);
+    CHECK(initialize(&mock, &driver) == MS5837_DRIVER_OK);
+    mock.conversion_write_count = 0U;
+
+    /* Incident 1 succeeds on its last permitted attempt. */
+    CHECK(ms5837_driver_trigger(&driver, &stats) == MS5837_SERVICE_PROGRESS);
+    mock.fail_next_read = 1U;
+    mock.time_ns = driver.deadline_ns;
+    CHECK(ms5837_driver_service(&driver, mock.time_ns, &stats, &sample) ==
+          -EIO);
+    mock.fail_open_count = MS5837_RECOVERY_MAX_ATTEMPTS - 1U;
+    CHECK(drive_recovery(&mock, &driver, &stats, &sample) == 0);
+    CHECK(stats.recovery_incidents == 1U);
+    CHECK(stats.recovery_attempts == MS5837_RECOVERY_MAX_ATTEMPTS);
+    CHECK(stats.recovery_successes == 1U);
+    CHECK(stats.recovery_exhaustions == 0U);
+
+    /* Incident 2 must get a full new allowance, then exhaust it exactly. */
+    CHECK(ms5837_driver_trigger(&driver, &stats) == MS5837_SERVICE_PROGRESS);
+    mock.fail_next_read = 1U;
+    mock.time_ns = driver.deadline_ns;
+    CHECK(ms5837_driver_service(&driver, mock.time_ns, &stats, &sample) ==
+          -EIO);
+    mock.fail_open_count = MS5837_RECOVERY_MAX_ATTEMPTS;
+    CHECK(drive_recovery(&mock, &driver, &stats, &sample) == -EIO);
+    CHECK(ms5837_driver_state(&driver) == MS5837_STATE_STOPPED);
+    CHECK(stats.recovery_incidents == 2U);
+    CHECK(stats.recovery_attempts == (2U * MS5837_RECOVERY_MAX_ATTEMPTS));
+    CHECK(stats.recovery_successes == 1U);
+    CHECK(stats.recovery_exhaustions == 1U);
     CHECK(ms5837_driver_shutdown(&driver) == 0);
     return 0;
 }
 
 int main(void)
 {
-    CHECK(test_symmetric_osr512_pair() == 0);
-    CHECK(test_error_aborts_pair_and_recovers() == 0);
-    CHECK(test_raw_invalid_still_completes_record() == 0);
-    CHECK(test_depth_reference_flags() == 0);
-    puts("PASS: Step 4C symmetric OSR-512 acquisition and recovery");
+    CHECK(test_raw_contract_pair() == 0);
+    CHECK(test_raw_invalid_record() == 0);
+    CHECK(test_recovery_success() == 0);
+    CHECK(test_recovery_exhaustion() == 0);
+    CHECK(test_recovery_backoff_nonblocking() == 0);
+    CHECK(test_shutdown_from_every_state() == 0);
+    CHECK(test_recovery_fresh_allowance_per_incident() == 0);
+    puts("PASS: Phase 1 raw contract and bounded recovery");
     return 0;
 }

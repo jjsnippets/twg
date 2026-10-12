@@ -96,10 +96,9 @@ static BaroLogRecord_t make_record(uint64_t sequence)
         ? BARO_CAPTURE_PHASE_ZERO : BARO_CAPTURE_PHASE_RUN;
     record.sample_ready = sequence != 1U;
     record.sample_stale = false;
-    record.config.config_version = BARO_RUN_CONFIG_VERSION;
-    record.config.fluid_density_kg_m3 = 1000.0;
-    record.config.surface_pressure_mbar = sequence == 1U ? NAN : 1000.25;
-    record.config.surface_pressure_valid = sequence != 1U;
+    record.fluid_density_kg_m3 = 1000.0;
+    record.surface_pressure_mbar = sequence == 1U ? NAN : 1000.25;
+    record.surface_pressure_valid = sequence != 1U;
     record.sample.contract_version = BARO_SAMPLE_CONTRACT_VERSION;
     record.sample.status_flags = sequence == 1U
         ? BARO_STATUS_NOT_READY : BARO_STATUS_NONE;
@@ -109,7 +108,7 @@ static BaroLogRecord_t make_record(uint64_t sequence)
     record.sample.raw_temperature_d2 = sequence == 1U ? 0U : 8077636U;
     record.sample.pressure_mbar = sequence == 1U ? NAN : 1000.25;
     record.sample.temperature_c = sequence == 1U ? NAN : 20.0;
-    record.sample.depth_m = sequence == 1U ? NAN : -0.001;
+    record.depth_m = sequence == 1U ? NAN : -0.001;
     return record;
 }
 

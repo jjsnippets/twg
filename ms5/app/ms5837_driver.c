@@ -42,8 +42,23 @@ static int fail_and_close(Ms5837Driver_t *driver, int error)
     return error;
 }
 
+static void record_error(Ms5837Driver_t *driver, BaroDriverStats_t *stats,
+                         int error)
+{
+    driver->last_error = error;
+    stats->last_error = error;
+}
+
+static void close_hal(Ms5837Driver_t *driver)
+{
+    if (driver->hal_open) {
+        (void)driver->hal.close(driver->hal.context);
+        driver->hal_open = false;
+    }
+}
+
 static int enter_recovery(Ms5837Driver_t *driver, int error,
-                          BaroRuntimeStats_t *stats, bool transport_error)
+                          BaroDriverStats_t *stats, bool transport_error)
 {
     if (transport_error) {
         ++stats->i2c_errors;
@@ -52,16 +67,42 @@ static int enter_recovery(Ms5837Driver_t *driver, int error,
         ++stats->aborted_pairs;
     }
     driver->pair_in_progress = false;
-
-    if (driver->hal_open) {
-        (void)driver->hal.close(driver->hal.context);
-        driver->hal_open = false;
-    }
+    driver->has_latest_sample = false;
+    close_hal(driver);
     driver->initialized = false;
     driver->recovery_prom_index = 0U;
     memset(&driver->recovery_prom, 0, sizeof(driver->recovery_prom));
+    if (!driver->recovery_incident_active) {
+        driver->recovery_incident_active = true;
+        driver->recovery_attempts_in_incident = 0U;
+        ++stats->recovery_incidents;
+    }
     driver->state = MS5837_STATE_RECOVERY_OPEN;
-    driver->last_error = error;
+    record_error(driver, stats, error);
+    return error;
+}
+
+/* A failed attempt either arms the nonblocking retry gap or ends the incident. */
+static int fail_recovery_attempt(Ms5837Driver_t *driver, int error,
+                                 BaroDriverStats_t *stats,
+                                 bool transport_error, uint64_t now_ns)
+{
+    if (transport_error) {
+        ++stats->i2c_errors;
+    }
+    close_hal(driver);
+    driver->initialized = false;
+    driver->has_latest_sample = false;
+    record_error(driver, stats, error);
+    if (driver->recovery_attempts_in_incident >=
+        MS5837_RECOVERY_MAX_ATTEMPTS) {
+        ++stats->recovery_exhaustions;
+        driver->recovery_incident_active = false;
+        driver->state = MS5837_STATE_STOPPED;
+        return error;
+    }
+    driver->recovery_retry_deadline_ns = now_ns + MS5837_RECOVERY_RETRY_NS;
+    driver->state = MS5837_STATE_RECOVERY_BACKOFF;
     return error;
 }
 
@@ -90,33 +131,9 @@ static int read_adc(Ms5837Driver_t *driver, uint32_t *value)
     return 0;
 }
 
-static void set_depth(BaroSample_t *sample, const BaroRunConfig_t *config)
-{
-    if ((sample->status_flags & (uint32_t)(BARO_STATUS_RAW_INVALID |
-                                           BARO_STATUS_PRESSURE_INVALID)) != 0U) {
-        sample->depth_m = NAN;
-        return;
-    }
-    if (!config->surface_pressure_valid) {
-        sample->depth_m = NAN;
-        sample->status_flags |= config->zero_at_start_requested
-            ? (uint32_t)BARO_STATUS_DEPTH_REFERENCE_PENDING
-            : (uint32_t)BARO_STATUS_DEPTH_REFERENCE_INVALID;
-        return;
-    }
-
-    sample->depth_m = ms5837_depth_from_reference(
-        sample->pressure_mbar, config->surface_pressure_mbar,
-        config->fluid_density_kg_m3);
-    if (!isfinite(sample->depth_m)) {
-        sample->status_flags |= BARO_STATUS_DEPTH_REFERENCE_INVALID;
-    }
-}
-
 static void build_sample(Ms5837Driver_t *driver, uint32_t raw_d2,
                          uint64_t complete_time_ns,
-                         const BaroRunConfig_t *config,
-                         BaroRuntimeStats_t *stats,
+                         BaroDriverStats_t *stats,
                          BaroSample_t *sample)
 {
     Ms5837Compensated_t compensated;
@@ -130,7 +147,6 @@ static void build_sample(Ms5837Driver_t *driver, uint32_t raw_d2,
     sample->raw_temperature_d2 = raw_d2;
     sample->pressure_mbar = NAN;
     sample->temperature_c = NAN;
-    sample->depth_m = NAN;
 
     math_status = ms5837_compensate(&driver->prom,
                                     driver->raw_pressure_d1,
@@ -143,7 +159,6 @@ static void build_sample(Ms5837Driver_t *driver, uint32_t raw_d2,
         sample->status_flags = ms5837_classify_measurement(
             sample->pressure_mbar, sample->temperature_c);
     }
-    set_depth(sample, config);
 
     ++stats->measurements_completed;
     if ((sample->status_flags & BARO_STATUS_PRESSURE_EXTENDED) != 0U) {
@@ -161,7 +176,7 @@ static void build_sample(Ms5837Driver_t *driver, uint32_t raw_d2,
 
 static int start_conversion(Ms5837Driver_t *driver, uint8_t command,
                             Ms5837DriverState_t wait_state,
-                            BaroRuntimeStats_t *stats)
+                            BaroDriverStats_t *stats)
 {
     uint64_t command_complete_ns;
     int status;
@@ -181,7 +196,7 @@ static int start_conversion(Ms5837Driver_t *driver, uint8_t command,
 }
 
 static int service_recovery(Ms5837Driver_t *driver, uint64_t now_ns,
-                            BaroRuntimeStats_t *stats)
+                            BaroDriverStats_t *stats)
 {
     uint8_t command;
     uint8_t response[2];
@@ -189,13 +204,18 @@ static int service_recovery(Ms5837Driver_t *driver, uint64_t now_ns,
     int status;
 
     switch (driver->state) {
+    case MS5837_STATE_RECOVERY_BACKOFF:
+        if (now_ns >= driver->recovery_retry_deadline_ns) {
+            driver->state = MS5837_STATE_RECOVERY_OPEN;
+        }
+        return MS5837_SERVICE_RECOVERING;
+
     case MS5837_STATE_RECOVERY_OPEN:
         ++stats->recovery_attempts;
+        ++driver->recovery_attempts_in_incident;
         status = driver->hal.open(driver->hal.context);
         if (status < 0) {
-            driver->last_error = status;
-            ++stats->i2c_errors;
-            return status;
+            return fail_recovery_attempt(driver, status, stats, true, now_ns);
         }
         driver->hal_open = true;
         driver->state = MS5837_STATE_RECOVERY_RESET;
@@ -204,12 +224,12 @@ static int service_recovery(Ms5837Driver_t *driver, uint64_t now_ns,
     case MS5837_STATE_RECOVERY_RESET:
         status = write_command(driver, MS5837_COMMAND_RESET);
         if (status < 0) {
-            return enter_recovery(driver, status, stats, true);
+            return fail_recovery_attempt(driver, status, stats, true, now_ns);
         }
         status = driver->hal.time_ns(driver->hal.context,
                                      &command_complete_ns);
         if (status < 0) {
-            return enter_recovery(driver, status, stats, true);
+            return fail_recovery_attempt(driver, status, stats, true, now_ns);
         }
         driver->deadline_ns = command_complete_ns + MS5837_RESET_RELOAD_NS;
         driver->state = MS5837_STATE_RECOVERY_WAIT_RESET;
@@ -227,12 +247,12 @@ static int service_recovery(Ms5837Driver_t *driver, uint64_t now_ns,
                             (2U * driver->recovery_prom_index));
         status = write_command(driver, command);
         if (status < 0) {
-            return enter_recovery(driver, status, stats, true);
+            return fail_recovery_attempt(driver, status, stats, true, now_ns);
         }
         status = driver->hal.read(driver->hal.context, response,
                                   sizeof(response));
         if (status < 0) {
-            return enter_recovery(driver, status, stats, true);
+            return fail_recovery_attempt(driver, status, stats, true, now_ns);
         }
         driver->recovery_prom.word[driver->recovery_prom_index] =
             (uint16_t)(((uint16_t)response[0] << 8U) | response[1]);
@@ -244,16 +264,18 @@ static int service_recovery(Ms5837Driver_t *driver, uint64_t now_ns,
 
     case MS5837_STATE_RECOVERY_VALIDATE:
         if (!prom_coefficients_valid(&driver->recovery_prom)) {
-            return enter_recovery(driver, MS5837_DRIVER_ERR_PROM_INVALID,
-                                  stats, false);
+            return fail_recovery_attempt(
+                driver, MS5837_DRIVER_ERR_PROM_INVALID, stats, false, now_ns);
         }
         if (!ms5837_prom_crc_valid(&driver->recovery_prom)) {
-            return enter_recovery(driver, MS5837_DRIVER_ERR_PROM_CRC,
-                                  stats, false);
+            return fail_recovery_attempt(
+                driver, MS5837_DRIVER_ERR_PROM_CRC, stats, false, now_ns);
         }
         driver->prom = driver->recovery_prom;
         driver->initialized = true;
         driver->last_error = MS5837_DRIVER_OK;
+        driver->recovery_incident_active = false;
+        driver->recovery_attempts_in_incident = 0U;
         driver->state = MS5837_STATE_IDLE;
         ++stats->recovery_successes;
         return MS5837_SERVICE_RECOVERING;
@@ -345,6 +367,7 @@ int ms5837_driver_shutdown(Ms5837Driver_t *driver)
     }
     driver->initialized = false;
     driver->pair_in_progress = false;
+    driver->recovery_incident_active = false;
     driver->state = MS5837_STATE_STOPPED;
     if (status < 0) {
         driver->last_error = status;
@@ -353,15 +376,19 @@ int ms5837_driver_shutdown(Ms5837Driver_t *driver)
 }
 
 int ms5837_driver_trigger(Ms5837Driver_t *driver,
-                           BaroRuntimeStats_t *stats)
+                           BaroDriverStats_t *stats)
 {
     int status;
 
     if ((driver == NULL) || (stats == NULL)) {
         return MS5837_DRIVER_ERR_ARGUMENT;
     }
+    if ((driver->state >= MS5837_STATE_RECOVERY_BACKOFF) &&
+        (driver->state <= MS5837_STATE_RECOVERY_VALIDATE)) {
+        return MS5837_DRIVER_ERR_BUSY;
+    }
     if (!driver->initialized || !driver->hal_open) {
-        driver->last_error = MS5837_DRIVER_ERR_NOT_INITIALIZED;
+        record_error(driver, stats, MS5837_DRIVER_ERR_NOT_INITIALIZED);
         return driver->last_error;
     }
     if (driver->state != MS5837_STATE_IDLE) {
@@ -381,26 +408,24 @@ int ms5837_driver_trigger(Ms5837Driver_t *driver,
 
 int ms5837_driver_service(Ms5837Driver_t *driver,
                            uint64_t now_ns,
-                           const BaroRunConfig_t *config,
-                           BaroRuntimeStats_t *stats,
+                           BaroDriverStats_t *stats,
                            BaroSample_t *completed_sample)
 {
     uint32_t raw_d2;
     uint64_t complete_time_ns;
     int status;
 
-    if ((driver == NULL) || (config == NULL) || (stats == NULL) ||
-        (completed_sample == NULL)) {
+    if ((driver == NULL) || (stats == NULL) || (completed_sample == NULL)) {
         return MS5837_DRIVER_ERR_ARGUMENT;
     }
     ++stats->service_ticks;
 
-    if ((driver->state >= MS5837_STATE_RECOVERY_OPEN) &&
+    if ((driver->state >= MS5837_STATE_RECOVERY_BACKOFF) &&
         (driver->state <= MS5837_STATE_RECOVERY_VALIDATE)) {
         return service_recovery(driver, now_ns, stats);
     }
     if (!driver->initialized || !driver->hal_open) {
-        driver->last_error = MS5837_DRIVER_ERR_NOT_INITIALIZED;
+        record_error(driver, stats, MS5837_DRIVER_ERR_NOT_INITIALIZED);
         return driver->last_error;
     }
 
@@ -439,15 +464,14 @@ int ms5837_driver_service(Ms5837Driver_t *driver,
         if (status < 0) {
             return enter_recovery(driver, status, stats, true);
         }
-        build_sample(driver, raw_d2, complete_time_ns, config, stats,
-                     completed_sample);
+        build_sample(driver, raw_d2, complete_time_ns, stats, completed_sample);
         driver->pair_in_progress = false;
         driver->state = MS5837_STATE_IDLE;
         driver->last_error = MS5837_DRIVER_OK;
         return MS5837_SERVICE_SAMPLE_READY;
 
     default:
-        driver->last_error = MS5837_DRIVER_ERR_NOT_INITIALIZED;
+        record_error(driver, stats, MS5837_DRIVER_ERR_NOT_INITIALIZED);
         return driver->last_error;
     }
 }

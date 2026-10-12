@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <pthread.h>
 
-#include "app_contract.h"
+#include "ms5837_contract.h"
 
 #define MS5837_LOGGER_CAPACITY 2048U
 #define MS5837_LOGGER_FILENAME_SIZE 40U
@@ -23,7 +23,10 @@ typedef struct {
     BaroCapturePhase_t phase;
     bool sample_ready;
     bool sample_stale;
-    BaroRunConfig_t config;
+    double fluid_density_kg_m3;
+    double surface_pressure_mbar;
+    bool surface_pressure_valid;
+    double depth_m;
     BaroSample_t sample;
 } BaroLogRecord_t;
 
@@ -48,4 +51,4 @@ int ms5837_logger_enqueue(Ms5837Logger_t *logger,
 int ms5837_logger_stop(Ms5837Logger_t *logger);
 const char *ms5837_logger_filename(const Ms5837Logger_t *logger);
 
-#endif
+#endif /* MS5837_LOGGER_H */

@@ -1,5 +1,16 @@
 # MS5837-02BA Pressure and Temperature Subsystem (`ms5`)
 
+## Phase 1 transition note
+
+The MS5837 public sample boundary is now `app/ms5837_contract.h` version 2.
+It carries only raw/compensated measurement facts and driver-owned acquisition
+statistics. Surface-pressure reference, density, depth derivation, publication
+accounting, logging, and command-line policy remain transitional application
+concerns and are intentionally outside the driver contract. The driver service
+path is nonblocking: reset-reload recovery waits use monotonic deadlines, and a
+recovery incident is bounded to three attempts with 200 ms between failed
+attempts before the driver enters `MS5837_STATE_STOPPED`.
+
 Linux userspace driver, real-time capture application, diagnostics, and archived benchmarks for the TE Connectivity MS5837-02BA on a Raspberry Pi 4B running Raspberry Pi OS with PREEMPT_RT.
 
 The production path is implemented through Step 4D. It uses a dedicated I2C1 bus, fixed symmetric OSR 512 pressure/temperature pairs, explicit acquisition triggering at the start of each 10 ms frame, 100 Hz publication, optional five-second surface taring, and asynchronous CSV logging.
@@ -177,10 +188,8 @@ If zeroing fails, `surface_pressure_valid` remains false and depth remains `NaN`
 | `raw_temperature_d2` | `uint32_t` | Raw temperature ADC result |
 | `pressure_mbar` | `double` | Compensated pressure |
 | `temperature_c` | `double` | Compensated temperature |
-| `depth_m` | `double` | Signed depth relative to the surface reference |
 
-Depth is computed from the pressure difference:
-
+`depth_m` is no longer part of `BaroSample_t`; the transitional logger derives it in application code. Depth is computed from the pressure difference:
 ```text
 depth_m = (pressure_mbar - surface_pressure_mbar) * 100
           / (fluid_density_kg_m3 * 9.80665)
@@ -197,8 +206,7 @@ Depth is intentionally signed. Pressure above the reference produces positive de
 | `BARO_STATUS_PRESSURE_EXTENDED` | 2 | Pressure is in the extended linear range but outside the nominal range |
 | `BARO_STATUS_PRESSURE_INVALID` | 3 | Pressure is outside the accepted linear range |
 | `BARO_STATUS_TEMPERATURE_EXTENDED` | 4 | Temperature is outside the nominal range |
-| `BARO_STATUS_DEPTH_REFERENCE_PENDING` | 5 | No surface tare was requested or completed yet |
-| `BARO_STATUS_DEPTH_REFERENCE_INVALID` | 6 | The surface reference or density is invalid |
+| Reserved | 5-6 | Must remain zero; consumer reference policy is not a sensor fact |
 
 The production classification boundaries are 300 to 1200 mbar nominal pressure, 10 to below 300 mbar and above 1200 to 2000 mbar extended pressure, and below 10 or above 2000 mbar invalid pressure. The nominal temperature range is -20 to 85 degrees C.
 
@@ -244,7 +252,7 @@ The logger queue capacity is 2048 records. Enqueue uses a non-blocking mutex att
 
 | File | Responsibility |
 |---|---|
-| `app/app_contract.h` | Versioned sample, run configuration, status flags, and runtime statistics |
+| `app/ms5837_contract.h` | Version-2 raw sample contract, sensor status flags, and driver-owned statistics |
 | `app/ms5837_math.c/.h` | CRC-4, factory compensation, range classification, and signed depth |
 | `app/ms5837_reference.c/.h` | Five-second 100 Hz tare collection and trimmed-mean finalization |
 | `app/ms5837_hal.h` | Injectable platform-independent I/O contract |
@@ -260,13 +268,13 @@ The logger queue capacity is 2048 records. Enqueue uses a non-blocking mutex att
 
 ### Acquisition
 
-`ms5837_driver_trigger()` is accepted only when the driver is initialized and idle. It starts a D1 OSR-512 conversion and establishes the conversion deadline. Calling it while an acquisition is active returns `MS5837_DRIVER_ERR_BUSY`.
+`ms5837_driver_trigger()` is accepted only when the driver is initialized and idle. It starts a D1 OSR-512 conversion and establishes the conversion deadline. Calling it while acquisition or recovery is active returns `MS5837_DRIVER_ERR_BUSY`. Runtime configuration is not passed into the driver; the completed version-2 sample contains only sequence/timestamp, D1/D2, compensated pressure/temperature, and sensor-validity flags.
 
 `ms5837_driver_service()` advances the nonblocking state machine according to the supplied monotonic time. It reads D1 after its deadline, starts D2 OSR 512, reads D2 after its deadline, performs compensation, assigns the completion timestamp and sequence number, updates the latest sample, and returns `MS5837_SERVICE_SAMPLE_READY`.
 
 ### Recovery
 
-An I2C failure aborts the partial pair and moves the state machine into recovery. Service calls then close/reopen the HAL, reset the sensor, wait for PROM reload, reread all PROM words, revalidate coefficients and CRC, and return the driver to `IDLE`. Runtime statistics retain I2C errors, aborted pairs, recovery attempts, and successful recoveries.
+An I2C failure aborts the partial pair and moves the state machine into recovery. Service calls then close/reopen the HAL, reset the sensor, wait for PROM reload by monotonic deadline, reread all PROM words, revalidate coefficients and CRC, and return the driver to `IDLE`. No recovery service state sleeps. Entering recovery clears the latest-sample mailbox. Each incident permits at most three attempts, separated by 200 ms after failed attempts; exhausting the budget records `recovery_exhaustions` and enters `STOPPED`. Driver-owned statistics retain service ticks, completed measurements, sensor-validity counts, I2C errors, aborted pairs, recovery incidents/attempts/successes/exhaustions, and the last error.
 
 ## Tests
 
@@ -293,7 +301,7 @@ Expected success lines are:
 PASS: Step 4A production math contract
 PASS: Step 4A surface-reference contract
 PASS: Step 4B mock initialization and cleanup
-PASS: Step 4C symmetric OSR-512 acquisition and recovery
+PASS: Phase 1 raw contract and bounded recovery
 PASS: Step 4D CLI and asynchronous CSV logger
 ```
 
@@ -429,7 +437,7 @@ twg/
     ├── Makefile
     ├── readme.md
     ├── app/
-    │   ├── app_contract.h
+    │   ├── ms5837_contract.h
     │   ├── main.c
     │   ├── ms5837_cli.c/.h
     │   ├── ms5837_driver.c/.h

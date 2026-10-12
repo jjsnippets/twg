@@ -156,8 +156,7 @@ double ms5837_depth_from_reference(double pressure_mbar,
            (fluid_density_kg_m3 * MS5837_GRAVITY_M_S2);
 }
 
-void ms5837_sample_set_not_ready(BaroSample_t *sample,
-                                  bool reference_pending)
+void ms5837_sample_set_not_ready(BaroSample_t *sample)
 {
     if (sample == NULL) {
         return;
@@ -166,12 +165,6 @@ void ms5837_sample_set_not_ready(BaroSample_t *sample,
     memset(sample, 0, sizeof(*sample));
     sample->contract_version = BARO_SAMPLE_CONTRACT_VERSION;
     sample->status_flags = BARO_STATUS_NOT_READY;
-    if (reference_pending) {
-        sample->status_flags |= BARO_STATUS_DEPTH_REFERENCE_PENDING;
-    } else {
-        sample->status_flags |= BARO_STATUS_DEPTH_REFERENCE_INVALID;
-    }
     sample->pressure_mbar = NAN;
     sample->temperature_c = NAN;
-    sample->depth_m = NAN;
 }

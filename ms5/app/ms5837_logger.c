@@ -32,9 +32,9 @@ static int write_record(FILE *stream, const BaroLogRecord_t *record)
         phase,
         record->sample_ready ? 1U : 0U,
         record->sample_stale ? 1U : 0U,
-        record->config.fluid_density_kg_m3,
-        record->config.surface_pressure_mbar,
-        record->config.surface_pressure_valid ? 1U : 0U,
+        record->fluid_density_kg_m3,
+        record->surface_pressure_mbar,
+        record->surface_pressure_valid ? 1U : 0U,
         record->sample.contract_version,
         record->sample.status_flags,
         record->sample.measurement_sequence,
@@ -43,7 +43,7 @@ static int write_record(FILE *stream, const BaroLogRecord_t *record)
         record->sample.raw_temperature_d2,
         record->sample.pressure_mbar,
         record->sample.temperature_c,
-        record->sample.depth_m) < 0 ? -EIO : 0;
+        record->depth_m) < 0 ? -EIO : 0;
 }
 
 static void *logger_thread(void *opaque)

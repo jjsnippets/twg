@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "app_contract.h"
+#include "ms5837_contract.h"
 
 #define MS5837_PROM_WORD_COUNT 7U
 #define MS5837_GRAVITY_M_S2 9.80665
@@ -43,7 +43,6 @@ uint32_t ms5837_classify_measurement(double pressure_mbar,
 double ms5837_depth_from_reference(double pressure_mbar,
                                     double surface_pressure_mbar,
                                     double fluid_density_kg_m3);
-void ms5837_sample_set_not_ready(BaroSample_t *sample,
-                                  bool reference_pending);
+void ms5837_sample_set_not_ready(BaroSample_t *sample);
 
-#endif
+#endif /* MS5837_MATH_H */

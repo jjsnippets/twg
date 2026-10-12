@@ -111,17 +111,13 @@ static int test_not_ready_sample(void)
 {
     BaroSample_t sample;
 
-    ms5837_sample_set_not_ready(&sample, false);
+    ms5837_sample_set_not_ready(&sample);
     CHECK(sample.contract_version == BARO_SAMPLE_CONTRACT_VERSION);
     CHECK(sample.measurement_sequence == 0U);
     CHECK((sample.status_flags & BARO_STATUS_NOT_READY) != 0U);
-    CHECK((sample.status_flags & BARO_STATUS_DEPTH_REFERENCE_INVALID) != 0U);
     CHECK(isnan(sample.pressure_mbar));
     CHECK(isnan(sample.temperature_c));
-    CHECK(isnan(sample.depth_m));
-
-    ms5837_sample_set_not_ready(&sample, true);
-    CHECK((sample.status_flags & BARO_STATUS_DEPTH_REFERENCE_PENDING) != 0U);
+    CHECK((sample.status_flags & BARO_STATUS_RESERVED_MASK) == 0U);
     return 0;
 }
 
