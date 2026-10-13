@@ -367,6 +367,95 @@ static void test_s18_same_session_verify_rejects_wrong_state(void)
           "S18", "settling rejected");
 }
 
+static void test_s19_return_to_configuring_from_operational(void)
+{
+    ImuSessionTestGroupEvent_t event;
+    ImuSampleSnapshot_t operational;
+    ImuSampleSnapshot_t returned;
+    ImuSampleSnapshot_t staged;
+
+    open_configuring("S19");
+    check(imu_session_configure_production(0x00u),
+          "S19", "production configure");
+    check(imu_session_begin_settle(), "S19", "begin settle");
+    check(imu_session_mark_operational(), "S19", "mark operational");
+
+    memset(&event, 0, sizeof(event));
+    event.groupBit = IMU_GROUP_BIT_ROTATION;
+    event.groupEventSeq = 1u;
+    event.hostDecodeNs = 1000u;
+    imu_session_test_inject_group(&event);
+    operational = snap();
+    check(operational.readerState == IMU_READER_STATE_OPERATIONAL,
+          "S19", "operational before return");
+    check(operational.validMask == IMU_GROUP_BIT_ROTATION,
+          "S19", "group seen before return");
+
+    check(imu_session_return_to_configuring(),
+          "S19", "return to configuring");
+    returned = snap();
+    check(returned.readerState == IMU_READER_STATE_CONFIGURING,
+          "S19", "state CONFIGURING");
+    check(returned.configurationEpoch == operational.configurationEpoch,
+          "S19", "epoch unchanged");
+    check(returned.validMask == operational.validMask,
+          "S19", "validity untouched");
+    check(returned.rotationMeta.groupEventSeq ==
+          operational.rotationMeta.groupEventSeq,
+          "S19", "identity untouched");
+    check(!imu_session_test_recovery_observed() &&
+          imu_session_test_recovery_attempt_count() == 0u,
+          "S19", "not recovery");
+
+    check(imu_session_configure_calibration(0x07u),
+          "S19", "stage entry legal after return");
+    staged = snap();
+    check(staged.readerState == IMU_READER_STATE_CALIBRATION,
+          "S19", "state CALIBRATION");
+    check(staged.configurationEpoch == returned.configurationEpoch + 1u,
+          "S19", "stage entry takes one epoch");
+    check(staged.validMask == 0u, "S19", "stage entry clears validity");
+
+    check(imu_session_restore_production(0x00u),
+          "S19", "restore production");
+    check(imu_session_begin_settle(), "S19", "settle again");
+    check(imu_session_mark_operational(), "S19", "operational again");
+    check(snap().readerState == IMU_READER_STATE_OPERATIONAL,
+          "S19", "round trip back to OPERATIONAL");
+}
+
+static void test_s20_return_to_configuring_rejects_other_states(void)
+{
+    static const ImuReaderState_t states[] = {
+        IMU_READER_STATE_CLOSED,
+        IMU_READER_STATE_OPENING,
+        IMU_READER_STATE_CONFIGURING,
+        IMU_READER_STATE_SETTLING,
+        IMU_READER_STATE_CALIBRATION,
+        IMU_READER_STATE_TARE,
+        IMU_READER_STATE_CHECK,
+        IMU_READER_STATE_PROBE,
+        IMU_READER_STATE_RECOVERING,
+        IMU_READER_STATE_FAULTED
+    };
+    size_t i;
+
+    for (i = 0u; i < sizeof(states) / sizeof(states[0]); ++i) {
+        ImuSampleSnapshot_t before;
+        ImuSampleSnapshot_t after;
+
+        open_configuring("S20");
+        check(imu_session_test_force_state(states[i]), "S20", "force state");
+        before = snap();
+        check(!imu_session_return_to_configuring(),
+              "S20", "rejected outside OPERATIONAL");
+        after = snap();
+        check(after.readerState == states[i], "S20", "state unchanged");
+        check(after.configurationEpoch == before.configurationEpoch,
+              "S20", "epoch unchanged");
+    }
+}
+
 int main(void)
 {
     test_s01_configure_cal_increments_epoch();
@@ -387,6 +476,8 @@ int main(void)
     test_s16_clear_reopen_failure_is_unusable();
     test_s17_same_session_verify_reconfigures_once();
     test_s18_same_session_verify_rejects_wrong_state();
+    test_s19_return_to_configuring_from_operational();
+    test_s20_return_to_configuring_rejects_other_states();
 
     if (g_fail != 0) {
         fprintf(stderr, "test_session_cal: %d failures\n", g_fail);

@@ -306,6 +306,15 @@ before any report set was configured behaves as the first production
 apply and does not extra-increment epoch. Restore failure faults
 without claiming an epoch change.
 
+`imu_session_return_to_configuring()` is the planned exit from production
+acquisition for commands started mid-run. It is legal from `OPERATIONAL`
+only and changes state to `CONFIGURING` and nothing else: no SH-2 call, no
+epoch increment, and validity and group identities are untouched. The next
+`configure_calibration`, `configure_tare`, `configure_check` or
+`restore_production` takes the epoch. It is not recovery and not a reset.
+`restore_production` remains illegal from `OPERATIONAL`. `bno_app` does not
+call it; the integrated executable in `twg/integration` does.
+
 Successful planned verification reopen also increments epoch once,
 returns `CONFIGURING`, and must not set recovery-observed or
 recovery-attempt counters. Failed planned reopen is an

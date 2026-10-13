@@ -314,6 +314,17 @@ bool imu_session_begin_settle(void);
 bool imu_session_mark_operational(void);
 
 /*
+ * Planned exit from production acquisition, for an owner that starts a
+ * command stage (calibration, tare, check, probe, clear) mid-run.
+ * OPERATIONAL -> CONFIGURING only. Makes no SH-2 call and does not change
+ * the epoch, validMask, group identities, or any mailbox: the next
+ * configure_calibration/tare/check or restore_production call takes the
+ * epoch. Returns false from every other state and leaves state unchanged.
+ * Not recovery, not a reset, and never passes through CLOSED.
+ */
+bool imu_session_return_to_configuring(void);
+
+/*
  * Drives sh2_service() on the caller thread. Callbacks update only the
  * group represented by each decoded event.
  */

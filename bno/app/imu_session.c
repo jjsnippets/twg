@@ -940,6 +940,17 @@ bool imu_session_mark_operational(void)
     return true;
 }
 
+bool imu_session_return_to_configuring(void)
+{
+    if (sState != IMU_READER_STATE_OPERATIONAL) {
+        return false;
+    }
+
+    sState = IMU_READER_STATE_CONFIGURING;
+    sync_header();
+    return true;
+}
+
 void imu_session_service(void)
 {
     if (sHal) {
