@@ -83,6 +83,53 @@ static const char *pose_name(uint8_t pose)
     }
 }
 
+static const char *reason_name(ImuCmdReason_t reason)
+{
+    switch (reason) {
+    case IMU_CMD_REASON_OK:                       return "OK";
+    case IMU_CMD_REASON_OPERATOR_Q:               return "OPERATOR_Q";
+    case IMU_CMD_REASON_OPERATOR_CONFIRM_TIMEOUT: return "OPERATOR_CONFIRM_TIMEOUT";
+    case IMU_CMD_REASON_GATE_NOT_REACHED:         return "GATE_NOT_REACHED";
+    case IMU_CMD_REASON_DCD_SAVE_FAILED:          return "DCD_SAVE_FAILED";
+    case IMU_CMD_REASON_DCD_CLEAR_FAILED:         return "DCD_CLEAR_FAILED";
+    case IMU_CMD_REASON_TARE_NOW_FAILED:          return "TARE_NOW_FAILED";
+    case IMU_CMD_REASON_TARE_PERSIST_FAILED:      return "TARE_PERSIST_FAILED";
+    case IMU_CMD_REASON_TARE_CLEAR_PARTIAL:       return "TARE_CLEAR_PARTIAL";
+    case IMU_CMD_REASON_TARE_CLEAR_FAILED:        return "TARE_CLEAR_FAILED";
+    case IMU_CMD_REASON_TARE_VERIFY_FAILED:       return "TARE_VERIFY_FAILED";
+    case IMU_CMD_REASON_CAL_CONFIG_FAILED:        return "CAL_CONFIG_FAILED";
+    case IMU_CMD_REASON_CAL_MAG_EXHAUSTED:        return "CAL_MAG_EXHAUSTED";
+    case IMU_CMD_REASON_CAL_HOLD_DEGRADED:        return "CAL_HOLD_DEGRADED";
+    case IMU_CMD_REASON_CAL_SAVE_FAILED:          return "CAL_SAVE_FAILED";
+    case IMU_CMD_REASON_CAL_REOPEN_FAILED:        return "CAL_REOPEN_FAILED";
+    case IMU_CMD_REASON_CAL_VERIFY_CONFIG_FAILED: return "CAL_VERIFY_CONFIG_FAILED";
+    case IMU_CMD_REASON_CAL_VERIFY_GATE_FAILED:   return "CAL_VERIFY_GATE_FAILED";
+    case IMU_CMD_REASON_CAL_RESTORE_FAILED:       return "CAL_RESTORE_FAILED";
+    case IMU_CMD_REASON_CAL_SESSION_UNUSABLE:     return "CAL_SESSION_UNUSABLE";
+    case IMU_CMD_REASON_CONFIG_FAILED:            return "CONFIG_FAILED";
+    case IMU_CMD_REASON_PROBE_DEADLINE:           return "PROBE_DEADLINE";
+    case IMU_CMD_REASON_SESSION_UNUSABLE:         return "SESSION_UNUSABLE";
+    case IMU_CMD_REASON_PROCESS_STOP:             return "PROCESS_STOP";
+    case IMU_CMD_REASON_ILLEGAL_PLAN:             return "ILLEGAL_PLAN";
+    case IMU_CMD_REASON_NONE:
+    default:                                      return "NONE";
+    }
+}
+
+static void note_result(
+    TwgStage *stage,
+    const char *stageName,
+    const char *resultName,
+    const char *reasonName,
+    bool warning)
+{
+    stage->lastStage = stageName;
+    stage->lastResult = resultName;
+    stage->lastReason = reasonName;
+    stage->lastWarning = warning;
+    stage->resultEvent = true;
+}
+
 static bool cal_enter_ready(const ImuCmdProgress_t *p)
 {
     return p->active == IMU_CMD_ID_CALIBRATION &&
@@ -177,6 +224,11 @@ static bool start_imu_plan(
     stage->productionConfigured = false;
     stage->promptKey = 0u;
     stage->lastStatusNs = 0u;
+    stage->lastStage = NULL;
+    stage->lastResult = NULL;
+    stage->lastReason = NULL;
+    stage->lastWarning = false;
+    stage->resultEvent = false;
     stage->lastActive = IMU_CMD_ID_NONE;
     memset(stage->resultPrinted, 0, sizeof(stage->resultPrinted));
 
@@ -463,6 +515,15 @@ static void report_results(TwgStage *stage)
                (unsigned)result.epochBefore,
                (unsigned)result.epochAfter);
 
+        if (result.identity != IMU_CMD_ID_SETTLE &&
+            result.identity != IMU_CMD_ID_ACQUISITION) {
+            note_result(stage,
+                        identity_name(result.identity),
+                        state_name(result.state),
+                        reason_name(result.reason),
+                        result.warningRequired);
+        }
+
         stage->resultPrinted[id] = true;
     }
 }
@@ -586,6 +647,8 @@ static bool consume_action_key(
         if (key == 'q') {
             stage->pressureZeroCancelled = true;
             stage->mode = TWG_STAGE_MODE_ACQUISITION;
+            note_result(stage, "PRESSURE_ZERO", "CANCELLED",
+                        "OPERATOR_Q", false);
             puts("\npressure zero cancelled.");
         }
         return true;
@@ -767,11 +830,53 @@ bool twg_stage_acquisition_active(const TwgStage *stage)
            stage->mode == TWG_STAGE_MODE_ACQUISITION;
 }
 
-void twg_stage_pressure_zero_finished(TwgStage *stage)
+void twg_stage_pressure_zero_finished(
+    TwgStage *stage,
+    bool ok)
 {
     if (stage != NULL &&
         stage->mode == TWG_STAGE_MODE_PRESSURE_ZERO) {
+        note_result(stage, "PRESSURE_ZERO",
+                    ok ? "SUCCEEDED" : "FAILED",
+                    ok ? "OK" : "INSUFFICIENT_SAMPLES",
+                    false);
         stage->mode = TWG_STAGE_MODE_ACQUISITION;
         puts("\nacquisition resumed.");
     }
+}
+
+void twg_stage_get_info(
+    TwgStage *stage,
+    TwgStageInfo *info)
+{
+    ImuCmdProgress_t p;
+
+    memset(info, 0, sizeof(*info));
+    info->active = "NONE";
+
+    if (stage == NULL) {
+        return;
+    }
+
+    if (stage->mode == TWG_STAGE_MODE_PRESSURE_ZERO) {
+        info->active = "PRESSURE_ZERO";
+    } else if (stage->mode == TWG_STAGE_MODE_CLEAR_CONFIRM) {
+        info->active = "CLEAR_CONFIRM";
+    } else if (stage->imuPlanActive &&
+               imu_cmd_get_progress(&p)) {
+        info->active = identity_name(p.active);
+
+        if (p.active == IMU_CMD_ID_CALIBRATION ||
+            p.active == IMU_CMD_ID_DCD_CLEAR) {
+            info->calValid = true;
+            info->cal = p.cal;
+        }
+    }
+
+    info->lastStage = stage->lastStage;
+    info->lastResult = stage->lastResult;
+    info->lastReason = stage->lastReason;
+    info->lastWarning = stage->lastWarning;
+    info->resultEvent = stage->resultEvent;
+    stage->resultEvent = false;
 }

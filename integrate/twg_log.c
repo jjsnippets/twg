@@ -118,6 +118,11 @@ static bool open_unique(TwgLog *log)
     return false;
 }
 
+static const char *text(const char *s)
+{
+    return s != NULL ? s : "none";
+}
+
 static bool write_header(FILE *stream)
 {
     return fprintf(
@@ -139,7 +144,12 @@ static bool write_header(FILE *stream)
         "pressure_complete_ns,raw_d1,raw_d2,pressure_mbar,"
         "temperature_c,zero_requested,zero_valid,"
         "zero_valid_samples,zero_rejected_samples,"
-        "surface_pressure_mbar,fluid_density_kg_m3,depth_m\n") >= 0;
+        "surface_pressure_mbar,fluid_density_kg_m3,depth_m,"
+        "stage_active,stage_event,last_stage,last_result,"
+        "last_reason,last_warning,cal_valid,cal_phase,cal_pose,"
+        "cal_pose_total,cal_accel_status,cal_gyro_status,"
+        "cal_mag_status,cal_rv_status,cal_rv_err_rad,"
+        "cal_mag_x_ut,cal_mag_y_ut,cal_mag_z_ut,cal_gate\n") >= 0;
 }
 
 static bool write_record(
@@ -164,7 +174,9 @@ static bool write_record(
         "%u,%u,%u,%u,%" PRIu64 ",%" PRId32 ","
         "%" PRIu32 ",%" PRIu32 ",%" PRIu64 ",%" PRIu64 ","
         "%" PRIu32 ",%" PRIu32 ",%.9g,%.9g,"
-        "%u,%u,%" PRIu64 ",%" PRIu64 ",%.9g,%.9g,%.9g\n",
+        "%u,%u,%" PRIu64 ",%" PRIu64 ",%.9g,%.9g,%.9g"
+        ",%s,%u,%s,%s,%s,%u,%u,%u,%u,%u,%u,%u,%u,%u"
+        ",%.9g,%.9g,%.9g,%.9g,%u\n",
 
         r->schemaVersion,
         r->rowSequence,
@@ -249,7 +261,27 @@ static bool write_record(
         r->zeroRejectedSamples,
         r->surfacePressureMbar,
         r->fluidDensityKgM3,
-        r->depthM) >= 0;
+        r->depthM,
+
+        text(r->stageActive),
+        r->stageEvent,
+        text(r->lastStage),
+        text(r->lastResult),
+        text(r->lastReason),
+        r->lastWarning,
+        r->calValid,
+        r->calPhase,
+        r->calPose,
+        r->calPoseTotal,
+        r->calAccel,
+        r->calGyro,
+        r->calMag,
+        r->calRv,
+        (double)r->calRvErrRad,
+        (double)r->calMagXuT,
+        (double)r->calMagYuT,
+        (double)r->calMagZuT,
+        r->calGate) >= 0;
 }
 
 static void update_high_water(TwgLog *log, uint32_t value)

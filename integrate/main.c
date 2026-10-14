@@ -548,7 +548,8 @@ static bool publication_emit(
     PublicationContext *publication,
     PressureContext *pressure,
     TwgLog *log,
-    TwgStageMode mode)
+    TwgStageMode mode,
+    TwgStage *stage)
 {
     ImuPublishGateDecision_t decision;
     ImuPublishGateStatus_t gateStatus;
@@ -579,6 +580,35 @@ static bool publication_emit(
     record.schemaVersion = TWG_LOG_SCHEMA_VERSION;
     record.rowSequence = ++publication->rowSequence;
     record.phase = log_phase(mode);
+
+    {
+        TwgStageInfo info;
+
+        twg_stage_get_info(stage, &info);
+
+        record.stageActive = info.active;
+        record.stageEvent = info.resultEvent ? 1u : 0u;
+        record.lastStage = info.lastStage;
+        record.lastResult = info.lastResult;
+        record.lastReason = info.lastReason;
+        record.lastWarning = info.lastWarning ? 1u : 0u;
+
+        if (info.calValid) {
+            record.calValid = 1u;
+            record.calPhase = (uint8_t)info.cal.phase;
+            record.calPose = info.cal.currentPoseIndex;
+            record.calPoseTotal = info.cal.totalPoseCount;
+            record.calAccel = info.cal.accelAccuracy;
+            record.calGyro = info.cal.gyroAccuracy;
+            record.calMag = info.cal.magAccuracy;
+            record.calRv = info.cal.rvAccuracy;
+            record.calGate = info.cal.gatePassingNow ? 1u : 0u;
+            record.calRvErrRad = info.cal.rvErrRad;
+            record.calMagXuT = info.cal.magXuT;
+            record.calMagYuT = info.cal.magYuT;
+            record.calMagZuT = info.cal.magZuT;
+        }
+    }
 
     actualValid = monotonic_ns(&actualNs);
 
@@ -905,7 +935,8 @@ int main(int argc, char **argv)
             nowNs);
 
         if (wasZeroing && !pressure.zeroActive) {
-            twg_stage_pressure_zero_finished(&stage);
+            twg_stage_pressure_zero_finished(
+                &stage, pressure.zeroValid);
         }
 
         ++serviceTicks;
@@ -928,7 +959,8 @@ int main(int argc, char **argv)
                     &publication,
                     &pressure,
                     &log,
-                    mode)) {
+                    mode,
+                    &stage)) {
                 ownerFailure = true;
                 break;
             }

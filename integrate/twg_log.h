@@ -57,6 +57,27 @@ typedef struct {
     double surfacePressureMbar;
     double fluidDensityKgM3;
     double depthM;
+    
+    const char *stageActive;
+    const char *lastStage;
+    const char *lastResult;
+    const char *lastReason;
+    uint8_t stageEvent;
+    uint8_t lastWarning;
+
+    uint8_t calValid;
+    uint8_t calPhase;
+    uint8_t calPose;
+    uint8_t calPoseTotal;
+    uint8_t calAccel;
+    uint8_t calGyro;
+    uint8_t calMag;
+    uint8_t calRv;
+    uint8_t calGate;
+    float calRvErrRad;
+    float calMagXuT;
+    float calMagYuT;
+    float calMagZuT;
 
     uint64_t loggerDropsBefore;
 } TwgLogRecord;

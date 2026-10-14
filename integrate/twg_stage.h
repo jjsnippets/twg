@@ -51,8 +51,25 @@ typedef struct {
     uint32_t promptKey;
     uint64_t lastStatusNs;
 
+    const char *lastStage;
+    const char *lastResult;
+    const char *lastReason;
+    bool lastWarning;
+    bool resultEvent;
+
     ImuCmdIdentity_t lastActive;
 } TwgStage;
+
+typedef struct {
+    const char *active;
+    const char *lastStage;
+    const char *lastResult;
+    const char *lastReason;
+    bool lastWarning;
+    bool resultEvent;
+    bool calValid;
+    ImuCmdCalProgress_t cal;
+} TwgStageInfo;
 
 bool twg_stage_init(
     TwgStage *stage,
@@ -77,7 +94,12 @@ bool twg_stage_take_pressure_clear(
     TwgStage *stage);
     
 void twg_stage_pressure_zero_finished(
-    TwgStage *stage);
+    TwgStage *stage,
+    bool ok);
+
+void twg_stage_get_info(
+    TwgStage *stage,
+    TwgStageInfo *info);
 
 bool twg_stage_acquisition_active(
     const TwgStage *stage);
