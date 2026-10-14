@@ -275,7 +275,7 @@ static void pressure_zero_begin(
     pressure->zeroValidSamples = 0u;
     pressure->zeroRejectedSamples = 0u;
 
-    puts("pressure zero collecting for five seconds...");
+    puts("\npressure zero collecting for five seconds...");
 }
 
 static void pressure_zero_clear(
@@ -288,7 +288,7 @@ static void pressure_zero_clear(
     pressure->zeroValid = false;
     pressure->surfacePressureMbar = NAN;
 
-    puts("pressure reference cleared; depth is now NaN.");
+    puts("\npressure reference cleared; depth is now NaN.");
 }
 
 static bool pressure_zero_finish(
@@ -347,7 +347,7 @@ static bool pressure_zero_finish(
         isfinite(pressure->surfacePressureMbar);
 
     printf(
-        "pressure zero complete:"
+        "\npressure zero complete:"
         " valid=%zu rejected=%zu"
         " surface_mbar=%.4f\n",
         pressure->zeroValidSamples,
@@ -476,6 +476,74 @@ static void classify_pressure(
     }
 }
 
+static const char *phase_text(TwgLogPhase phase)
+{
+    switch (phase) {
+    case TWG_LOG_PHASE_ZERO:        return "zero";
+    case TWG_LOG_PHASE_RUN:         return "run";
+    case TWG_LOG_PHASE_CALIBRATION: return "calibration";
+    case TWG_LOG_PHASE_TARE_Z:      return "tare_z";
+    case TWG_LOG_PHASE_TARE_FULL:   return "tare_full";
+    case TWG_LOG_PHASE_CLEAR:       return "clear";
+    case TWG_LOG_PHASE_RESTORE:     return "restore";
+    case TWG_LOG_PHASE_PRE:
+    default:                        return "pre";
+    }
+}
+
+static void format_imu_text(
+    const TwgLogRecord *r,
+    TwgStageMode mode,
+    char *out,
+    size_t capacity)
+{
+    ImuCmdProgress_t p;
+
+    if (mode == TWG_STAGE_MODE_CALIBRATION &&
+        imu_cmd_get_progress(&p) &&
+        p.active == IMU_CMD_ID_CALIBRATION) {
+        (void)snprintf(
+            out, capacity,
+            "cal_pose=%u/%u accelStatus=%u gyroStatus=%u"
+            " magStatus=%u rvStatus=%u rv_err=%.4f"
+            " mag_uT=%.1f,%.1f,%.1f",
+            (unsigned)p.cal.currentPoseIndex,
+            (unsigned)p.cal.totalPoseCount,
+            (unsigned)p.cal.accelAccuracy,
+            (unsigned)p.cal.gyroAccuracy,
+            (unsigned)p.cal.magAccuracy,
+            (unsigned)p.cal.rvAccuracy,
+            (double)p.cal.rvErrRad,
+            (double)p.cal.magXuT,
+            (double)p.cal.magYuT,
+            (double)p.cal.magZuT);
+        return;
+    }
+
+    if (r->imu.validMask == 0u) {
+        (void)snprintf(out, capacity,
+                       "imu=not_ready (stage reconfiguring reports)");
+        return;
+    }
+
+    (void)snprintf(
+        out, capacity,
+        "accelStatus=%u gyroStatus=%u magStatus=na rvStatus=%u"
+        " qw=%.4f qx=%.4f qy=%.4f qz=%.4f"
+        " yaw=%.4f pitch=%.4f roll=%.4f"
+        " ax=%.4f ay=%.4f az=%.4f"
+        " gx=%.4f gy=%.4f gz=%.4f",
+        (unsigned)r->imu.accel.rawStatus,
+        (unsigned)r->imu.gyro.rawStatus,
+        (unsigned)r->imu.rotation.rawStatus,
+        (double)r->imu.qw, (double)r->imu.qx,
+        (double)r->imu.qy, (double)r->imu.qz,
+        (double)r->imu.yawRad, (double)r->imu.pitchRad,
+        (double)r->imu.rollRad,
+        (double)r->imu.ax, (double)r->imu.ay, (double)r->imu.az,
+        (double)r->imu.gx, (double)r->imu.gy, (double)r->imu.gz);
+}
+
 static bool publication_emit(
     PublicationContext *publication,
     PressureContext *pressure,
@@ -577,45 +645,27 @@ static bool publication_emit(
     }
 
     if ((record.rowSequence % UINT64_C(50)) == 0u) {
+        char imuText[320];
+
+        format_imu_text(&record, mode, imuText, sizeof(imuText));
+
         printf(
             "row=%" PRIu64
-            " phase=%d"
+            " phase=%s"
             " imu_fresh=0x%02x imu_valid=0x%02x"
             " pressure_seq=%" PRIu64
             " pressure_fresh=%u"
             " pressure_mbar=%.2f depth_m=%.4f"
-            " qw=%.4f qx=%.4f qy=%.4f qz=%.4f"
-            " yaw=%.4f pitch=%.4f roll=%.4f"
-            " ax=%.4f ay=%.4f az=%.4f"
-            " gx=%.4f gy=%.4f gz=%.4f"
-            " drops=%" PRIu64 "\n",
-
+            " %s drops=%" PRIu64 "\n",
             record.rowSequence,
-            (int)record.phase,
+            phase_text(record.phase),
             record.imu.freshMask,
             record.imu.validMask,
             record.pressure.measurement_sequence,
             record.pressureFresh,
             record.pressure.pressure_mbar,
             record.depthM,
-
-            (double)record.imu.qw,
-            (double)record.imu.qx,
-            (double)record.imu.qy,
-            (double)record.imu.qz,
-
-            (double)record.imu.yawRad,
-            (double)record.imu.pitchRad,
-            (double)record.imu.rollRad,
-
-            (double)record.imu.ax,
-            (double)record.imu.ay,
-            (double)record.imu.az,
-
-            (double)record.imu.gx,
-            (double)record.imu.gy,
-            (double)record.imu.gz,
-
+            imuText,
             record.loggerDropsBefore);
     }
 

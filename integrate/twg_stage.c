@@ -369,6 +369,11 @@ static void print_calibration_prompt(const ImuCmdProgress_t *p)
 
 static void print_prompt(const ImuCmdProgress_t *p)
 {
+    if (p->active != IMU_CMD_ID_ACQUISITION &&
+        p->active != IMU_CMD_ID_NONE) {
+        putchar('\n');
+    }
+
     switch (p->active) {
     case IMU_CMD_ID_CALIBRATION:
         print_calibration_prompt(p);
@@ -448,7 +453,7 @@ static void report_results(TwgStage *stage)
             continue;
         }
 
-        printf("result %s: %s reason=%d warning=%u restored=%u"
+        printf("\nresult %s: %s reason=%d warning=%u restored=%u"
                " epoch %u->%u\n",
                identity_name(result.identity),
                state_name(result.state),
@@ -508,7 +513,7 @@ static bool service_imu_plan(
         stage->mode = TWG_STAGE_MODE_ACQUISITION;
         stage->clearConfirmed = false;
         stage->lastActive = IMU_CMD_ID_NONE;
-        puts("acquisition resumed.");
+        puts("\nacquisition resumed.");
         return true;
     }
 
@@ -543,12 +548,12 @@ static void consume_acquisition_key(
     case 'w':
         stage->pressureZeroRequested = true;
         stage->mode = TWG_STAGE_MODE_PRESSURE_ZERO;
-        puts("pressure zero started: hold still; q cancels.");
+        puts("\npressure zero started: hold still; q cancels.");
         break;
 
     case 'x':
         stage->mode = TWG_STAGE_MODE_CLEAR_CONFIRM;
-        puts("WARNING: press y to clear DCD calibration, IMU tare"
+        puts("\nWARNING: press y to clear DCD calibration, IMU tare"
              " and pressure reference; q cancels.");
         break;
 
@@ -567,12 +572,12 @@ static bool consume_action_key(
     if (stage->mode == TWG_STAGE_MODE_CLEAR_CONFIRM) {
         if (key == 'q') {
             stage->mode = TWG_STAGE_MODE_ACQUISITION;
-            puts("full clear cancelled.");
+            puts("\nfull clear cancelled.");
         } else if (key == 'y') {
             stage->clearConfirmed = true;
             stage->pressureClearRequested = true;
             stage->requestedMode = TWG_STAGE_MODE_CLEAR_ALL;
-            puts("full clear confirmed.");
+            puts("\nfull clear confirmed.");
         }
         return true;
     }
@@ -581,7 +586,7 @@ static bool consume_action_key(
         if (key == 'q') {
             stage->pressureZeroCancelled = true;
             stage->mode = TWG_STAGE_MODE_ACQUISITION;
-            puts("pressure zero cancelled.");
+            puts("\npressure zero cancelled.");
         }
         return true;
     }
@@ -675,9 +680,9 @@ TwgStageStatus twg_stage_turn(
 
             stage->mode = TWG_STAGE_MODE_ACQUISITION;
             stage->settleStarted = false;
-            puts("acquisition ready:"
+            puts("\nacquisition ready:"
                  " c=cal z=tare-z a=tare-full"
-                 " w=pressure-zero x=clear");
+                 " w=pressure-zero x=clear\n");
         }
 
         return TWG_STAGE_OK;
@@ -767,6 +772,6 @@ void twg_stage_pressure_zero_finished(TwgStage *stage)
     if (stage != NULL &&
         stage->mode == TWG_STAGE_MODE_PRESSURE_ZERO) {
         stage->mode = TWG_STAGE_MODE_ACQUISITION;
-        puts("acquisition resumed.");
+        puts("\nacquisition resumed.");
     }
 }
