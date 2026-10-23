@@ -6,7 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include mits.h>
+#include <limits.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>

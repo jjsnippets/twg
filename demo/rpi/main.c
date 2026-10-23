@@ -2,7 +2,7 @@
 
 #include <errno.h>
 #include <inttypes.h>
-#include ocale.h>
+#include <locale.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
