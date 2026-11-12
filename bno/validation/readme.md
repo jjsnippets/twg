@@ -16,9 +16,9 @@ application in `../app/sh2_hal_rpi.c`.
 
 | AMT102 signal | Raspberry Pi BCM | Physical pin |
 |---|---:|---:|
-| Channel A | 17 | 11 |
-| Channel B | 27 | 13 |
-| Index X | 22 | 15 |
+| Channel A | 16 | 36 |
+| Channel B | 20 | 38 |
+| Index X | 21 | 40 |
 | +5 V | 5 V rail | 2 or 4 |
 | GND | GND | any ground pin |
 

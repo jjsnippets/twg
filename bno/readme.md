@@ -69,10 +69,10 @@ Adafruit BNO085 breakout to Raspberry Pi 4B 40-pin header:
 | SCL | HSCL / SCK | GPIO 11 (SPI0 SCLK) | 23 | SPI clock |
 | SDA | HSDA / MISO | GPIO 9 (SPI0 MISO) | 21 | data out of the BNO085 |
 | DI | HMOSI | GPIO 10 (SPI0 MOSI) | 19 | data into the BNO085 |
-| CS | HCSN | **GPIO 25** | **22** | manual chip select, not CE0/GPIO 8 |
-| INT | H_INTN | GPIO 6 | 31 | active-low data-ready; required for stable SPI |
-| RST | NRST | GPIO 13 | 33 | active-low reset |
-| P0 (PS0/WAKE) | WAKE | GPIO 5 | 29 | protocol select and SPI wake handshake |
+| CS | HCSN | **GPIO 17** | **11** | manual chip select, not CE0/GPIO 8 |
+| INT | H_INTN | GPIO 4 | 7 | active-low data-ready; required for stable SPI |
+| RST | NRST | GPIO 27 | 13 | active-low reset |
+| P0 (PS0/WAKE) | WAKE | GPIO 22 | 15 | protocol select and SPI wake handshake |
 | P1 (PS1) | — | 3V3 (tied high) | 1 | PS1=1 and PS0=1 selects SPI host mode |
 
 Wiring notes:
@@ -81,7 +81,7 @@ Wiring notes:
   PS0/WAKE high before pulsing reset, so both pins are high when the BNO085
   samples its protocol pins.
 - INT is polled by the HAL during each service iteration; it is not configured
-  as a kernel interrupt. Do not repurpose GPIO 6.
+  as a kernel interrupt. Do not repurpose GPIO 4.
 - If CS moves, update `GPIO_LINE_CS` in `app/sh2_hal_rpi.c`. A wire/code CS
   mismatch is a common failure after rewiring.
 

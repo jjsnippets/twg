@@ -38,10 +38,10 @@
 #define SPI_DEV_PATH        "/dev/spidev0.0"
 #define GPIO_CHIP_NAME      "gpiochip0"
 
-#define GPIO_LINE_RST       13  /* NRST, active-low, physical pin 33 */
-#define GPIO_LINE_INT       6   /* H_INTN, active-low, physical pin 31 */
-#define GPIO_LINE_WAKE      5   /* PS0/WAKE, active-low, physical pin 29 */
-#define GPIO_LINE_CS        25  /* HCSN, active-low, physical pin 22 */
+#define GPIO_LINE_RST       27  /* NRST, active-low, physical pin 13 */
+#define GPIO_LINE_INT       4   /* H_INTN, active-low, physical pin 7 */
+#define GPIO_LINE_WAKE      22  /* PS0/WAKE, active-low, physical pin 15 */
+#define GPIO_LINE_CS        17  /* HCSN, active-low, physical pin 11 */
 
 #define SPI_MODE            (SPI_MODE_3 | SPI_NO_CS)
 #define SPI_BITS_PER_WORD   8

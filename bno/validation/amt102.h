@@ -8,9 +8,9 @@
  * an x4 position count via quad_decode.
  *
  * Wiring (BCM numbering, matches the agreed level-shifted chain):
- *   encoder A -> 1k -> BCM 17 (header pin 11)
- *   encoder B -> 1k -> BCM 27 (header pin 13)
- *   encoder X -> 1k -> BCM 22 (header pin 15)
+ *   encoder A -> 1k -> BCM 16 (header pin 36)
+ *   encoder B -> 1k -> BCM 20 (header pin 38)
+ *   encoder X -> 1k -> BCM 21 (header pin 40)
  *   encoder 5V -> Pi 5V rail, encoder G -> Pi GND (common ground)
  *   (encoder connector pin order is B, 5V, A, X, G - check before power)
  *

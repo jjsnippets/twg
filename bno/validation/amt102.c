@@ -27,9 +27,9 @@
 #include "validation/quad_decode.h"
 
 #define AMT102_GPIOCHIP  "gpiochip0"
-#define AMT102_LINE_A    17      /* BCM 17, header pin 11 */
-#define AMT102_LINE_B    27      /* BCM 27, header pin 13 */
-#define AMT102_LINE_X    22      /* BCM 22, header pin 15 */
+#define AMT102_LINE_A    16      /* BCM 16, header pin 36 */
+#define AMT102_LINE_B    20      /* BCM 20, header pin 38 */
+#define AMT102_LINE_X    21      /* BCM 21, header pin 40 */
 
 #define AMT102_MAX_BATCH 64      /* events read per line per drain pass */
 #define AMT102_EV_MAX    256     /* combined batch processed per pass */
