@@ -108,8 +108,10 @@ is fixed to `MS5837_OSR_512`; changing it causes a compile-time error.
 | SCL | I2C1 SCL | 5 | GPIO3 | 3.3 V logic only |
 
 The sensor needs no chip-select, interrupt, or reset GPIO. The previously
-listed occupied physical pins are 11, 13, 15, 19, 21, 22, 23, 29, 31, and 33;
-none conflicts with pins 3 and 5. The BNO085 uses SPI0 and GPIO lines.
+listed occupied physical pins are 7, 11, 13, 15, 19, 21, 23, 36, 38, and 40;
+none conflicts with pins 3 and 5. Physical pins 32 and 33 (GPIO 12 and 13,
+PWM0 and PWM1) are reserved for motor PWM and are not yet used by any code.
+The BNO085 uses SPI0 and GPIO lines.
 
 ### Electrical notes
 
