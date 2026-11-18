@@ -1,72 +1,47 @@
-/*
- * validate_contract.h — data contract for the validation binary.
- *
- * Counterpart of app/app_contract.h with one deliberate divergence: each
- * sensor group carries its OWN host/device timestamp pair and sequence
- * numbers. The app mailbox cannot express how stale each group is (one
- * ImuSample_t can mix values from up to three events ~10 ms apart, with
- * seq/timestamp reflecting only the newest), and phase comparison against
- * the encoder needs that per-group freshness.
- *
- * validMask bit meanings are identical to app/app_contract.h.
- *
- * Part of the sensor_validate binary (see Makefile).
- */
-
 #ifndef VALIDATE_CONTRACT_H
 #define VALIDATE_CONTRACT_H
 
 #include <stdint.h>
 
-#define IMU_VALIDATE_STRUCT_VERSION 3u
+#include "app/imu_publish.h"
+#include "validation/amt102.h"
 
-/* validMask bits — same meanings as app/app_contract.h */
-#define IMU_VALIDATE_VALID_RV    (1u << 0)
-#define IMU_VALIDATE_VALID_ACCEL (1u << 1)
-#define IMU_VALIDATE_VALID_GYRO  (1u << 2)
+#define VALIDATE_SCHEMA_VERSION 2u
+
+#define VALIDATE_SERVICE_NS UINT64_C(1000000)
+#define VALIDATE_PUBLICATION_NS UINT64_C(10000000)
+#define VALIDATE_STATUS_NS UINT64_C(500000000)
+#define VALIDATE_WINDOW_NS UINT64_C(20000000000)
 
 /*
- * Per-sensor-group freshness info, updated only by the thread that calls
- * sensor_validate_service() (the SH-2 event callback runs inside it).
+ * At most one publication per distinct 10 ms gate.
+ * 2048 records leave headroom above a 20-second, 100 Hz trial.
  */
-typedef struct {
-    uint64_t host_ts_ns;    /* CLOCK_MONOTONIC ns, captured at decode time */
-    uint64_t sensor_ts_us;  /* BNO085 device timestamp of the originating report */
-    uint32_t seq;           /* global decode counter at this group's last update */
-    uint8_t  report_seq;    /* device-side per-sensor rolling sequence (report byte 1) */
-    uint8_t  status;        /* sh2 sensor status byte */
-} ImuGroupMeta_t;
+#define VALIDATE_RECORD_CAPACITY 2048u
+#define VALIDATE_FILENAME_CAPACITY 64u
 
 typedef struct {
-    uint32_t version;       /* IMU_VALIDATE_STRUCT_VERSION */
-    uint32_t seq;           /* +1 per decoded event (any of the three), counts from
-                               the post-settle reset (sensor_validate_resetSeq) */
-    uint64_t host_ts_ns;    /* CLOCK_MONOTONIC ns of the newest decoded event */
+    uint64_t trial;
+    uint64_t elapsed_ns;
+    amt102_state_t encoder;
+    ImuPublicationRecord_t imu;
+} ValidateRecord;
 
-    /* Rotation vector (SH2_ROTATION_VECTOR) */
-    ImuGroupMeta_t rv;
-    float rv_qw;            /* quaternion w (real component) */
-    float rv_qx;            /* quaternion x (i component) */
-    float rv_qy;            /* quaternion y (j component) */
-    float rv_qz;            /* quaternion z (k component) */
-    float yaw;              /* rad */
-    float pitch;            /* rad */
-    float roll;             /* rad */
-    float rvErrRad;         /* rad, rotation-vector accuracy estimate */
+typedef enum {
+    VALIDATE_OUTCOME_COMPLETE = 0,
+    VALIDATE_OUTCOME_INTERRUPTED,
+    VALIDATE_OUTCOME_FAILED,
+    VALIDATE_OUTCOME_ABORTED_BEFORE_START
+} ValidateOutcome;
 
-    /* Linear acceleration (SH2_LINEAR_ACCELERATION) */
-    ImuGroupMeta_t accel;
-    float ax;               /* m/s^2 */
-    float ay;
-    float az;
-
-    /* Calibrated gyroscope (SH2_GYROSCOPE_CALIBRATED) */
-    ImuGroupMeta_t gyro;
-    float gx;               /* rad/s */
-    float gy;
-    float gz;
-
-    uint8_t validMask;      /* IMU_VALIDATE_VALID_* bits, set once per group ever seen */
-} ImuValidateSample_t;
+typedef struct {
+    uint64_t trial;
+    uint64_t start_ns;
+    uint64_t end_ns;
+    uint64_t observed_stop_ns;
+    uint64_t gates_skipped;
+    int signal_number;
+    ValidateOutcome outcome;
+} ValidateEnd;
 
 #endif /* VALIDATE_CONTRACT_H */

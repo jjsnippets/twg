@@ -84,8 +84,19 @@ VALOBJS := \
 	$(BUILDDIR)/val_amt102.o \
 	$(BUILDDIR)/val_quad_decode.o \
 	$(BUILDDIR)/val_validate_logger.o \
-	$(BUILDDIR)/val_validate_sensor.o \
 	$(BUILDDIR)/val_validate_main.o
+
+VALIMUOBJS := \
+  $(BUILDDIR)/app_imu_session.o \
+  $(BUILDDIR)/app_imu_cmd.o \
+  $(BUILDDIR)/app_imu_cal.o \
+  $(BUILDDIR)/app_imu_cal_adapter.o \
+  $(BUILDDIR)/app_imu_tare.o \
+  $(BUILDDIR)/app_imu_tare_adapter.o \
+  $(BUILDDIR)/app_imu_check.o \
+  $(BUILDDIR)/app_imu_console.o \
+  $(BUILDDIR)/app_imu_publish.o \
+  $(BUILDDIR)/app_imu_csv.o
 
 BRINGUPOBJS := \
 	$(BUILDDIR)/val_amt102_bringup.o \
@@ -147,7 +158,7 @@ all: tools tests
 $(BINDIR)/bno_app: $(SH2OBJS) $(APPHALOBJ) $(RTOBJ) $(APPOBJS) | $(BINDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
-$(BINDIR)/bno_validate: $(VALOBJS) $(APPHALOBJ) $(RTOBJ) $(SH2OBJS) | $(BINDIR)
+$(BINDIR)/bno_validate: $(VALOBJS) $(VALIMUOBJS) $(APPHALOBJ) $(SH2OBJS) | $(BINDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BINDIR)/amt102_bringup: $(BRINGUPOBJS) | $(BINDIR)

@@ -1,67 +1,69 @@
-/*
- * validate_logger.h — bounded-ring CSV logger for the validation binary.
- *
- * The RT thread never touches the file: it pushes CsvRecord_t values
- * into a fixed-size ring (drop-newest on overflow, never blocks); a
- * dedicated SCHED_OTHER logger thread drains the ring to a stdio-
- * buffered CSV file. SD-card write stalls therefore cannot perturb
- * the 1 ms service cadence.
- *
- * File layout:
- *   - '#'-prefixed metadata block (clocks, units, run notes)
- *   - one plain header row with column names (first non-comment line,
- *     so pandas/read_csv skip-comment='#' reads it directly)
- *   - one row per 100 Hz tick
- *   - '#'-prefixed footer (records, drops, duration)
- *
- * Part of the sensor_validate binary (see Makefile).
- */
-
 #ifndef VALIDATE_LOGGER_H
 #define VALIDATE_LOGGER_H
 
-#include <stdint.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
 
 #include "validation/validate_contract.h"
 
-/* One synchronized 100 Hz row: encoder snapshot + latest IMU sample. */
+/*
+ * Owner appends records only before finish().
+ * Worker reads the immutable buffer only after finish().
+ *
+ * No record-buffer access is concurrent between owner and worker.
+ * done/failed provide completion and failure publication.
+ */
 typedef struct {
-    uint64_t host_ts_ns;       /* record assembly time, CLOCK_MONOTONIC ns */
-    int64_t  enc_count;        /* x4 counts since encoder open */
-    double   enc_angle_deg;    /* enc_count * 360/8192, continuous (unwrapped) */
-    uint64_t enc_event_ts_ns;  /* kernel stamp of newest encoder event */
-    uint64_t enc_x_pulses;     /* index pulses since open */
-    uint64_t enc_invalid;      /* illegal quadrature transitions since open */
-    uint64_t enc_edges_ab;     /* a_edges + b_edges since open */
-    ImuValidateSample_t imu;
-    uint64_t drops;            /* cumulative ring drops at push time */
-} CsvRecord_t;
+    ValidateRecord *records;
+    size_t count;
 
-typedef struct {
-    uint64_t records_written;
-    uint64_t records_dropped;
-    double   duration_sec;
-} CsvLogStats_t;
+    FILE *file;
+    char filename[VALIDATE_FILENAME_CAPACITY];
 
-/*
- * Open path for writing, emit the metadata block and column header, and
- * start the logger thread. Returns 0 on success, -1 on failure (errno).
- */
-int csv_log_start(const char *path, double arm_len_m, const char *notes);
+    ValidateEnd end;
+
+    pthread_t worker;
+    bool thread_started;
+    bool finishing;
+
+    atomic_bool done;
+    atomic_bool failed;
+} ValidateLogger;
+
+bool validate_logger_init(ValidateLogger *logger);
 
 /*
- * Queue one record. Returns 0 on success, 1 if the ring was full (the
- * record is dropped and the drop counter incremented — never blocks).
+ * Create imu_validate_YYYYMMDD_hhmmss.csv in the working directory.
+ * Uses local time and O_EXCL. Existing files are never overwritten.
  */
-int csv_log_push(const CsvRecord_t *rec);
+bool validate_logger_open(ValidateLogger *logger);
 
-/* Cumulative ring drops so far (thread-safe). */
-uint64_t csv_log_dropped(void);
+const char *validate_logger_filename(const ValidateLogger *logger);
+
+bool validate_logger_append(
+    ValidateLogger *logger,
+    const ValidateRecord *record);
 
 /*
- * Stop the logger thread, drain, and write the footer. Fills *out with
- * final stats if non-NULL. Safe to call even after a failed start.
+ * Freeze the buffer and start asynchronous finalization.
+ *
+ * If worker creation fails, performs a synchronous best-effort save,
+ * marks the logger failed, and returns false.
  */
-void csv_log_stop(CsvLogStats_t *out);
+bool validate_logger_finish(
+    ValidateLogger *logger,
+    const ValidateEnd *end);
+
+bool validate_logger_done(const ValidateLogger *logger);
+bool validate_logger_failed(const ValidateLogger *logger);
+
+/* Call after done(). Joins the worker if one was started. */
+bool validate_logger_reap(ValidateLogger *logger);
+
+/* Requires any active trial to have been finished and reaped. */
+void validate_logger_destroy(ValidateLogger *logger);
 
 #endif /* VALIDATE_LOGGER_H */
