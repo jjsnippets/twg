@@ -4,6 +4,7 @@ CFLAGS ?= -O2 -Wall -Wextra -Werror -pedantic -std=c11
 CPPFLAGS ?= -D_GNU_SOURCE
 LDFLAGS ?=
 LDLIBS ?= -lgpiod -lpthread -lm -lrt
+MS5_VAL_TARGET := $(BIN)/ms5_validation
 
 ROOT := ..
 BNO := $(ROOT)/bno
@@ -18,6 +19,7 @@ TARGET := $(BIN)/twg_app
 
 CPPFLAGS += \
 	-I$(ROOT) \
+	-I. \
 	-I$(BNO) \
 	-I$(BNO_APP) \
 	-I$(SH2) \
@@ -28,6 +30,12 @@ INTEGRATE_SRCS := \
 	twg_term.c \
 	twg_log.c \
 	twg_stage.c
+
+MS5_VAL_SRCS := \
+	ms5_validation/ms5_validate.c \
+	twg_term.c \
+	twg_log.c \
+	$(BNO_APP)/imu_console.c
 
 BNO_SRCS := \
 	$(BNO_APP)/imu_session.c \
@@ -67,14 +75,29 @@ SRCS := \
 OBJS := $(addprefix $(BUILD)/,$(patsubst $(ROOT)/%,ext/%,$(SRCS:.c=.o)))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all app clean
+MS5_VAL_ALL_SRCS := \
+	$(MS5_VAL_SRCS) \
+	$(BNO_SRCS) \
+	$(SH2_SRCS) \
+	$(MS5_SRCS) \
+	$(RT_SRCS)
+
+MS5_VAL_OBJS := $(addprefix $(BUILD)/,$(patsubst $(ROOT)/%,ext/%,$(MS5_VAL_ALL_SRCS:.c=.o)))
+MS5_VAL_DEPS := $(MS5_VAL_OBJS:.o=.d)
+
+.PHONY: all app ms5_validation clean
 
 all: app
 
 app: $(TARGET)
 
+ms5_validation: $(MS5_VAL_TARGET)
+
 $(TARGET): $(OBJS) | $(BIN)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
+
+$(MS5_VAL_TARGET): $(MS5_VAL_OBJS) | $(BIN)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(MS5_VAL_OBJS) $(LDLIBS)
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -91,3 +114,4 @@ clean:
 	rm -rf $(BUILD) $(BIN)
 
 -include $(DEPS)
+-include $(MS5_VAL_DEPS)
