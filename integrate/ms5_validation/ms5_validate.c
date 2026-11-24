@@ -386,6 +386,17 @@ static bool check_preparation_results(Preparation *prep)
 
         if (i == 0u) {
             acceptable = acceptable && result.dcdSaved;
+            if (result.state == IMU_CMD_STATE_RECOVERY_FAILED) {
+                fprintf(stderr, "Startup stopped: calibration left IMU unrecoverable.\n");
+                return false;
+            }
+            if (!acceptable) {
+                fprintf(
+                    stderr,
+                    "WARNING: calibration did not pass; continuing to Z-axis tare.\n");
+            }
+            prep->calibrationOk = acceptable;
+            continue;
         } else {
             acceptable =
                 acceptable &&
@@ -401,11 +412,7 @@ static bool check_preparation_results(Preparation *prep)
             return false;
         }
 
-        if (i == 0u) {
-            prep->calibrationOk = true;
-        } else {
-            prep->tareOk = true;
-        }
+        prep->tareOk = true;
     }
 
     return true;
@@ -564,14 +571,13 @@ static bool prepare_imu(
         if (progress.active == IMU_CMD_ID_TARE &&
             progress.requiredAction == IMU_CMD_ACTION_ALIGN_AND_CONFIRM &&
             progress.tare.confirmationPending) {
-            if (!prep.calibrationOk ||
-                !post_event(IMU_CMD_EVENT_OPERATOR_CONFIRM, nowNs)) {
+            if (!post_event(IMU_CMD_EVENT_OPERATOR_CONFIRM, nowNs)) {
                 return false;
             }
         }
 
         if (progress.active == IMU_CMD_ID_SETTLE) {
-            if (!prep.calibrationOk || !prep.tareOk) {
+            if (!prep.tareOk) {
                 return false;
             }
 
@@ -601,7 +607,7 @@ static bool prepare_imu(
         }
 
         if (progress.active == IMU_CMD_ID_ACQUISITION) {
-            return prep.calibrationOk && prep.tareOk;
+            return prep.tareOk;
         }
 
         if (imu_cmd_plan_complete()) {

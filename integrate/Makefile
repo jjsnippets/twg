@@ -4,7 +4,6 @@ CFLAGS ?= -O2 -Wall -Wextra -Werror -pedantic -std=c11
 CPPFLAGS ?= -D_GNU_SOURCE
 LDFLAGS ?=
 LDLIBS ?= -lgpiod -lpthread -lm -lrt
-MS5_VAL_TARGET := $(BIN)/ms5_validation
 
 ROOT := ..
 BNO := $(ROOT)/bno
@@ -16,6 +15,7 @@ RT := $(ROOT)/rt
 BUILD := build
 BIN := bin
 TARGET := $(BIN)/twg_app
+MS5_VAL_TARGET := $(BIN)/ms5_validation
 
 CPPFLAGS += \
 	-I$(ROOT) \
